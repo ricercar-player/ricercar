@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ctrlc = "3.5.2"
+ricercar-audio = { version = "0.1.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 ricercar-mpris.workspace = true
 ricercar-upnp.workspace = true
