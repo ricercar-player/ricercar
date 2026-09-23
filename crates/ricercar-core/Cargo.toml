@@ -1,0 +1,14 @@
+[package]
+name = "ricercar-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossbeam-channel.workspace = true
+lofty = "0.25.4"
+notify = "8.2.0"
+ricercar-audio.workspace = true
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+thiserror.workspace = true
+tracing.workspace = true
+walkdir = "2.5.0"

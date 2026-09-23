@@ -1,0 +1,12 @@
+[package]
+name = "ricercar-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = "0.25.10"
+ricercar-core.workspace = true
+ricercar-ui.workspace = true
+slint = "1.18.1"
+tracing.workspace = true
+tracing-subscriber.workspace = true

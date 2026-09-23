@@ -1,0 +1,10 @@
+[package]
+name = "ricercar-mpris"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ricercar-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zbus = "5.19.0"

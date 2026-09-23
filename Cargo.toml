@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/ricercar-player/ricercar"
+rust-version = "1.85"
+
+[workspace.dependencies]
+ricercar-audio = { path = "crates/ricercar-audio", version = "0.1.0" }
+ricercar-core = { path = "crates/ricercar-core", version = "0.1.0" }
+ricercar-upnp = { path = "crates/ricercar-upnp", version = "0.1.0" }
+ricercar-mpris = { path = "crates/ricercar-mpris", version = "0.1.0" }
+ricercar-ui = { path = "crates/ricercar-ui", version = "0.1.0" }
+
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crossbeam-channel = "0.5"
+
+[profile.release]
+strip = true
+lto = "thin"
