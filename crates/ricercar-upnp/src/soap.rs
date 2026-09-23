@@ -1,5 +1,5 @@
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 /// Parse a SOAP envelope: returns (action, args).
 pub fn parse(body: &[u8]) -> Result<(String, Vec<(String, String)>), String> {
@@ -49,19 +49,18 @@ pub fn parse(body: &[u8]) -> Result<(String, Vec<(String, String)>), String> {
             _ => {}
         }
     }
-    action.ok_or_else(|| "no action".to_string()).map(|a| (a, args))
+    action
+        .ok_or_else(|| "no action".to_string())
+        .map(|a| (a, args))
 }
 
 pub fn response_body(action: &str, service_ns: &str, out: &[(&str, &str)]) -> String {
-    let mut s = String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body>");
-    s.push_str(&format!(
-        "<u:{action}Response xmlns:u=\"{service_ns}\">"
-    ));
+    let mut s = String::from(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body>",
+    );
+    s.push_str(&format!("<u:{action}Response xmlns:u=\"{service_ns}\">"));
     for (k, v) in out {
-        s.push_str(&format!(
-            "<{k}>{}</{k}>",
-            crate::desc::xml_escape(v)
-        ));
+        s.push_str(&format!("<{k}>{}</{k}>", crate::desc::xml_escape(v)));
     }
     s.push_str(&format!("</u:{action}Response></s:Body></s:Envelope>"));
     s

@@ -2,12 +2,14 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use walkdir::WalkDir;
 
 use crate::meta::{file_uri, read_tags};
 
-pub const SUPPORTED_EXTS: &[&str] = &["flac", "wav", "aiff", "aif", "mp3", "ogg", "oga", "m4a", "mp4"];
+pub const SUPPORTED_EXTS: &[&str] = &[
+    "flac", "wav", "aiff", "aif", "mp3", "ogg", "oga", "m4a", "mp4",
+];
 
 #[derive(Debug, Clone)]
 pub struct Track {

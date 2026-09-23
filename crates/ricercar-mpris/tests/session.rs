@@ -76,8 +76,7 @@ fn registration_and_props() {
         )
         .unwrap();
     let (v,): (zbus::zvariant::OwnedValue,) = body.body().deserialize().unwrap();
-    let meta: std::collections::HashMap<String, zbus::zvariant::OwnedValue> =
-        v.try_into().unwrap();
+    let meta: std::collections::HashMap<String, zbus::zvariant::OwnedValue> = v.try_into().unwrap();
     assert!(meta.contains_key("mpris:trackid"));
     assert!(meta.contains_key("xesam:url"));
 }

@@ -116,10 +116,10 @@ impl Controller {
                         match ev {
                             Some(EngineEvent::TrackStarted { uri, format }) => {
                                 let mut st = state.lock().unwrap();
-                                if !st.meta_map.contains_key(&uri) {
-                                    if let Some(info) = track_info_for(&uri) {
-                                        st.meta_map.insert(uri.clone(), info);
-                                    }
+                                if !st.meta_map.contains_key(&uri)
+                                    && let Some(info) = track_info_for(&uri)
+                                {
+                                    st.meta_map.insert(uri.clone(), info);
                                 }
                                 st.current_uri = Some(uri);
                                 if format.is_some() {
@@ -154,10 +154,12 @@ impl Controller {
                                     (true, Origin::Local, Some(cur), armed, Some(idx))
                                         if armed.as_deref() != Some(cur.as_str()) =>
                                     {
-                                        st.queue.get(idx + 1).filter(|_| {
-                                            st.dur_ms == 0 || st.pos_ms + 12_000 >= st.dur_ms
-                                        })
-                                        .map(|t| t.uri.clone())
+                                        st.queue
+                                            .get(idx + 1)
+                                            .filter(|_| {
+                                                st.dur_ms == 0 || st.pos_ms + 12_000 >= st.dur_ms
+                                            })
+                                            .map(|t| t.uri.clone())
                                     }
                                     _ => None,
                                 }
@@ -225,7 +227,9 @@ impl Controller {
     pub fn next(&self) {
         let idx = {
             let st = self.state.lock().unwrap();
-            st.queue_index.filter(|i| i + 1 < st.queue.len()).map(|i| i + 1)
+            st.queue_index
+                .filter(|i| i + 1 < st.queue.len())
+                .map(|i| i + 1)
         };
         if let Some(i) = idx {
             let uri = self.state.lock().unwrap().queue[i].uri.clone();

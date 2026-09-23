@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -103,11 +103,7 @@ fn post_event(callback: &str, sid: &str, seq: u32, body: &str) -> Option<()> {
     let mut buf = [0u8; 256];
     let n = stream.read(&mut buf).unwrap_or(0);
     let resp = String::from_utf8_lossy(&buf[..n]).into_owned();
-    if resp.contains("200") {
-        Some(())
-    } else {
-        None
-    }
+    if resp.contains("200") { Some(()) } else { None }
 }
 
 fn split_url(url: &str) -> Option<(String, String)> {

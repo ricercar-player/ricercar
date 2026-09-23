@@ -54,10 +54,7 @@ impl RendererHandle {
     }
 }
 
-pub fn start_renderer(
-    controller: Arc<Controller>,
-    name: &str,
-) -> std::io::Result<RendererHandle> {
+pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Result<RendererHandle> {
     let listener = TcpListener::bind("0.0.0.0:0")?;
     let port = listener.local_addr()?.port();
     let udn = load_or_create_udn();
@@ -139,7 +136,11 @@ pub fn start_renderer(
         tracing::warn!("SSDP port 1900 unavailable — renderer not discoverable");
     }
 
-    Ok(RendererHandle { port, stop, _ssdp: ssdp })
+    Ok(RendererHandle {
+        port,
+        stop,
+        _ssdp: ssdp,
+    })
 }
 
 struct Renderer {
@@ -173,10 +174,7 @@ impl Renderer {
             TransportStatus::Paused => "PAUSED_PLAYBACK",
             TransportStatus::Stopped => "STOPPED",
         };
-        let uri = st
-            .current_uri
-            .clone()
-            .unwrap_or_default();
+        let uri = st.current_uri.clone().unwrap_or_default();
         let mute = self.inner.read().unwrap().mute;
         (transport.to_string(), uri, st.volume, mute)
     }
@@ -335,7 +333,13 @@ impl Renderer {
                 let cur = st.current_uri.clone().unwrap_or_default();
                 let dur = st.dur_ms;
                 drop(st);
-                let next = self.inner.read().unwrap().next_uri.clone().unwrap_or_default();
+                let next = self
+                    .inner
+                    .read()
+                    .unwrap()
+                    .next_uri
+                    .clone()
+                    .unwrap_or_default();
                 let cur_meta = self.meta_raw(&cur);
                 let next_meta = self.meta_raw(&next);
                 (
@@ -377,11 +381,7 @@ impl Renderer {
                     _ => "Play",
                 };
                 (
-                    Some(soap::response_body(
-                        action,
-                        AVT_NS,
-                        &[("Actions", acts)],
-                    )),
+                    Some(soap::response_body(action, AVT_NS, &[("Actions", acts)])),
                     200,
                 )
             }
@@ -449,13 +449,13 @@ impl Renderer {
                 Some(soap::response_body(
                     action,
                     CMS_NS,
-                    &[(
-                        "Source",
-                        "",
-                    ), (
-                        "Sink",
-                        "http-get:*:flac:*,http-get:*:wav:*,http-get:*:mpeg:*,http-get:*:mp3:*,http-get:*:ogg:*,http-get:*:m4a:*,http-get:*:mp4:*",
-                    )],
+                    &[
+                        ("Source", ""),
+                        (
+                            "Sink",
+                            "http-get:*:flac:*,http-get:*:wav:*,http-get:*:mpeg:*,http-get:*:mp3:*,http-get:*:ogg:*,http-get:*:m4a:*,http-get:*:mp4:*",
+                        ),
+                    ],
                 )),
                 200,
             ),
@@ -472,7 +472,7 @@ impl Renderer {
                     action,
                     CMS_NS,
                     &[
-                        ("RcsID", "-1".into()),
+                        ("RcsID", "-1"),
                         ("AVTransportID", "-1"),
                         ("ProtocolInfo", ""),
                         ("PeerConnectionManager", ""),
@@ -511,15 +511,27 @@ fn serve_conn(r: &Renderer, mut stream: std::net::TcpStream) {
             let xml = desc::device_xml(&r.name, &r.udn);
             http::write_response(&mut stream, 200, "OK", "text/xml", xml.as_bytes());
         }
-        ("GET", "/svc/avt.xml") => {
-            http::write_response(&mut stream, 200, "OK", "text/xml", desc::AVT_SCPDL.as_bytes())
-        }
-        ("GET", "/svc/rcs.xml") => {
-            http::write_response(&mut stream, 200, "OK", "text/xml", desc::RCS_SCPDL.as_bytes())
-        }
-        ("GET", "/svc/cms.xml") => {
-            http::write_response(&mut stream, 200, "OK", "text/xml", desc::CMS_SCPDL.as_bytes())
-        }
+        ("GET", "/svc/avt.xml") => http::write_response(
+            &mut stream,
+            200,
+            "OK",
+            "text/xml",
+            desc::AVT_SCPDL.as_bytes(),
+        ),
+        ("GET", "/svc/rcs.xml") => http::write_response(
+            &mut stream,
+            200,
+            "OK",
+            "text/xml",
+            desc::RCS_SCPDL.as_bytes(),
+        ),
+        ("GET", "/svc/cms.xml") => http::write_response(
+            &mut stream,
+            200,
+            "OK",
+            "text/xml",
+            desc::CMS_SCPDL.as_bytes(),
+        ),
         ("POST", "/ctl/avt") => handle_control(r, AVT_NS, &req, &mut stream),
         ("POST", "/ctl/rcs") => handle_control(r, RCS_NS, &req, &mut stream),
         ("POST", "/ctl/cms") => handle_control(r, CMS_NS, &req, &mut stream),
@@ -553,13 +565,35 @@ fn handle_control(r: &Renderer, ns: &str, req: &http::Request, stream: &mut std:
                 _ => (Some(soap::fault(401, "invalid service")), 500),
             };
             match body {
-                Some(b) => http::write_response(stream, status, if status == 200 { "OK" } else { "Internal Server Error" }, "text/xml; charset=\"utf-8\"", b.as_bytes()),
-                None => http::write_response(stream, 200, "OK", "text/xml; charset=\"utf-8\"", empty_response(&action, &ns_owned).as_bytes()),
+                Some(b) => http::write_response(
+                    stream,
+                    status,
+                    if status == 200 {
+                        "OK"
+                    } else {
+                        "Internal Server Error"
+                    },
+                    "text/xml; charset=\"utf-8\"",
+                    b.as_bytes(),
+                ),
+                None => http::write_response(
+                    stream,
+                    200,
+                    "OK",
+                    "text/xml; charset=\"utf-8\"",
+                    empty_response(&action, &ns_owned).as_bytes(),
+                ),
             }
         }
         Err(_) => {
             let f = soap::fault(400, "bad request");
-            http::write_response(stream, 500, "Internal Server Error", "text/xml", f.as_bytes());
+            http::write_response(
+                stream,
+                500,
+                "Internal Server Error",
+                "text/xml",
+                f.as_bytes(),
+            );
         }
     }
 }
@@ -584,11 +618,11 @@ fn handle_subscribe(
     let timeout = timeout.clamp(60, 3600);
     let subs = subs_of(r, path);
     if nts.contains("renew") {
-        if let Some(sid) = req.header("sid") {
-            if subs.renew(sid, timeout) {
-                write_event_response(stream, sid, timeout);
-                return;
-            }
+        if let Some(sid) = req.header("sid")
+            && subs.renew(sid, timeout)
+        {
+            write_event_response(stream, sid, timeout);
+            return;
         }
         http::write_response(stream, 412, "Precondition Failed", "text/plain", b"");
     } else {
@@ -619,7 +653,13 @@ fn handle_unsubscribe(
     let sid = req.header("sid").unwrap_or("");
     let ok = subs_of(r, path).unsubscribe(sid);
     let status = if ok { 200 } else { 412 };
-    http::write_response(stream, status, if ok { "OK" } else { "Precondition Failed" }, "text/plain", b"");
+    http::write_response(
+        stream,
+        status,
+        if ok { "OK" } else { "Precondition Failed" },
+        "text/plain",
+        b"",
+    );
 }
 
 fn load_or_create_udn() -> String {
@@ -645,7 +685,7 @@ fn load_or_create_udn() -> String {
     let udn = format!(
         "{:08x}-{:04x}-4{:03x}-8{:03x}-{:012x}",
         (hash >> 32) as u32,
-        (hash >> 16) as u16 & 0xffff,
+        ((hash >> 16) as u16),
         (hash >> 4) as u16 & 0xfff,
         (hash >> 8) as u16 & 0xfff,
         hash & 0xffffffffff

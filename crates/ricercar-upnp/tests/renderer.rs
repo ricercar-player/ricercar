@@ -68,7 +68,11 @@ fn device_desc() {
     assert!(resp.contains("MediaRenderer"));
     assert!(resp.contains("AVTransport"));
     assert!(resp.contains("RenderingControl"));
-    let scpdl = http(r.handle.port, "GET /svc/avt.xml HTTP/1.1\r\nHOST: x\r\n", "");
+    let scpdl = http(
+        r.handle.port,
+        "GET /svc/avt.xml HTTP/1.1\r\nHOST: x\r\n",
+        "",
+    );
     assert!(scpdl.contains("SetNextAVTransportURI"));
 }
 
@@ -89,7 +93,13 @@ fn transport_flow() {
         ],
     );
     assert!(resp.contains("200 OK"), "seturi: {resp}");
-    let resp = soap(r.handle.port, "/ctl/avt", ns, "Play", &[("InstanceID", "0")]);
+    let resp = soap(
+        r.handle.port,
+        "/ctl/avt",
+        ns,
+        "Play",
+        &[("InstanceID", "0")],
+    );
     assert!(resp.contains("200 OK"), "play: {resp}");
 
     // The file sink is un-paced: the tone may finish in well under a second.
@@ -138,7 +148,13 @@ fn transport_flow() {
     let mut stopped = false;
     while Instant::now() < deadline && !stopped {
         std::thread::sleep(Duration::from_millis(250));
-        let info = soap(r.handle.port, "/ctl/avt", ns, "GetTransportInfo", &[("InstanceID", "0")]);
+        let info = soap(
+            r.handle.port,
+            "/ctl/avt",
+            ns,
+            "GetTransportInfo",
+            &[("InstanceID", "0")],
+        );
         if info.contains("STOPPED") {
             stopped = true;
         }
@@ -161,7 +177,11 @@ fn volume_flow() {
         "/ctl/rcs",
         ns,
         "SetVolume",
-        &[("InstanceID", "0"), ("Channel", "Master"), ("DesiredVolume", "55")],
+        &[
+            ("InstanceID", "0"),
+            ("Channel", "Master"),
+            ("DesiredVolume", "55"),
+        ],
     );
     let resp = soap(
         r.handle.port,
@@ -180,7 +200,8 @@ fn ssdp_soft_check() {
         Ok(s) => s,
         Err(_) => return,
     };
-    sock.set_read_timeout(Some(Duration::from_millis(800))).unwrap();
+    sock.set_read_timeout(Some(Duration::from_millis(800)))
+        .unwrap();
     let msearch = "M-SEARCH * HTTP/1.1\r\nHOST: 239.2.55.52:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
     let _ = sock.send_to(msearch.as_bytes(), ("127.0.0.1", 1900));
     let mut buf = [0u8; 2048];

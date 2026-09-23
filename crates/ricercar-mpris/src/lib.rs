@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ricercar_audio::TransportStatus;
 use ricercar_core::Controller;
-use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 use zbus::interface;
+use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
 pub const BUS_NAME: &str = "org.mpris.MediaPlayer2.ricercar";
 pub const PATH: &str = "/org/mpris/MediaPlayer2";
@@ -157,7 +157,8 @@ impl MprisPlayer {
     }
     #[zbus(property)]
     fn set_volume(&self, value: f64) {
-        self.ctl.set_volume((value * 100.0).clamp(0.0, 100.0) as u32);
+        self.ctl
+            .set_volume((value * 100.0).clamp(0.0, 100.0) as u32);
     }
 }
 
@@ -217,12 +218,7 @@ pub fn serve(ctl: Arc<Controller>) -> zbus::Result<zbus::blocking::Connection> {
     let conn = zbus::blocking::connection::Builder::session()?
         .name(BUS_NAME)?
         .serve_at(PATH, MprisRoot)?
-        .serve_at(
-            PATH,
-            MprisPlayer {
-                ctl: ctl.clone(),
-            },
-        )?
+        .serve_at(PATH, MprisPlayer { ctl: ctl.clone() })?
         .build()?;
     Ok(conn)
 }
@@ -237,14 +233,7 @@ pub fn spawn_event_loop(
             Ok(p) => p,
             Err(_) => return,
         };
-        let snap = |p: &MprisPlayer| {
-            (
-                p.playback_status(),
-                p.metadata(),
-                p.volume(),
-                p.can_seek(),
-            )
-        };
+        let snap = |p: &MprisPlayer| (p.playback_status(), p.metadata(), p.volume(), p.can_seek());
         let mut last = snap(&player.get());
         while !quit.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(500));

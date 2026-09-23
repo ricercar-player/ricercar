@@ -1,13 +1,13 @@
 use std::net::{IpAddr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const SSDP: &str = "239.2.55.52:1900";
 const CACHE_SECS: u32 = 1800;
 
 pub struct Ssdp {
-    sock: Arc<UdpSocket>,
+    _sock: Arc<UdpSocket>,
     stop: Arc<AtomicBool>,
 }
 
@@ -51,12 +51,7 @@ fn byebye_packet(nt: &str, usn: &str, bootid: u64) -> String {
     )
 }
 
-fn search_reply(
-    st: &str,
-    usn: &str,
-    location: &str,
-    bootid: u64,
-) -> String {
+fn search_reply(st: &str, usn: &str, location: &str, bootid: u64) -> String {
     format!(
         "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age={CACHE_SECS}\r\nSERVER: Linux/5.0 UPnP/1.1 ricercar/0.1\r\nST: {st}\r\nUSN: {usn}\r\nEXT:\r\nLOCATION: {location}\r\nBOOTID.UPNP.ORG: {bootid}\r\nCONFIGID.UPNP.ORG: 1\r\nCONTENT-LENGTH: 0\r\n\r\n"
     )
@@ -79,7 +74,7 @@ impl Ssdp {
             .spawn(move || {
                 let types = advertise_types(&udn_a);
                 // three quick alives at boot, then periodic refresh
-                let mut delays = [50u64, 150, 600];
+                let delays = [50u64, 150, 600];
                 let mut i = 0usize;
                 loop {
                     for (nt, usn) in &types {
@@ -154,7 +149,7 @@ impl Ssdp {
             })
             .ok()?;
 
-        Some(Ssdp { sock, stop })
+        Some(Ssdp { _sock: sock, stop })
     }
 }
 

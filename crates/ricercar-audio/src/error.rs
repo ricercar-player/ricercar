@@ -14,7 +14,9 @@ pub enum AudioError {
     UnsupportedSource(String),
     #[error("decode error: {0}")]
     Decode(String),
-    #[error("device '{0}' does not support the track format (bit-perfect policy refuses resampling)")]
+    #[error(
+        "device '{0}' does not support the track format (bit-perfect policy refuses resampling)"
+    )]
     UnsupportedFormat(String),
     #[error("engine is shut down")]
     ShutDown,

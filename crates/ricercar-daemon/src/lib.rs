@@ -1,9 +1,9 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ricercar_audio::device::list_devices;
-use ricercar_core::{watcher::WatcherHandle, Controller, Library};
+use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -80,7 +80,11 @@ pub fn print_devices() {
             "{}  {}{}{}",
             d.name,
             d.description,
-            if d.kind.is_bit_perfect() { " [bit-perfect]" } else { "" },
+            if d.kind.is_bit_perfect() {
+                " [bit-perfect]"
+            } else {
+                ""
+            },
             if d.kind == ricercar_audio::DeviceKind::Virtual {
                 " [virtual]"
             } else {
@@ -100,8 +104,7 @@ pub struct AppContext {
 pub fn startup(cfg: Config) -> Result<AppContext, Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -152,7 +155,7 @@ pub fn startup(cfg: Config) -> Result<AppContext, Box<dyn std::error::Error>> {
         ctl,
         quit,
         _renderer: renderer,
-        _watcher: _watcher,
+        _watcher,
     })
 }
 

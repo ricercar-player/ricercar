@@ -72,9 +72,7 @@ pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
 }
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {
-    buf.windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|p| p + 4)
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
 }
 
 pub fn write_response(
@@ -91,18 +89,4 @@ pub fn write_response(
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body);
     let _ = stream.flush();
-}
-
-pub fn http_date_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // RFC1123-ish without external deps (UPnP only needs *a* DATE header).
-    let days = secs / 86400;
-    let base_names = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    let dow = base_names[(days % 7) as usize];
-    let _ = dow;
-    format!("{secs}")
 }

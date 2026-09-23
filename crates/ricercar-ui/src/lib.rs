@@ -49,7 +49,9 @@ fn load_rows(lib: &Library, q: &str) -> Vec<Row> {
 
 fn set_model(ui: &App, rows: &RefCell<Vec<Row>>, new: Vec<Row>) {
     let items: Vec<TrackItem> = new.iter().map(|r| r.item.clone()).collect();
-    ui.set_tracks(ModelRc::from(Rc::new(VecModel::<TrackItem>::from_iter(items))));
+    ui.set_tracks(ModelRc::from(Rc::new(VecModel::<TrackItem>::from_iter(
+        items,
+    ))));
     *rows.borrow_mut() = new;
 }
 
@@ -103,38 +105,42 @@ pub fn run_ui(ctl: Arc<Controller>) -> Result<(), slint::PlatformError> {
     });
 
     let weak = ui.as_weak();
-    let mut timer = Timer::default();
-    timer.start(TimerMode::Repeated, std::time::Duration::from_millis(300), {
-        let c = ctl.clone();
-        move || {
-            let Some(u) = weak.upgrade() else { return };
-            let st = c.state.lock().unwrap();
-            let t = st.track();
-            u.set_track_title(
-                t.as_ref()
-                    .map(|x| x.title.clone())
-                    .unwrap_or_else(|| "—".into())
-                    .into(),
-            );
-            u.set_track_artist(
-                t.as_ref()
-                    .and_then(|x| x.artist.clone())
-                    .unwrap_or_default()
-                    .into(),
-            );
-            u.set_position_text(fmt_time(st.pos_ms).into());
-            u.set_playing(matches!(
-                st.status,
-                ricercar_audio::TransportStatus::Playing
-            ));
-            u.set_volume(st.volume as f32 / 100.0);
-            let origin = match st.origin {
-                ricercar_core::Origin::Remote => "remote (upnp)",
-                ricercar_core::Origin::Local => "local",
-            };
-            u.set_status_text(format!("{} · {}", origin, c.device_name()).into());
-        }
-    });
+    let timer = Timer::default();
+    timer.start(
+        TimerMode::Repeated,
+        std::time::Duration::from_millis(300),
+        {
+            let c = ctl.clone();
+            move || {
+                let Some(u) = weak.upgrade() else { return };
+                let st = c.state.lock().unwrap();
+                let t = st.track();
+                u.set_track_title(
+                    t.as_ref()
+                        .map(|x| x.title.clone())
+                        .unwrap_or_else(|| "—".into())
+                        .into(),
+                );
+                u.set_track_artist(
+                    t.as_ref()
+                        .and_then(|x| x.artist.clone())
+                        .unwrap_or_default()
+                        .into(),
+                );
+                u.set_position_text(fmt_time(st.pos_ms).into());
+                u.set_playing(matches!(
+                    st.status,
+                    ricercar_audio::TransportStatus::Playing
+                ));
+                u.set_volume(st.volume as f32 / 100.0);
+                let origin = match st.origin {
+                    ricercar_core::Origin::Remote => "remote (upnp)",
+                    ricercar_core::Origin::Local => "local",
+                };
+                u.set_status_text(format!("{} · {}", origin, c.device_name()).into());
+            }
+        },
+    );
 
     ui.run()
 }

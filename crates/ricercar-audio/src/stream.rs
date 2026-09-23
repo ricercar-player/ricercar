@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use symphonia::core::audio::GenericAudioBufferRef;
-use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::codecs::CodecParameters;
+use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
 use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions};
@@ -74,7 +74,10 @@ impl Prefetch {
                 }
             })
             .ok();
-        Prefetch { rx, buf: VecDeque::new() }
+        Prefetch {
+            rx,
+            buf: VecDeque::new(),
+        }
     }
 }
 
@@ -88,8 +91,8 @@ impl Read for Prefetch {
             }
         }
         let n = std::cmp::min(out.len(), self.buf.len());
-        for i in 0..n {
-            out[i] = self.buf.pop_front().unwrap();
+        for slot in out.iter_mut().take(n) {
+            *slot = self.buf.pop_front().unwrap();
         }
         Ok(n)
     }
@@ -125,12 +128,13 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;
@@ -165,9 +169,8 @@ impl TrackSource {
     pub fn open(uri: &str) -> Result<TrackSource> {
         let (mss, seekable): (MediaSourceStream<'static>, bool) =
             if let Some(path) = path_from_uri(uri) {
-                let file = std::fs::File::open(&path).map_err(|e| {
-                    AudioError::UnsupportedSource(format!("open {path}: {e}"))
-                })?;
+                let file = std::fs::File::open(&path)
+                    .map_err(|e| AudioError::UnsupportedSource(format!("open {path}: {e}")))?;
                 (
                     MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default()),
                     true,
@@ -215,10 +218,10 @@ impl TrackSource {
             (Some(dur), Some(tb)) => tb.calc_duration(dur).map(|t| t.as_millis() as u64),
             _ => None,
         };
-        if duration_ms.is_none() {
-            if let (Some(nf), Some(sr)) = (num_frames, params.sample_rate) {
-                duration_ms = Some(nf * 1000 / sr as u64);
-            }
+        if duration_ms.is_none()
+            && let (Some(nf), Some(sr)) = (num_frames, params.sample_rate)
+        {
+            duration_ms = Some(nf * 1000 / sr as u64);
         }
 
         Ok(TrackSource {
@@ -264,16 +267,13 @@ impl TrackSource {
                             let intrinsic = intrinsic_bits(&buf) as u32;
                             self.scratch.clear();
                             buf.copy_to_vec_interleaved::<i32>(&mut self.scratch);
-                            drop(buf);
+                            let _ = buf;
                             let bits = self
                                 .decoder
                                 .codec_params()
                                 .bits_per_sample
-                                .unwrap_or(if intrinsic == 32 {
-                                    24
-                                } else {
-                                    intrinsic
-                                }) as u8;
+                                .unwrap_or(if intrinsic == 32 { 24 } else { intrinsic })
+                                as u8;
                             // symphonia left-aligns content inside the sample
                             // type; right-shift back to LSB alignment so the
                             // container stage can re-align losslessly.

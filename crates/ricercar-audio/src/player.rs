@@ -6,9 +6,9 @@ use std::time::Duration;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender as CbSender};
 
 use crate::device::{DeviceInfo, DeviceKind};
-use crate::sink::device_info;
 use crate::fmt::{Container, PcmFormat};
-use crate::sink::{make_sink, AudioSink};
+use crate::sink::device_info;
+use crate::sink::{AudioSink, make_sink};
 use crate::stream::TrackSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,21 +20,13 @@ pub enum TransportStatus {
 
 #[derive(Debug)]
 pub enum EngineCommand {
-    Load {
-        uri: String,
-    },
-    EnqueueNext {
-        uri: String,
-    },
+    Load { uri: String },
+    EnqueueNext { uri: String },
     Pause,
     Resume,
     Stop,
-    Seek {
-        ms: u64,
-    },
-    SetVolume {
-        percent: u32,
-    },
+    Seek { ms: u64 },
+    SetVolume { percent: u32 },
 }
 
 #[derive(Debug, Clone)]
@@ -225,11 +217,8 @@ fn open_source(uri: &str, hub: &EventHub) -> Option<TrackSource> {
 
 /// Decode until the track format is known.
 fn prime(src: &mut TrackSource) -> bool {
-    while src.format.is_none() && !src.end_of_stream {
-        match src.pump() {
-            Ok(_) => break,
-            Err(_) => return false,
-        }
+    if src.format.is_none() && !src.end_of_stream && src.pump().is_err() {
+        return false;
     }
     src.format.is_some()
 }
@@ -349,27 +338,27 @@ fn engine_loop(
                     } else if current.is_none() {
                         // Nothing playing: start it immediately.
                         sink.close();
-                        if let Some(mut src) = open_source(&uri, &hub) {
-                            if prime(&mut src) {
-                                let fmt = src.format.unwrap();
-                                if sink.open(fmt).is_ok() {
-                                    {
-                                        let mut st = state.lock().unwrap();
-                                        st.track_uri = Some(uri.clone());
-                                        st.next_uri = None;
-                                        st.pos_ms = 0;
-                                        st.dur_ms = src.duration_ms;
-                                        st.seekable = src.seekable;
-                                        st.chain = chain_of(&device, Some(fmt), volume);
-                                    }
-                                    pos_frames = 0;
-                                    set_status(&state, &hub, TransportStatus::Playing);
-                                    hub.publish(EngineEvent::TrackStarted {
-                                        uri,
-                                        format: Some(fmt),
-                                    });
-                                    current = Some(src);
+                        if let Some(mut src) = open_source(&uri, &hub)
+                            && prime(&mut src)
+                        {
+                            let fmt = src.format.unwrap();
+                            if sink.open(fmt).is_ok() {
+                                {
+                                    let mut st = state.lock().unwrap();
+                                    st.track_uri = Some(uri.clone());
+                                    st.next_uri = None;
+                                    st.pos_ms = 0;
+                                    st.dur_ms = src.duration_ms;
+                                    st.seekable = src.seekable;
+                                    st.chain = chain_of(&device, Some(fmt), volume);
                                 }
+                                pos_frames = 0;
+                                set_status(&state, &hub, TransportStatus::Playing);
+                                hub.publish(EngineEvent::TrackStarted {
+                                    uri,
+                                    format: Some(fmt),
+                                });
+                                current = Some(src);
                             }
                         }
                     } else {
@@ -433,13 +422,13 @@ fn engine_loop(
                 }
                 None => false,
             };
-            if near_end && matches!(next, Some(NextSource::Pending(_))) {
-                if let Some(NextSource::Pending(uri)) = next.take() {
-                    if let Some(mut t) = open_source(&uri, &hub) {
-                        prime(&mut t);
-                        next = Some(NextSource::Open(t));
-                    }
-                }
+            if near_end
+                && matches!(next, Some(NextSource::Pending(_)))
+                && let Some(NextSource::Pending(uri)) = next.take()
+                && let Some(mut t) = open_source(&uri, &hub)
+            {
+                prime(&mut t);
+                next = Some(NextSource::Open(t));
             }
 
             match src.pump() {

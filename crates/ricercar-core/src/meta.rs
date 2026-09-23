@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use lofty::file::TaggedFileExt;
-use lofty::prelude::*;
 use lofty::picture::PictureType;
+use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
 
@@ -21,12 +21,17 @@ pub struct TagInfo {
 }
 
 fn parse_u32(s: Option<&str>) -> Option<u32> {
-    s.map(|v| v.split('/').next().unwrap_or(v).trim().parse::<u32>().ok())
-        .flatten()
+    s.and_then(|v| v.split('/').next().unwrap_or(v).trim().parse::<u32>().ok())
 }
 
 fn parse_year(s: Option<&str>) -> Option<i32> {
-    s.and_then(|v| v.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+    s.and_then(|v| {
+        v.chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse()
+            .ok()
+    })
 }
 
 pub fn read_tags(path: &Path) -> TagInfo {
@@ -49,12 +54,11 @@ pub fn read_tags(path: &Path) -> TagInfo {
     let mut info = TagInfo {
         title: tag.and_then(|t| t.get_string(ItemKey::TrackTitle).map(|s| s.to_string())),
         artist: tag.and_then(|t| t.get_string(ItemKey::TrackArtist).map(|s| s.to_string())),
-        album_artist: tag
-            .and_then(|t| t.get_string(ItemKey::AlbumArtist).map(|s| s.to_string())),
+        album_artist: tag.and_then(|t| t.get_string(ItemKey::AlbumArtist).map(|s| s.to_string())),
         album: tag.and_then(|t| t.get_string(ItemKey::AlbumTitle).map(|s| s.to_string())),
-        track: tag.and_then(|t| parse_u32(t.get_string(ItemKey::TrackNumber).as_deref())),
-        disc: tag.and_then(|t| parse_u32(t.get_string(ItemKey::DiscNumber).as_deref())),
-        year: tag.and_then(|t| parse_year(t.get_string(ItemKey::Year).as_deref())),
+        track: tag.and_then(|t| parse_u32(t.get_string(ItemKey::TrackNumber))),
+        disc: tag.and_then(|t| parse_u32(t.get_string(ItemKey::DiscNumber))),
+        year: tag.and_then(|t| parse_year(t.get_string(ItemKey::Year))),
         genre: tag.and_then(|t| t.get_string(ItemKey::Genre).map(|s| s.to_string())),
         duration_ms: props.duration().as_millis() as u64,
     };
@@ -73,9 +77,8 @@ pub fn cover_bytes(path: &Path) -> Option<(Vec<u8>, String)> {
         .iter()
         .find(|p| matches!(p.pic_type(), PictureType::CoverFront))
         .or_else(|| {
-            pics.iter().find(|p| {
-                !matches!(p.pic_type(), PictureType::Other)
-            })
+            pics.iter()
+                .find(|p| !matches!(p.pic_type(), PictureType::Other))
         })
         .or_else(|| pics.first())?;
     let mime = front
@@ -99,12 +102,13 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;

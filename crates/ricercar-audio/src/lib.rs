@@ -16,8 +16,7 @@ pub use device::{DeviceInfo, DeviceKind};
 pub use error::{AudioError, Result};
 pub use fmt::{Container, PcmFormat};
 pub use player::{
-    spawn_player, ChainInfo, EngineEvent, PlayerHandle, PlayerShared, Subscriber,
-    TransportStatus,
+    ChainInfo, EngineEvent, PlayerHandle, PlayerShared, Subscriber, TransportStatus, spawn_player,
 };
 pub use sink::AudioSink;
 pub use stream::TrackSource;

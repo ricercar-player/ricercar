@@ -27,7 +27,7 @@ fn spawn_file_player(tag: &str) -> (PlayerHandle, PathBuf) {
 }
 
 /// Run until status becomes Stopped (or error), return true if finished.
-fn wait_finished(h: &PlayerHandle, sub: &ricercar_audio::Subscriber, secs: u64) -> bool {
+fn wait_finished(_h: &PlayerHandle, sub: &ricercar_audio::Subscriber, secs: u64) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_secs(secs);
     loop {
         match sub.0.recv_timeout(Duration::from_millis(200)) {
@@ -59,8 +59,7 @@ fn assert_eq_bytes(got: &Path, golden: &str) {
     );
     let first_diff = g.iter().zip(w.iter()).position(|(a, b)| a != b);
     assert_eq!(
-        first_diff,
-        None,
+        first_diff, None,
         "first difference vs {golden} at {first_diff:?}"
     );
 }
@@ -125,11 +124,10 @@ fn seek_file_source() {
     while std::time::Instant::now() < deadline {
         if let Ok(EngineEvent::Position { pos_ms, .. }) =
             sub.0.recv_timeout(Duration::from_millis(300))
+            && pos_ms >= 1400
         {
-            if pos_ms >= 1400 {
-                saw_pos = true;
-                break;
-            }
+            saw_pos = true;
+            break;
         }
     }
     assert!(saw_pos, "position should pass the seek target");

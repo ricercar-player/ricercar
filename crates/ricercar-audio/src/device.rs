@@ -23,7 +23,10 @@ impl DeviceKind {
     /// True when we can guarantee no resampling or mixing happens on our side
     /// and the kernel hands samples to the codec untouched.
     pub fn is_bit_perfect(self) -> bool {
-        matches!(self, DeviceKind::Hardware | DeviceKind::Null | DeviceKind::File)
+        matches!(
+            self,
+            DeviceKind::Hardware | DeviceKind::Null | DeviceKind::File
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -11,7 +11,6 @@ use crate::library::Library;
 pub struct WatcherHandle {
     stop: Arc<AtomicBool>,
 }
-
 
 impl WatcherHandle {
     pub fn start(lib: Arc<Library>, roots: Vec<PathBuf>) -> WatcherHandle {

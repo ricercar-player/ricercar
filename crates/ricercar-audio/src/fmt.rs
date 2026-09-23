@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn s24_3_packed() {
         let mut out = Vec::new();
-        append_container(&mut out, &[0x00FF_EE], Container::S24_3, 24);
+        append_container(&mut out, &[0x0000_FFEE], Container::S24_3, 24);
         assert_eq!(out, [0xEE, 0xFF, 0x00]);
     }
 

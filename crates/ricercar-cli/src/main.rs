@@ -19,7 +19,13 @@ fn call<T>(c: &zbus::blocking::Connection, member: &str, body: &T)
 where
     T: serde::Serialize + zbus::zvariant::DynamicType,
 {
-    match c.call_method(Some(DEST), PATH, Some("org.mpris.MediaPlayer2.Player"), member, body) {
+    match c.call_method(
+        Some(DEST),
+        PATH,
+        Some("org.mpris.MediaPlayer2.Player"),
+        member,
+        body,
+    ) {
         Ok(_) => {}
         Err(e) => {
             eprintln!("{member}: {e}");
@@ -71,15 +77,15 @@ fn main() {
         None | Some("status") => {
             let status = str_prop(&c, "org.mpris.MediaPlayer2.Player", "PlaybackStatus");
             let md = metadata(&c);
-            let get = |k: &str| -> String {
-                md.get(k)
-                    .map(|v| vs(v))
-                    .unwrap_or_default()
-            };
+            let get = |k: &str| -> String { md.get(k).map(vs).unwrap_or_default() };
             let pos = prop(&c, "org.mpris.MediaPlayer2.Player", "Position")
                 .and_then(|v| i64::try_from(v).ok())
                 .unwrap_or(0);
-            println!("{status}  {} — {}  [{pos}]", get("xesam:artist"), get("xesam:title"));
+            println!(
+                "{status}  {} — {}  [{pos}]",
+                get("xesam:artist"),
+                get("xesam:title")
+            );
         }
         Some("play") => call(&c, "Play", &()),
         Some("pause") => call(&c, "Pause", &()),
@@ -92,38 +98,39 @@ fn main() {
             call(&c, "OpenURI", &(uri.as_str(),));
         }
         Some("seek") => {
-            let secs: i64 = args
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_default();
+            let secs: i64 = args.next().and_then(|s| s.parse().ok()).unwrap_or_default();
             call(&c, "Seek", &(secs * 1_000_000,));
         }
-        Some("volume") => {
-            match args.next().and_then(|s| s.parse::<f64>().ok()) {
-                Some(v) => {
-                    let _ = c.call_method(
-                        Some(DEST),
-                        PATH,
-                        Some("org.freedesktop.DBus.Properties"),
-                        "Set",
-                        &("org.mpris.MediaPlayer2.Player", "Volume", OwnedValue::try_from(v).unwrap()),
-                    );
-                }
-                None => {
-                    let v = prop(&c, "org.mpris.MediaPlayer2.Player", "Volume")
-                        .and_then(|v| f64::try_from(v).ok())
-                        .unwrap_or(1.0);
-                    println!("{v:.2}");
-                }
+        Some("volume") => match args.next().and_then(|s| s.parse::<f64>().ok()) {
+            Some(v) => {
+                let _ = c.call_method(
+                    Some(DEST),
+                    PATH,
+                    Some("org.freedesktop.DBus.Properties"),
+                    "Set",
+                    &(
+                        "org.mpris.MediaPlayer2.Player",
+                        "Volume",
+                        OwnedValue::from(v),
+                    ),
+                );
             }
-        }
+            None => {
+                let v = prop(&c, "org.mpris.MediaPlayer2.Player", "Volume")
+                    .and_then(|v| f64::try_from(v).ok())
+                    .unwrap_or(1.0);
+                println!("{v:.2}");
+            }
+        },
         Some("metadata") => {
             for (k, v) in metadata(&c) {
                 println!("{k}: {}", vs(&v));
             }
         }
         Some(other) => {
-            eprintln!("unknown command: {other}\ncommands: status play pause toggle stop next prev open seek volume metadata");
+            eprintln!(
+                "unknown command: {other}\ncommands: status play pause toggle stop next prev open seek volume metadata"
+            );
             std::process::exit(2);
         }
     }

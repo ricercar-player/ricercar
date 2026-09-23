@@ -74,14 +74,18 @@ impl AudioSink for AlsaSink {
         self.close();
         let container = Container::for_bits(fmt.bits);
         let alsa_fmt = to_alsa_format(container);
-        let pcm = alsa::PCM::new(&self.device.name, alsa::Direction::Playback, false)
-            .map_err(|e| AudioError::Alsa {
-                device: self.device.name.clone(),
-                source: e,
+        let pcm =
+            alsa::PCM::new(&self.device.name, alsa::Direction::Playback, false).map_err(|e| {
+                AudioError::Alsa {
+                    device: self.device.name.clone(),
+                    source: e,
+                }
             })?;
         let setup = (|| -> Result<()> {
-            let alsa_err =
-                |e: alsa::Error| AudioError::Alsa { device: self.device.name.clone(), source: e };
+            let alsa_err = |e: alsa::Error| AudioError::Alsa {
+                device: self.device.name.clone(),
+                source: e,
+            };
             let h = pcm.hw_params_current().map_err(alsa_err)?;
             h.set_access(alsa::pcm::Access::RWInterleaved)
                 .map_err(alsa_err)?;
@@ -124,19 +128,16 @@ impl AudioSink for AlsaSink {
     }
 
     fn write_i32(&mut self, samples: &[i32]) -> Result<()> {
-        let (pcm, container, content_bits, channels) = match (&self.pcm, self.container, self.fmt)
-        {
+        let (pcm, container, content_bits, channels) = match (&self.pcm, self.container, self.fmt) {
             (Some(p), Some(c), Some(f)) => (p, c, f.bits, f.channels as usize),
             _ => return Err(AudioError::UnsupportedSource("sink not open".into())),
         };
         self.bytes.clear();
         append_container(&mut self.bytes, samples, container, content_bits);
-        let io = pcm
-            .io_u8()
-            .map_err(|e| AudioError::Alsa {
-                device: self.device.name.clone(),
-                source: e,
-            })?;
+        let io = pcm.io_u8().map_err(|e| AudioError::Alsa {
+            device: self.device.name.clone(),
+            source: e,
+        })?;
         let frame_bytes = container.bytes_per_sample() * channels;
         let mut off = 0usize;
         while off < self.bytes.len() {
@@ -166,11 +167,10 @@ impl AudioSink for AlsaSink {
 
     fn drain(&mut self) -> Result<()> {
         if let Some(pcm) = &self.pcm {
-            pcm.drain()
-                .map_err(|e| AudioError::Alsa {
-                    device: self.device.name.clone(),
-                    source: e,
-                })?;
+            pcm.drain().map_err(|e| AudioError::Alsa {
+                device: self.device.name.clone(),
+                source: e,
+            })?;
         }
         Ok(())
     }
@@ -233,8 +233,7 @@ impl AudioSink for FileSink {
         Ok(())
     }
     fn write_i32(&mut self, samples: &[i32]) -> Result<()> {
-        let (Some(file), Some(container), Some(f)) =
-            (&mut self.file, self.container, self.fmt)
+        let (Some(file), Some(container), Some(f)) = (&mut self.file, self.container, self.fmt)
         else {
             return Err(AudioError::UnsupportedSource("sink not open".into()));
         };
@@ -304,8 +303,8 @@ impl AudioSink for NullSink {
         };
         self.bytes.clear();
         append_container(&mut self.bytes, samples, container, f.bits);
-        self.frames += (self.bytes.len()
-            / (container.bytes_per_sample() * f.channels as usize)) as u64;
+        self.frames +=
+            (self.bytes.len() / (container.bytes_per_sample() * f.channels as usize)) as u64;
         Ok(())
     }
     fn drain(&mut self) -> Result<()> {
