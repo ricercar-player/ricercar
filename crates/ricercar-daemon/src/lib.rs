@@ -90,7 +90,14 @@ pub fn print_devices() {
     }
 }
 
-pub fn run(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
+pub struct AppContext {
+    pub ctl: Arc<Controller>,
+    pub quit: Arc<AtomicBool>,
+    _renderer: Option<ricercar_upnp::RendererHandle>,
+    _watcher: Option<WatcherHandle>,
+}
+
+pub fn startup(cfg: Config) -> Result<AppContext, Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -117,7 +124,7 @@ pub fn run(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     let quit = Arc::new(AtomicBool::new(false));
 
-    let _renderer = if cfg.upnp {
+    let renderer = if cfg.upnp {
         let handle = ricercar_upnp::start_renderer(ctl.clone(), &cfg.name)?;
         let ip = local_ip().unwrap_or_else(|| "127.0.0.1".into());
         tracing::info!(
@@ -141,12 +148,27 @@ pub fn run(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let q = quit.clone();
-    let _ = ctrlc::set_handler(move || q.store(true, Ordering::SeqCst));
-    while !quit.load(Ordering::Relaxed) {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    Ok(AppContext {
+        ctl,
+        quit,
+        _renderer: renderer,
+        _watcher: _watcher,
+    })
+}
+
+impl AppContext {
+    pub fn wait_until_quit(&self) {
+        let q = self.quit.clone();
+        let _ = ctrlc::set_handler(move || q.store(true, Ordering::SeqCst));
+        while !self.quit.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        tracing::info!("bye");
     }
-    tracing::info!("bye");
+}
+
+pub fn run(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
+    startup(cfg)?.wait_until_quit();
     Ok(())
 }
 

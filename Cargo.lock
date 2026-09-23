@@ -4403,9 +4403,11 @@ dependencies = [
  "image",
  "ricercar-core",
  "ricercar-ui",
+ "serde",
  "slint",
  "tracing",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]
@@ -4452,7 +4454,9 @@ name = "ricercar-ui"
 version = "0.1.0"
 dependencies = [
  "image",
+ "ricercar-audio",
  "ricercar-core",
+ "ricercar-daemon",
  "ricercar-mpris",
  "ricercar-upnp",
  "slint",

@@ -214,15 +214,16 @@ impl MprisRoot {
 
 /// Publish on the session bus; returns the connection (must stay alive).
 pub fn serve(ctl: Arc<Controller>) -> zbus::Result<zbus::blocking::Connection> {
-    let conn = zbus::blocking::Connection::session()?;
-    conn.request_name(BUS_NAME)?;
-    conn.object_server().at(PATH, MprisRoot)?;
-    conn.object_server().at(
-        PATH,
-        MprisPlayer {
-            ctl: ctl.clone(),
-        },
-    )?;
+    let conn = zbus::blocking::connection::Builder::session()?
+        .name(BUS_NAME)?
+        .serve_at(PATH, MprisRoot)?
+        .serve_at(
+            PATH,
+            MprisPlayer {
+                ctl: ctl.clone(),
+            },
+        )?
+        .build()?;
     Ok(conn)
 }
 

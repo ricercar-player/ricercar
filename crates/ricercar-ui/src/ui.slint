@@ -1,0 +1,92 @@
+import { Button, Slider, GroupBox, LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct TrackItem {
+    title: string,
+    artist: string,
+    album: string,
+    dur: string,
+}
+
+export component App inherits Window {
+    title: "ricercar";
+    preferred-width: 760px;
+    preferred-height: 560px;
+    background: #14151a;
+
+    in property <string> track-title;
+    in property <string> track-artist;
+    in property <string> position-text;
+    in property <bool> playing;
+    in property <float> volume;
+    in-out property <string> search-text;
+    in property <[TrackItem]> tracks;
+    in property <string> status-text;
+
+    callback play-pause();
+    callback stop();
+    callback next();
+    callback prev();
+    callback volume-changed(float);
+    callback activate(int);
+    callback search-changed(string);
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            LineEdit {
+                placeholder-text: "search library…";
+                text <=> root.search-text;
+                accepted => { root.search-changed(self.text); }
+            }
+        }
+
+        GroupBox { title: "now playing";
+            VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: root.track-title; font-size: 16px; color: #e8e9ed; horizontal-stretch: 1; }
+                }
+                Text { text: root.track-artist; color: #9aa0b0; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: root.position-text; color: #6f7689; font-size: 12px; }
+                }
+                Slider {
+                    value: root.volume * 100;
+                    changed value => { root.volume-changed(self.value / 100); }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 10px;
+                    Button { text: "⏮"; clicked => { root.prev(); } }
+                    Button { text: root.playing ? "⏸" : "▶"; clicked => { root.play-pause(); } }
+                    Button { text: "⏹"; clicked => { root.stop(); } }
+                    Button { text: "⏭"; clicked => { root.next(); } }
+                }
+            }
+        }
+
+        GroupBox { title: "library";
+            ScrollView {
+                VerticalLayout {
+                    for t[idx] in root.tracks: TouchArea {
+                        height: 34px;
+                        clicked => { root.activate(idx); }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Text { text: t.artist; color: #9aa0b0; width: 180px; }
+                            Text { text: t.title; color: #e8e9ed; horizontal-stretch: 1; }
+                            Text { text: t.dur; color: #6f7689; width: 60px; }
+                        }
+                    }
+                }
+            }
+        }
+
+        Text { text: root.status-text; color: #6f7689; font-size: 11px; }
+    }
+}

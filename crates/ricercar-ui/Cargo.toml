@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 image = "0.25.10"
+ricercar-audio = { version = "0.1.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
+ricercar-daemon = { version = "0.1.0", path = "../ricercar-daemon" }
 ricercar-mpris.workspace = true
 ricercar-upnp.workspace = true
 slint = "1.18.1"
