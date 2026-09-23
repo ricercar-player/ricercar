@@ -11,4 +11,5 @@ ricercar-audio.workspace = true
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 thiserror.workspace = true
 tracing.workspace = true
+ureq = "2.12"
 walkdir = "2.5.0"

@@ -4406,6 +4406,7 @@ dependencies = [
  "rusqlite",
  "thiserror 2.0.20",
  "tracing",
+ "ureq",
  "walkdir",
 ]
 
@@ -4451,6 +4452,7 @@ version = "0.1.0"
 dependencies = [
  "if-addrs",
  "quick-xml 0.42.0",
+ "ricercar-audio",
  "ricercar-core",
  "socket2",
  "thiserror 2.0.20",

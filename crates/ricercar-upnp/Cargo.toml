@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 if-addrs = "0.15.0"
 quick-xml = "0.42.0"
+ricercar-audio = { version = "0.1.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 socket2 = "0.6.5"
 thiserror.workspace = true

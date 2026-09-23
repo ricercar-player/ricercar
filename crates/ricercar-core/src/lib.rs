@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! ricercar-core — library, queue, controller, metadata.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod controller;
+pub mod library;
+pub mod meta;
+pub mod watcher;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use controller::{Controller, CtlState, Origin, TrackInfo};
+pub use library::{AlbumKey, Library, Track};

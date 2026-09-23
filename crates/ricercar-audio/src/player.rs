@@ -342,8 +342,40 @@ fn engine_loop(
                     }
                 }
                 EngineCommand::EnqueueNext { uri } => {
-                    next = Some(NextSource::Pending(uri.clone()));
-                    state.lock().unwrap().next_uri = Some(uri);
+                    if uri.is_empty() {
+                        // Ignored (e.g. control points clearing the next slot).
+                        next = None;
+                        state.lock().unwrap().next_uri = None;
+                    } else if current.is_none() {
+                        // Nothing playing: start it immediately.
+                        sink.close();
+                        if let Some(mut src) = open_source(&uri, &hub) {
+                            if prime(&mut src) {
+                                let fmt = src.format.unwrap();
+                                if sink.open(fmt).is_ok() {
+                                    {
+                                        let mut st = state.lock().unwrap();
+                                        st.track_uri = Some(uri.clone());
+                                        st.next_uri = None;
+                                        st.pos_ms = 0;
+                                        st.dur_ms = src.duration_ms;
+                                        st.seekable = src.seekable;
+                                        st.chain = chain_of(&device, Some(fmt), volume);
+                                    }
+                                    pos_frames = 0;
+                                    set_status(&state, &hub, TransportStatus::Playing);
+                                    hub.publish(EngineEvent::TrackStarted {
+                                        uri,
+                                        format: Some(fmt),
+                                    });
+                                    current = Some(src);
+                                }
+                            }
+                        }
+                    } else {
+                        next = Some(NextSource::Pending(uri.clone()));
+                        state.lock().unwrap().next_uri = Some(uri);
+                    }
                 }
                 EngineCommand::Pause => {
                     let st = state.lock().unwrap().status;
