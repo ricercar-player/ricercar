@@ -2,6 +2,7 @@
 name = "ricercar-core"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 crossbeam-channel.workspace = true

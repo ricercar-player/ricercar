@@ -3,6 +3,12 @@ targets = [{ triple = "x86_64-unknown-linux-gnu" }]
 
 [advisories]
 yanked = "warn"
+ignore = [
+    # proc-macro helper, no known vulnerability, widely depended on
+    { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained notice only; transitive of transitive" },
+    # font parser behind slint's software text renderer; no fix available upstream yet
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: unmaintained notice only; slint pins it" },
+]
 
 [licenses]
 allow = [
@@ -16,6 +22,9 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
     "MPL-2.0",
+    "Unlicense",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
     "LicenseRef-ring",
     "LicenseRef-Slint-Royalty-free-2.0",
     "LicenseRef-Slint-Software-3.0",

@@ -2,6 +2,7 @@
 name = "ricercar-daemon"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 ctrlc = "3.5.2"
