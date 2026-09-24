@@ -89,6 +89,12 @@ hardware during `cargo test`.
 
 ## License
 
-MIT. See `LICENSE` and `AUTHORS`. ricercar is not affiliated with a streaming service;
-streaming playback depends on your own subscription and a third-party
+MIT. See `LICENSE` and `AUTHORS`.
+
+ricercar is an independent open-source project. It is **not affiliated with,
+endorsed by, or connected to** the Belgian record label *Ricercar*
+(Outhere), nor to a streaming service or any other streaming service. "Ricercar" here is
+used in its old musical sense (a contrapuntal study, literally "searching"),
+which matches the project's goal: searching for music the open, legal way.
+Streaming playback depends on your own subscription and a third-party
 control point.
