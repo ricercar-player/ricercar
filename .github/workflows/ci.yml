@@ -19,7 +19,7 @@ jobs:
       - name: system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config clang libclang-dev
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev pkg-config clang libclang-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
