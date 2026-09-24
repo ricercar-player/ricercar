@@ -218,3 +218,69 @@ fn ssdp_soft_check() {
         eprintln!("note: no SSDP reply (port 1900 may be unavailable in this sandbox)");
     }
 }
+
+#[test]
+fn http_source_flow() {
+    use std::net::TcpListener;
+    let r = rig("http");
+    let body = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone_16_441.flac"),
+    )
+    .unwrap();
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in l.incoming().flatten() {
+            let mut stream = stream;
+            let mut req = [0u8; 2048];
+            let _ = stream.read(&mut req);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nCONTENT-TYPE: audio/flac\r\nCONTENT-LENGTH: {}\r\nCONNECTION: close\r\n\r\n",
+                body.len()
+            );
+            if stream.write_all(head.as_bytes()).is_ok() {
+                let _ = stream.write_all(&body);
+                let _ = stream.flush();
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    });
+    let uri = format!("http://127.0.0.1:{port}/tone.flac");
+    let ns = "urn:schemas-upnp-org:service:AVTransport:1";
+    let resp = soap(
+        r.handle.port,
+        "/ctl/avt",
+        ns,
+        "SetAVTransportURI",
+        &[
+            ("InstanceID", "0"),
+            ("CurrentURI", &uri),
+            ("CurrentURIMetaData", ""),
+        ],
+    );
+    assert!(resp.contains("200 OK"));
+    soap(
+        r.handle.port,
+        "/ctl/avt",
+        ns,
+        "Play",
+        &[("InstanceID", "0")],
+    );
+
+    let mut stopped = false;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline && !stopped {
+        std::thread::sleep(Duration::from_millis(150));
+        let info = soap(
+            r.handle.port,
+            "/ctl/avt",
+            ns,
+            "GetTransportInfo",
+            &[("InstanceID", "0")],
+        );
+        stopped = info.contains("STOPPED");
+    }
+    assert!(stopped, "http stream via upnp never finished");
+    let bytes = std::fs::read(&r.out).unwrap_or_default();
+    assert_eq!(bytes.len(), 352_800, "full 2s tone streamed and written");
+}

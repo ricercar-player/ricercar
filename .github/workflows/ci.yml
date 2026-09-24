@@ -27,3 +27,9 @@ jobs:
         run: dbus-run-session -- cargo test --workspace
       - name: release build
         run: cargo build --release --workspace
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

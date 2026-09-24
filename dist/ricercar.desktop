@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ricercar
+GenericName=Music player
+Comment=Bit-perfect player and UPnP renderer
+Exec=ricercar-ui %U
+Icon=ricercar
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupNotify=true
