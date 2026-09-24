@@ -127,7 +127,9 @@ pub fn run_ui(ctl: Arc<Controller>) -> Result<(), slint::PlatformError> {
                         .unwrap_or_default()
                         .into(),
                 );
-                u.set_position_text(fmt_time(st.pos_ms).into());
+                u.set_position_text(
+                    format!("{} / {}", fmt_time(st.pos_ms), fmt_time(st.dur_ms)).into(),
+                );
                 u.set_playing(matches!(
                     st.status,
                     ricercar_audio::TransportStatus::Playing
@@ -137,7 +139,19 @@ pub fn run_ui(ctl: Arc<Controller>) -> Result<(), slint::PlatformError> {
                     ricercar_core::Origin::Remote => "remote (upnp)",
                     ricercar_core::Origin::Local => "local",
                 };
-                u.set_status_text(format!("{} · {}", origin, c.device_name()).into());
+                let chain = if st.chain.bit_perfect {
+                    " · bit-perfect ✓"
+                } else {
+                    " · soft volume"
+                };
+                let fmt = st
+                    .chain
+                    .format
+                    .map(|f| format!(" · {} Hz/{} b", f.sample_rate, f.bits))
+                    .unwrap_or_default();
+                u.set_status_text(
+                    format!("{} · {}{}{}", origin, c.device_name(), fmt, chain).into(),
+                );
             }
         },
     );

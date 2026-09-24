@@ -62,10 +62,10 @@ export component App inherits Window {
                 HorizontalLayout {
                     alignment: center;
                     spacing: 10px;
-                    Button { text: "⏮"; clicked => { root.prev(); } }
-                    Button { text: root.playing ? "⏸" : "▶"; clicked => { root.play-pause(); } }
-                    Button { text: "⏹"; clicked => { root.stop(); } }
-                    Button { text: "⏭"; clicked => { root.next(); } }
+                    Button { text: "◀◀"; clicked => { root.prev(); } }
+                    Button { text: root.playing ? "❚❚" : "▶"; clicked => { root.play-pause(); } }
+                    Button { text: "■"; clicked => { root.stop(); } }
+                    Button { text: "▶▶"; clicked => { root.next(); } }
                 }
             }
         }
