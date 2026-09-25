@@ -2,7 +2,7 @@ import { ScrollView, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, AlbumCard, TrackRow } from "state.slint";
-import { Icon, IconButton, Button, PlayButton, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile } from "widgets.slint";
+import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile } from "widgets.slint";
 import { TrackTable, TrackListView, AlbumShelf, AlbumGrid, AlbumFlow, TrackMenu } from "lists.slint";
 
 /// Top bar with history arrows and a title that appears once scrolled.
@@ -91,29 +91,179 @@ component EmptyState inherits VerticalLayout {
     }
 }
 
-// ------------------------------------------------------------------ home
+/// Primary actions of a collection page: text buttons, hi-fi style.
+component ActionBar inherits HorizontalLayout {
+    in property <bool> playing;
+    in property <bool> show-extra: true;
+    in property <bool> fav;
+    callback play();
+    callback shuffle();
+    callback toggle-fav();
+    callback queue();
+    callback more(length, length);
+    spacing: 10px;
+    alignment: start;
+    Button {
+        primary: true;
+        icon: playing ? Icons.pause-fill : Icons.play-fill;
+        text: playing ? @tr("Pause") : @tr("Play");
+        clicked => { root.play(); }
+    }
+    Button {
+        icon: Icons.shuffle;
+        text: @tr("Shuffle");
+        clicked => { root.shuffle(); }
+    }
+    if show-extra: Rectangle { width: 6px; }
+    if show-extra: IconButton {
+        y: (parent.height - self.height) / 2;
+        icon: fav ? Icons.heart-fill : Icons.heart;
+        tint: fav ? Theme.accent : Theme.text2;
+        tooltip: @tr("Favorite");
+        clicked => { root.toggle-fav(); }
+    }
+    if show-extra: IconButton {
+        y: (parent.height - self.height) / 2;
+        icon: Icons.list-end;
+        tooltip: @tr("Add to queue");
+        clicked => { root.queue(); }
+    }
+    if show-extra: IconButton {
+        y: (parent.height - self.height) / 2;
+        icon: Icons.ellipsis;
+        tooltip: @tr("More");
+        clicked => { root.more(self.absolute-position.x, self.absolute-position.y + self.height); }
+    }
+}
 
-export component HomePage inherits PageScroll {
-    title: App.greeting;
-    fade-at: 40px;
-    VerticalLayout {
-        padding-left: 32px;
-        padding-right: 32px;
-        spacing: 12px;
-        HorizontalLayout {
-            spacing: 16px;
+/// Home header: what is playing (or was last played), with its signal path.
+component ListeningHero inherits Rectangle {
+    in property <image> cover;
+    in property <image> backdrop;
+    in property <string> status;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> detail;
+    in property <bool> bitperfect;
+    in property <bool> detail-known;
+    in property <bool> playing;
+    in property <string> open-label;
+    callback play();
+    callback open();
+    height: 232px;
+    border-radius: Theme.r-lg;
+    clip: true;
+    background: Theme.raised;
+    Image {
+        width: 100%;
+        height: 100%;
+        source: root.backdrop;
+        image-fit: ImageFit.cover;
+        opacity: 0.55;
+    }
+    Rectangle { background: @linear-gradient(90deg, Theme.bg.with-alpha(0.55) 0%, Theme.bg.with-alpha(0.85) 70%); }
+    HorizontalLayout {
+        padding: 24px;
+        spacing: 28px;
+        Cover {
+            width: 184px;
+            height: 184px;
+            source: root.cover;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 10px;
+            drop-shadow-color: #00000080;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 6px;
+            Text { text: root.status; font-size: Theme.fs-sm; font-weight: 600; color: Theme.accent; }
             Text {
-                text: App.greeting;
+                text: root.title;
                 font-family: Theme.display;
                 font-size: Theme.fs-3xl;
                 font-weight: 800;
                 letter-spacing: -0.8px;
                 color: Theme.text;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
+                overflow: elide;
             }
-            if App.lib-tracks > 0: Button {
-                y: (parent.height - self.height) / 2;
+            Text { text: root.subtitle; font-size: Theme.fs-lg; color: Theme.text2; overflow: elide; }
+            if root.detail != "": HorizontalLayout {
+                spacing: 8px;
+                padding-top: 4px;
+                alignment: start;
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: !root.detail-known ? Theme.text3 : root.bitperfect ? Theme.good : Theme.warn;
+                }
+                Text { text: root.detail; font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; }
+            }
+            HorizontalLayout {
+                padding-top: 12px;
+                spacing: 10px;
+                alignment: start;
+                Button {
+                    primary: true;
+                    icon: root.playing ? Icons.pause-fill : Icons.play-fill;
+                    text: root.playing ? @tr("Pause") : @tr("Play");
+                    clicked => { root.play(); }
+                }
+                Button {
+                    icon: Icons.disc-3;
+                    text: root.open-label;
+                    clicked => { root.open(); }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ home
+
+export component HomePage inherits PageScroll {
+    title: @tr("Home");
+    fade-at: 200px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 12px;
+        if App.has-track: ListeningHero {
+            cover: App.cover-large.width > 0 ? App.cover-large : App.cover;
+            backdrop: App.backdrop;
+            status: App.playing ? @tr("Now playing") : @tr("Paused");
+            title: App.title;
+            subtitle: App.album != "" ? App.artist + " — " + App.album : App.artist;
+            detail: App.quality == "" ? "" : (App.codec != "" ? App.codec + " " : "") + App.quality + " → " + App.device-label + (App.bitperfect ? " · " + @tr("bit-perfect") : "");
+            detail-known: App.chain-known;
+            bitperfect: App.bitperfect;
+            playing: App.playing;
+            open-label: App.album-id != "" ? @tr("Open album") : @tr("Lyrics");
+            play => { App.play-pause(); }
+            open => {
+                if App.album-id != "" { App.go-to-album(); } else { App.now-playing-open = true; }
+            }
+        }
+        if !App.has-track && App.home-played.length > 0: ListeningHero {
+            cover: App.home-played[0].cover;
+            status: @tr("Pick up where you left off");
+            title: App.home-played[0].title;
+            subtitle: App.home-played[0].artist + (App.home-played[0].year != "" ? " · " + App.home-played[0].year : "");
+            open-label: @tr("Open album");
+            play => { App.album-action(App.home-played[0].id, "play"); }
+            open => { App.album-activate(App.home-played[0].id); }
+        }
+        if App.lib-tracks > 0: HorizontalLayout {
+            padding-top: App.has-track || App.home-played.length > 0 ? 8px : 0px;
+            spacing: 40px;
+            Stat { value: App.lib-albums; label: @tr("albums"); }
+            Stat { value: App.lib-artists; label: @tr("artists"); }
+            Stat { value: App.lib-tracks; label: @tr("tracks"); }
+            Stat { value: App.lib-hires; label: @tr("hi-res tracks"); }
+            Stat { value: App.lib-duration; label: @tr("of music"); }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
                 text: @tr("Shuffle library");
                 icon: Icons.shuffle;
                 clicked => { App.shuffle-all(); }
@@ -133,7 +283,7 @@ export component HomePage inherits PageScroll {
         }
         if App.home-played.length > 0: VerticalLayout {
             spacing: 8px;
-            padding-top: 12px;
+            padding-top: 16px;
             SectionTitle { text: @tr("Recently played"); }
             AlbumShelf { albums: App.home-played; playing-album: App.album-id; }
         }
@@ -154,7 +304,7 @@ export component HomePage inherits PageScroll {
         if App.home-tracks.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
-            SectionTitle { text: @tr("On repeat"); }
+            SectionTitle { text: @tr("Most played"); }
             TrackTable { rows: App.home-tracks; list: "home-tracks"; show-cover: true; show-plays: true; header: false; }
         }
         if App.home-top.length > 0: VerticalLayout {
@@ -162,16 +312,6 @@ export component HomePage inherits PageScroll {
             padding-top: 8px;
             SectionTitle { text: @tr("Most played albums"); }
             AlbumShelf { albums: App.home-top; playing-album: App.album-id; }
-        }
-        if App.lib-tracks > 0: HorizontalLayout {
-            padding-top: 28px;
-            spacing: 48px;
-            alignment: start;
-            Stat { value: App.lib-albums; label: @tr("albums"); }
-            Stat { value: App.lib-artists; label: @tr("artists"); }
-            Stat { value: App.lib-tracks; label: @tr("tracks"); }
-            Stat { value: App.lib-hires; label: @tr("hi-res tracks"); }
-            Stat { value: App.lib-duration; label: @tr("of music"); }
         }
     }
 }
@@ -320,62 +460,30 @@ export component AlbumPage inherits PageScroll {
             }
         }
     }
-    HorizontalLayout {
+    ActionBar {
         padding-left: 32px;
         padding-right: 32px;
         padding-top: 20px;
         padding-bottom: 16px;
-        spacing: 12px;
-        alignment: start;
-        PlayButton {
-            playing: is-current && App.playing;
-            clicked => {
-                if is-current { App.play-pause(); } else { App.album-action(App.al-id, "play"); }
-            }
+        playing: is-current && App.playing;
+        fav: App.al-fav;
+        play => {
+            if is-current { App.play-pause(); } else { App.album-action(App.al-id, "play"); }
         }
-        IconButton {
-            y: (parent.height - self.height) / 2;
-            size: 44px;
-            icon-size: 22px;
-            icon: Icons.shuffle;
-            tooltip: @tr("Shuffle");
-            clicked => { App.album-action(App.al-id, "shuffle"); }
-        }
-        IconButton {
-            y: (parent.height - self.height) / 2;
-            size: 44px;
-            icon-size: 22px;
-            icon: App.al-fav ? Icons.heart-fill : Icons.heart;
-            tint: App.al-fav ? Theme.accent : Theme.text2;
-            tooltip: @tr("Favorite");
-            clicked => { App.album-action(App.al-id, "fav"); }
-        }
-        IconButton {
-            y: (parent.height - self.height) / 2;
-            size: 44px;
-            icon-size: 22px;
-            icon: Icons.list-end;
-            tooltip: @tr("Add to queue");
-            clicked => { App.album-action(App.al-id, "queue"); }
-        }
-        IconButton {
-            y: (parent.height - self.height) / 2;
-            size: 44px;
-            icon-size: 22px;
-            icon: Icons.ellipsis;
-            tooltip: @tr("More");
-            clicked => {
-                TrackMenu.album-id = App.al-id;
-                TrackMenu.x = self.absolute-position.x;
-                TrackMenu.y = self.absolute-position.y + self.height;
-                TrackMenu.album-serial += 1;
-            }
+        shuffle => { App.album-action(App.al-id, "shuffle"); }
+        toggle-fav => { App.album-action(App.al-id, "fav"); }
+        queue => { App.album-action(App.al-id, "queue"); }
+        more(x, y) => {
+            TrackMenu.album-id = App.al-id;
+            TrackMenu.x = x;
+            TrackMenu.y = y;
+            TrackMenu.album-serial += 1;
         }
     }
     VerticalLayout {
         padding-left: 16px;
         padding-right: 16px;
-        TrackTable { rows: App.al-tracks; list: "album"; show-album: false; }
+        TrackTable { rows: App.al-tracks; list: "album"; show-album: false; show-format: false; }
     }
     if App.al-path != "": Text {
         x: 32px;
@@ -459,81 +567,67 @@ export component ArtistsPage inherits Rectangle {
 
 export component ArtistPage inherits PageScroll {
     title: App.ar-name;
-    fade-at: 220px;
-    Rectangle {
-        height: 280px;
-        Rectangle {
-            y: -56px;
-            height: parent.height + 56px;
-            Image {
-                width: 100%;
-                height: 100%;
-                source: App.ar-cover;
-                image-fit: cover;
-                opacity: 0.35;
-            }
-            Rectangle { background: @linear-gradient(180deg, Theme.bg.with-alpha(0.2) 0%, Theme.bg 100%); }
-        }
-        VerticalLayout {
-            padding-left: 32px;
-            padding-right: 32px;
-            alignment: end;
-            spacing: 6px;
-            padding-bottom: 12px;
-            Text {
-                text: App.ar-name;
-                font-family: Theme.display;
-                font-size: App.ar-name.character-count > 30 ? Theme.fs-3xl : Theme.fs-hero;
-                font-weight: 800;
-                letter-spacing: -1.2px;
-                color: Theme.text;
-                overflow: elide;
-            }
-            Text {
-                text: @tr("{n} album" | "{n} albums" % App.ar-albums) + " · " + @tr("{n} track" | "{n} tracks" % App.ar-tracks);
-                font-size: Theme.fs-md;
-                color: Theme.text2;
-            }
-        }
-    }
-    HorizontalLayout {
+    fade-at: 150px;
+    VerticalLayout {
         padding-left: 32px;
-        padding-top: 16px;
-        padding-bottom: 8px;
-        spacing: 12px;
-        alignment: start;
-        PlayButton { clicked => { App.album-action(App.ar-name, "artist-play"); } }
-        IconButton {
-            y: (parent.height - self.height) / 2;
-            size: 44px;
-            icon-size: 22px;
-            icon: Icons.shuffle;
-            tooltip: @tr("Shuffle");
-            clicked => { App.album-action(App.ar-name, "artist-shuffle"); }
+        padding-right: 32px;
+        spacing: 10px;
+        // The artist's covers, like sleeves on a shelf.
+        if App.ar-own.length + App.ar-appears.length > 0: HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            padding-bottom: 8px;
+            for a[i] in App.ar-own.length > 0 ? App.ar-own : App.ar-appears: Cover {
+                visible: i < 8;
+                width: i < 8 ? 76px : 0px;
+                height: 76px;
+                radius: 6px;
+                source: a.cover;
+            }
         }
-    }
-    if App.ar-top.length > 0: VerticalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        padding-top: 16px;
-        spacing: 8px;
-        HorizontalLayout { padding-left: 16px; SectionTitle { text: @tr("Popular"); } }
-        TrackTable { rows: App.ar-top; list: "artist-top"; show-cover: true; show-plays: true; header: false; }
+        Text {
+            text: App.ar-name;
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+            overflow: elide;
+        }
+        Text {
+            text: @tr("{n} album" | "{n} albums" % App.ar-albums) + " · " + @tr("{n} track" | "{n} tracks" % App.ar-tracks);
+            font-size: Theme.fs-md;
+            color: Theme.text2;
+        }
+        ActionBar {
+            padding-top: 10px;
+            show-extra: false;
+            play => { App.album-action(App.ar-name, "artist-play"); }
+            shuffle => { App.album-action(App.ar-name, "artist-shuffle"); }
+        }
     }
     if App.ar-own.length > 0: VerticalLayout {
         padding-left: 32px;
         padding-right: 32px;
         padding-top: 28px;
         spacing: 12px;
-        SectionTitle { text: @tr("Albums"); }
+        SectionTitle { text: @tr("Discography"); }
         AlbumFlow { albums: App.ar-own; playing-album: App.album-id; }
+    }
+    if App.ar-top.length > 0: VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        spacing: 8px;
+        HorizontalLayout { padding-left: 16px; SectionTitle { text: @tr("Most played"); } }
+        TrackTable { rows: App.ar-top; list: "artist-top"; show-cover: true; show-plays: true; header: false; }
     }
     if App.ar-appears.length > 0: VerticalLayout {
         padding-left: 32px;
         padding-right: 32px;
-        padding-top: 12px;
+        padding-top: 20px;
         spacing: 12px;
-        SectionTitle { text: @tr("Appears on"); }
+        SectionTitle { text: @tr("Also appears on"); }
         AlbumFlow { albums: App.ar-appears; playing-album: App.album-id; }
     }
 }
@@ -764,8 +858,9 @@ export component PlaylistPage inherits PageScroll {
         padding-bottom: 16px;
         spacing: 12px;
         alignment: start;
-        PlayButton { clicked => { App.playlist-play(App.pl-id, false); } }
-        IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 22px; icon: Icons.shuffle; tooltip: @tr("Shuffle"); clicked => { App.playlist-play(App.pl-id, true); } }
+        Button { primary: true; icon: Icons.play-fill; text: @tr("Play"); clicked => { App.playlist-play(App.pl-id, false); } }
+        Button { icon: Icons.shuffle; text: @tr("Shuffle"); clicked => { App.playlist-play(App.pl-id, true); } }
+        Rectangle { width: 6px; }
         IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 20px; icon: Icons.pencil; tooltip: @tr("Rename"); clicked => { root.rename(); } }
         IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 20px; icon: Icons.upload; tooltip: @tr("Export as M3U"); clicked => { App.playlist-export(App.pl-id); } }
         IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 20px; icon: Icons.trash; tooltip: @tr("Delete playlist"); clicked => { root.delete(); } }

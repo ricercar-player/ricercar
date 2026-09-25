@@ -17,6 +17,7 @@ export global TrackMenu {
 
 export component TrackHeader inherits Rectangle {
     in property <bool> show-album: true;
+    in property <bool> show-format: true;
     in property <bool> show-cover;
     in property <bool> show-plays;
     height: 34px;
@@ -29,8 +30,9 @@ export component TrackHeader inherits Rectangle {
         Text { horizontal-stretch: 3; min-width: 0px; preferred-width: 0px; text: @tr("Title"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
         if show-album: Text { horizontal-stretch: 2; min-width: 0px; preferred-width: 0px; text: @tr("Album"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
         if show-plays: Text { width: 56px; text: @tr("Plays"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: right; }
+        if show-format: Text { width: 92px; text: @tr("Format"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
         Rectangle { width: 30px; }
-        Icon { y: (parent.height - self.height) / 2; width: 44px; size: 15px; source: Icons.clock; tint: Theme.text3; }
+        Text { width: 44px; text: @tr("Length"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: right; }
         Rectangle { width: 30px; }
     }
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
@@ -38,6 +40,7 @@ export component TrackHeader inherits Rectangle {
 
 export component TrackLine inherits Rectangle {
     in property <TrackRow> item;
+    in property <bool> show-format: true;
     in property <int> index;
     in property <string> list;
     in property <bool> show-album: true;
@@ -113,20 +116,11 @@ export component TrackLine inherits Rectangle {
                 color: item.playing ? Theme.accent : Theme.text;
                 overflow: elide;
             }
-            if (show-artist && item.artist != "") || (item.hires && show-album): HorizontalLayout {
-                spacing: 6px;
-                if item.hires && show-album: Badge {
-                    y: (parent.height - self.height) / 2;
-                    text: item.fmt;
-                    tint: Theme.text3;
-                }
-                if show-artist && item.artist != "": Text {
-                    text: item.artist;
-                    font-size: Theme.fs-sm;
-                    color: Theme.text2;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                }
+            if show-artist && item.artist != "": Text {
+                text: item.artist;
+                font-size: Theme.fs-sm;
+                color: Theme.text2;
+                overflow: elide;
             }
         }
         if show-album: Text {
@@ -150,6 +144,14 @@ export component TrackLine inherits Rectangle {
             color: Theme.text2;
             vertical-alignment: center;
             horizontal-alignment: right;
+        }
+        if show-format: Text {
+            width: 92px;
+            text: item.fmt;
+            font-size: Theme.fs-sm;
+            font-weight: item.hires ? 600 : 400;
+            color: item.hires ? Theme.hires : Theme.text3;
+            vertical-alignment: center;
         }
         Rectangle {
             width: 30px;
@@ -191,6 +193,7 @@ export component TrackLine inherits Rectangle {
 /// Non-virtualized table (album/playlist pages live inside a scrolling page).
 export component TrackTable inherits VerticalLayout {
     in property <[TrackRow]> rows;
+    in property <bool> show-format: true;
     in property <string> list;
     in property <bool> show-album: true;
     in property <bool> show-cover;
@@ -200,6 +203,7 @@ export component TrackTable inherits VerticalLayout {
     in property <int> limit: 100000;
     spacing: 0;
     if header: TrackHeader {
+        show-format: root.show-format;
         show-album: root.show-album;
         show-cover: root.show-cover;
         show-plays: root.show-plays;
@@ -218,6 +222,7 @@ export component TrackTable inherits VerticalLayout {
             item: row;
             index: i;
             list: root.list;
+            show-format: root.show-format;
             show-album: root.show-album;
             show-cover: root.show-cover;
             show-plays: root.show-plays;

@@ -166,13 +166,13 @@ export component MainWindow inherits Window {
 
         if App.now-playing-open: NowPlayingView {
             y: 0;
-            height: parent.height - 88px;
+            height: parent.height - 100px;
             close => { App.now-playing-open = false; }
         }
 
         if chain-open: Rectangle {
             y: 0;
-            height: parent.height - 88px;
+            height: parent.height - 100px;
             TouchArea { clicked => { chain-open = false; } }
             ChainPanel {
                 x: min(chain-x, root.width - self.width - 12px);
@@ -194,7 +194,7 @@ export component MainWindow inherits Window {
 
         Toast {
             x: (parent.width - self.width) / 2;
-            y: toast-shown ? parent.height - 88px - self.height - 16px : parent.height;
+            y: toast-shown ? parent.height - 100px - self.height - 16px : parent.height;
             opacity: toast-shown ? 1 : 0;
             text: App.toast;
             error: App.toast-error;

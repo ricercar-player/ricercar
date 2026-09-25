@@ -601,8 +601,16 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
                 fav: t.favorite,
                 playing: now.as_deref() == Some(t.path.as_str()),
                 hires: t.is_hires(),
-                fmt: crate::text::quality(t.sample_rate, t.bits, t.codec.as_deref(), t.bitrate)
-                    .into(),
+                fmt: {
+                    let q =
+                        crate::text::quality(t.sample_rate, t.bits, t.codec.as_deref(), t.bitrate);
+                    match t.codec.as_deref() {
+                        Some(c) if !q.is_empty() => format!("{c} {q}"),
+                        Some(c) => c.to_string(),
+                        None => q,
+                    }
+                }
+                .into(),
                 disc: disc.into(),
                 cover,
                 ckey: ckey.into(),

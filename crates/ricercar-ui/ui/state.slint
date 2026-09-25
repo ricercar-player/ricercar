@@ -141,6 +141,8 @@ export global App {
     in property <bool> bitperfect;
     in property <bool> chain-known;
     in property <[ChainHop]> chain;
+    // compact hops for the player bar: FLAC 24/96 → S24_LE → hw:1,0
+    in property <[ChainHop]> chain-short;
     in property <string> device-label;
     in property <string> origin; // "", "UPnP", "Radio"
     in property <string> context-label;

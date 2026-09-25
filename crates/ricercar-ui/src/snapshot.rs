@@ -167,6 +167,10 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            "home-playing",
+            (1500, Box::new(|ui| ui.navigate(Page::Home, "", true))),
+        ),
+        (
             "albums",
             (1200, Box::new(|ui| ui.navigate(Page::Albums, "", true))),
         ),

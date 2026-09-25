@@ -468,6 +468,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         app.set_quality("".into());
         app.set_codec("".into());
         app.set_chain(ModelRc::default());
+        app.set_chain_short(ModelRc::default());
         app.set_chain_known(false);
         return;
     };
@@ -561,6 +562,49 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         state: dev_state,
     });
     app.set_chain(ModelRc::new(VecModel::from(hops)));
+
+    // Compact form for the player bar: FLAC 24/96 → Vol 73 % → S24_LE → hw:1,0
+    let mut short = vec![ChainHop {
+        label: "".into(),
+        value: match info.codec.as_deref() {
+            Some(c) => format!("{c} {}", app.get_quality()),
+            None => app.get_quality().to_string(),
+        }
+        .trim()
+        .to_string()
+        .into(),
+        state: if lossy { 1 } else { 0 },
+    }];
+    if gain_touch {
+        short.push(ChainHop {
+            label: "".into(),
+            value: if st.muted {
+                t("Muted").to_string()
+            } else if st.volume < 100 {
+                format!("{} %", st.volume)
+            } else {
+                "ReplayGain".to_string()
+            }
+            .into(),
+            state: 1,
+        });
+    }
+    if fmt.is_some() {
+        short.push(ChainHop {
+            label: "".into(),
+            value: c.container.unwrap_or("?").into(),
+            state: 0,
+        });
+    }
+    short.push(ChainHop {
+        label: "".into(),
+        value: match c.device_kind {
+            DeviceKind::Null => t("Null sink").into(),
+            _ => c.device.clone().into(),
+        },
+        state: dev_state,
+    });
+    app.set_chain_short(ModelRc::new(VecModel::from(short)));
 }
 
 fn rebuild_queue(ui: &Rc<Ui>, st: &CtlState) {

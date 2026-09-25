@@ -160,6 +160,14 @@ msgctxt "TrackHeader"
 msgid "Plays"
 msgstr "Écoutes"
 
+msgctxt "TrackHeader"
+msgid "Format"
+msgstr "Format"
+
+msgctxt "TrackHeader"
+msgid "Length"
+msgstr "Durée"
+
 msgctxt "TrackLine"
 msgid "Favorite"
 msgstr "Favori"
@@ -536,7 +544,7 @@ msgstr "Fermer"
 
 msgctxt "ContextMenu"
 msgid "Play"
-msgstr "Lire"
+msgstr "Lecture"
 
 msgctxt "ContextMenu"
 msgid "Shuffle"
@@ -598,6 +606,86 @@ msgctxt "TopBar"
 msgid "Forward"
 msgstr "Suivant"
 
+msgctxt "ActionBar"
+msgid "Pause"
+msgstr "Pause"
+
+msgctxt "ActionBar"
+msgid "Play"
+msgstr "Lecture"
+
+msgctxt "ActionBar"
+msgid "Shuffle"
+msgstr "Aléatoire"
+
+msgctxt "ActionBar"
+msgid "Favorite"
+msgstr "Favori"
+
+msgctxt "ActionBar"
+msgid "Add to queue"
+msgstr "Ajouter à la file"
+
+msgctxt "ActionBar"
+msgid "More"
+msgstr "Plus"
+
+msgctxt "ListeningHero"
+msgid "Pause"
+msgstr "Pause"
+
+msgctxt "ListeningHero"
+msgid "Play"
+msgstr "Lecture"
+
+msgctxt "HomePage"
+msgid "Home"
+msgstr "Accueil"
+
+msgctxt "HomePage"
+msgid "Now playing"
+msgstr "En cours de lecture"
+
+msgctxt "HomePage"
+msgid "Paused"
+msgstr "En pause"
+
+msgctxt "HomePage"
+msgid "bit-perfect"
+msgstr "bit-perfect"
+
+msgctxt "HomePage"
+msgid "Open album"
+msgstr "Ouvrir l'album"
+
+msgctxt "HomePage"
+msgid "Lyrics"
+msgstr "Paroles"
+
+msgctxt "HomePage"
+msgid "Pick up where you left off"
+msgstr "Reprendre là où vous en étiez"
+
+msgctxt "HomePage"
+msgid "albums"
+msgstr "albums"
+
+msgctxt "HomePage"
+msgid "artists"
+msgstr "artistes"
+
+msgctxt "HomePage"
+msgid "tracks"
+msgstr "titres"
+
+msgctxt "HomePage"
+msgid "hi-res tracks"
+msgstr "titres hi-res"
+
+msgctxt "HomePage"
+msgid "of music"
+msgstr "de musique"
+
 msgctxt "HomePage"
 msgid "Shuffle library"
 msgstr "Toute la bibliothèque en aléatoire"
@@ -639,32 +727,12 @@ msgid "Show all"
 msgstr "Tout afficher"
 
 msgctxt "HomePage"
-msgid "On repeat"
-msgstr "En boucle"
+msgid "Most played"
+msgstr "Les plus écoutés"
 
 msgctxt "HomePage"
 msgid "Most played albums"
 msgstr "Albums les plus écoutés"
-
-msgctxt "HomePage"
-msgid "albums"
-msgstr "albums"
-
-msgctxt "HomePage"
-msgid "artists"
-msgstr "artistes"
-
-msgctxt "HomePage"
-msgid "tracks"
-msgstr "titres"
-
-msgctxt "HomePage"
-msgid "hi-res tracks"
-msgstr "titres hi-res"
-
-msgctxt "HomePage"
-msgid "of music"
-msgstr "de musique"
 
 msgctxt "AlbumsPage"
 msgid "Albums"
@@ -713,22 +781,6 @@ msgstr[0] "{n} titre"
 msgstr[1] "{n} titres"
 
 msgctxt "AlbumPage"
-msgid "Shuffle"
-msgstr "Aléatoire"
-
-msgctxt "AlbumPage"
-msgid "Favorite"
-msgstr "Favori"
-
-msgctxt "AlbumPage"
-msgid "Add to queue"
-msgstr "Ajouter à la file"
-
-msgctxt "AlbumPage"
-msgid "More"
-msgstr "Plus"
-
-msgctxt "AlbumPage"
 msgid "More by {}"
 msgstr "Plus de {}"
 
@@ -759,20 +811,16 @@ msgstr[0] "{n} titre"
 msgstr[1] "{n} titres"
 
 msgctxt "ArtistPage"
-msgid "Shuffle"
-msgstr "Aléatoire"
+msgid "Discography"
+msgstr "Discographie"
 
 msgctxt "ArtistPage"
-msgid "Popular"
-msgstr "Populaires"
+msgid "Most played"
+msgstr "Les plus écoutés"
 
 msgctxt "ArtistPage"
-msgid "Albums"
-msgstr "Albums"
-
-msgctxt "ArtistPage"
-msgid "Appears on"
-msgstr "Apparaît sur"
+msgid "Also appears on"
+msgstr "Apparaît aussi sur"
 
 msgctxt "TracksPage"
 msgid "Tracks"
@@ -830,7 +878,7 @@ msgstr "Favoris"
 
 msgctxt "FavoritesPage"
 msgid "Play"
-msgstr "Lire"
+msgstr "Lecture"
 
 msgctxt "FavoritesPage"
 msgid "Nothing here yet"
@@ -853,6 +901,10 @@ msgid "{n} track"
 msgid_plural "{n} tracks"
 msgstr[0] "{n} titre"
 msgstr[1] "{n} titres"
+
+msgctxt "PlaylistPage"
+msgid "Play"
+msgstr "Lecture"
 
 msgctxt "PlaylistPage"
 msgid "Shuffle"

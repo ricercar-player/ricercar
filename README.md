@@ -34,9 +34,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   ALSA device at its native rate and bit depth: no mixer, no resampling, no
   volume maths. A format the DAC can't take is refused, never quietly
   converted.
-- **It shows the signal path instead of just claiming bit-perfect.** One
-  click on the format badge shows each hop from file to DAC and flags
-  anything that changes the samples.
+- **It shows the signal path instead of just claiming bit-perfect.** The
+  chain (source → processing → output format → DAC) sits under the seek bar
+  at all times; one click opens every hop and flags anything that changes
+  the samples.
 - **It is a real desktop app.** Album grid, artist pages, synced lyrics,
   queue, playlists, radio and search, native and fast, with no webview and no
   Electron.
@@ -72,7 +73,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Fast incremental indexing with a folder watcher
 - Instant accent-insensitive search (`bjork` finds Björk)
 - Albums, artists (with "appears on"), genres, all tracks
-- Favorites, play counts, history, "on repeat"
+- Favorites, play counts, history, most played
 - Playlists with M3U / M3U8 import & export
 - Covers: embedded, folder images, or Cover Art Archive
 - Synced lyrics from `.lrc` files, tags or lrclib.net
@@ -83,7 +84,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 <td valign="top">
 
 ### Desktop app
-- Home with recently played, recently added and most played
+- Listening header: what plays, and how it reaches the DAC
+- Format column on every track list (hi-res in gold)
 - Full-screen now playing with synced, clickable lyrics
 - Colours that follow the playing album cover
 - Queue drawer with drag-to-reorder, context menus everywhere
@@ -113,7 +115,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 <td><img src="docs/screenshots/albums.jpg" alt="Album grid"></td>
 </tr>
 <tr>
-<td align="center"><sub><b>Home</b>: recently played, recently added, on repeat</sub></td>
+<td align="center"><sub><b>Home</b>: what is playing and how it reaches the DAC</sub></td>
 <td align="center"><sub><b>Albums</b>: responsive grid with hi-res badges</sub></td>
 </tr>
 <tr>
@@ -212,7 +214,8 @@ Desktop integration: copy `dist/ricercar.desktop` to
 2. Pick your DAC in **Settings → Audio output**. `hw:` devices are marked
    **BIT-PERFECT**; `default` / `pipewire` are marked **SHARED** (they go
    through the system mixer).
-3. Press play. The green dot on the format badge means bit-perfect.
+3. Press play. The green dot on the chain line under the seek bar means
+   bit-perfect.
 
 ```sh
 ./target/release/ricercar --print-devices   # list outputs
@@ -425,7 +428,7 @@ and your account, on safe ground.
 <details>
 <summary><b>Why is my track "altered" and not bit-perfect?</b></summary>
 
-Open the signal-path view (click the format badge in the player bar). Common
+Open the signal-path view (click the chain line under the seek bar). Common
 causes: volume below 100 %, ReplayGain enabled, mute, or a shared output
 (`default`, `pipewire`, `pulse`) instead of a `hw:` device.
 </details>

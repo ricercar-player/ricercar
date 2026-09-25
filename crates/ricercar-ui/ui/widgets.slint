@@ -391,6 +391,21 @@ export component TextField inherits Rectangle {
     }
 }
 
+/// Animated "now playing" equalizer glyph for the current row.
+export component NowBars inherits Rectangle {
+    in property <bool> animated;
+    width: 14px;
+    height: 14px;
+    for i in 3: Rectangle {
+        x: i * 5px;
+        width: 3px;
+        border-radius: 1px;
+        background: Theme.accent;
+        height: animated ? (parent.height * (0.35 + 0.65 * abs(sin((animation-tick() / 1ms * (0.004 + i * 0.0017) + i * 1.3) * 1rad)))) : parent.height * (0.4 + i * 0.2);
+        y: parent.height - self.height;
+    }
+}
+
 /// Square album tile: cover, title, artist; play button on hover.
 export component AlbumTile inherits Rectangle {
     in property <image> cover;
@@ -411,6 +426,7 @@ export component AlbumTile inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.open(); }
+        double-clicked => { root.play(); }
         pointer-event(e) => {
             if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
                 root.menu(self.mouse-x, self.mouse-y);
@@ -439,27 +455,15 @@ export component AlbumTile inherits Rectangle {
                 tint: #f0cf8a;
             }
         }
-        Rectangle {
-            opacity: ta.has-hover || play-ta.has-hover || (root.current && root.playing) ? 1 : 0;
-            animate opacity { duration: Theme.quick; }
-            x: parent.width - self.width - 10px;
-            y: parent.height - self.height - 10px;
-            width: 44px;
-            height: 44px;
-            border-radius: 22px;
-            background: play-ta.pressed ? Theme.accent.darker(0.15) : Theme.accent;
-            drop-shadow-blur: 10px;
-            drop-shadow-color: #00000080;
-            Icon {
-                x: (parent.width - self.width) / 2 + (root.current && root.playing ? 0 : 1px);
-                source: root.current && root.playing ? Icons.pause-fill : Icons.play-fill;
-                size: 18px;
-                tint: Theme.on-accent;
-            }
-            play-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.play(); }
-            }
+        // The album that is playing wears a small "on air" chip.
+        if root.current: Rectangle {
+            x: 8px;
+            y: parent.height - self.height - 8px;
+            width: 30px;
+            height: 26px;
+            border-radius: 6px;
+            background: #000000b0;
+            NowBars { animated: root.playing; }
         }
     }
     Text {
@@ -537,20 +541,5 @@ export component ArtistTile inherits Rectangle {
             horizontal-alignment: center;
             overflow: elide;
         }
-    }
-}
-
-/// Animated "now playing" equalizer glyph for the current row.
-export component NowBars inherits Rectangle {
-    in property <bool> animated;
-    width: 14px;
-    height: 14px;
-    for i in 3: Rectangle {
-        x: i * 5px;
-        width: 3px;
-        border-radius: 1px;
-        background: Theme.accent;
-        height: animated ? (parent.height * (0.35 + 0.65 * abs(sin((animation-tick() / 1ms * (0.004 + i * 0.0017) + i * 1.3) * 1rad)))) : parent.height * (0.4 + i * 0.2);
-        y: parent.height - self.height;
     }
 }

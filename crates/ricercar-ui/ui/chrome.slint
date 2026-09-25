@@ -201,40 +201,6 @@ export component Sidebar inherits Rectangle {
     Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
 }
 
-component QualityChip inherits Rectangle {
-    callback clicked();
-    height: 24px;
-    width: lay.preferred-width;
-    border-radius: 12px;
-    background: ta.has-hover ? Theme.selected : Theme.hover;
-    animate background { duration: Theme.quick; }
-    accessible-role: button;
-    accessible-label: App.bitperfect ? "Bit-perfect " + App.quality : App.quality;
-    lay := HorizontalLayout {
-        padding-left: 9px;
-        padding-right: 10px;
-        spacing: 6px;
-        Rectangle {
-            y: (parent.height - self.height) / 2;
-            width: 7px;
-            height: 7px;
-            border-radius: 3.5px;
-            background: !App.chain-known ? Theme.text3 : App.bitperfect ? Theme.good : Theme.warn;
-        }
-        Text {
-            text: App.codec == "" ? App.quality : App.codec + " " + App.quality;
-            font-size: Theme.fs-xs;
-            font-weight: 700;
-            color: App.hires ? Theme.text : Theme.text2;
-            vertical-alignment: center;
-        }
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
 /// Signal path popover content: source → decoder → container → device.
 export component ChainPanel inherits Rectangle {
     width: 330px;
@@ -321,7 +287,7 @@ component VolumeControl inherits HorizontalLayout {
 
 export component PlayerBar inherits Rectangle {
     callback show-chain(length, length);
-    height: 88px;
+    height: 100px;
     background: Theme.panel;
     Rectangle { height: 1px; y: 0; background: Theme.line; }
     private property <int> shown-pos: App.pos-ms;
@@ -492,6 +458,47 @@ export component PlayerBar inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
+            // The signal path, always in view: source → processing → format → device.
+            if App.has-track && App.chain-short.length > 0: HorizontalLayout {
+                alignment: center;
+                chain := Rectangle {
+                    height: 20px;
+                    width: chain-row.preferred-width + 16px;
+                    border-radius: 10px;
+                    background: chain-ta.has-hover ? Theme.hover : transparent;
+                    chain-row := HorizontalLayout {
+                        x: 8px;
+                        spacing: 6px;
+                        Rectangle {
+                            y: (parent.height - self.height) / 2;
+                            width: 7px;
+                            height: 7px;
+                            border-radius: 3.5px;
+                            background: !App.chain-known ? Theme.text3 : App.bitperfect ? Theme.good : Theme.warn;
+                        }
+                        for hop[i] in App.chain-short: HorizontalLayout {
+                            spacing: 6px;
+                            if i > 0: Icon {
+                                y: (parent.height - self.height) / 2;
+                                source: Icons.chevron-right;
+                                size: 11px;
+                                tint: Theme.text3;
+                            }
+                            Text {
+                                text: hop.value;
+                                font-size: Theme.fs-xs;
+                                font-weight: i == 0 ? 700 : 500;
+                                color: hop.state == 1 ? Theme.warn : i == 0 ? Theme.text : Theme.text2;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    chain-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.show-chain(chain.absolute-position.x, chain.absolute-position.y); }
+                    }
+                }
+            }
         }
         // ---- tools
         HorizontalLayout {
@@ -500,10 +507,6 @@ export component PlayerBar inherits Rectangle {
             horizontal-stretch: 1;
             alignment: end;
             spacing: 6px;
-            if App.has-track && App.quality != "": qc := QualityChip {
-                y: (parent.height - self.height) / 2;
-                clicked => { root.show-chain(self.absolute-position.x, self.absolute-position.y); }
-            }
             IconButton {
                 y: (parent.height - self.height) / 2;
                 icon: Icons.mic-vocal;
