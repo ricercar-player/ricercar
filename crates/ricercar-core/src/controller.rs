@@ -588,6 +588,37 @@ impl Controller {
         }
     }
 
+    /// Insert items right after the queue item `after_id` (`0` = at the
+    /// front) without starting playback (OpenHome `Playlist.Insert`).
+    /// Returns the new item ids, or `None` when `after_id` is not queued.
+    pub fn insert_after(&self, after_id: u64, infos: Vec<TrackInfo>) -> Option<Vec<u64>> {
+        let items = self.new_items(infos);
+        let ids: Vec<u64> = items.iter().map(|q| q.id).collect();
+        {
+            let mut st = self.lock();
+            let pos = if after_id == 0 {
+                0
+            } else {
+                st.queue.iter().position(|q| q.id == after_id)? + 1
+            };
+            if items.is_empty() {
+                return Some(ids);
+            }
+            let n = items.len();
+            st.queue.splice(pos..pos, items);
+            if let Some(cur) = st.current
+                && pos <= cur
+            {
+                st.current = Some(cur + n);
+            }
+            st.origin = Origin::Local;
+            st.queue_rev += 1;
+        }
+        self.events.publish(CtlEvent::QueueChanged);
+        self.bridge().rearm();
+        Some(ids)
+    }
+
     pub fn play_index(&self, i: usize) {
         {
             let mut st = self.lock();
@@ -1260,6 +1291,28 @@ mod tests {
             titles(&c),
             (1..=30).map(|n| format!("t{n}")).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn insert_after_positions_and_keeps_current() {
+        let c = ctl();
+        // Into an empty queue: nothing is selected, nothing starts.
+        let a = c.insert_after(0, vec![info(1)]).unwrap();
+        assert_eq!(c.lock().current, None);
+        let b = c.insert_after(a[0], vec![info(2), info(3)]).unwrap();
+        assert_eq!(b.len(), 2);
+        assert_eq!(titles(&c), ["t1", "t2", "t3"]);
+        c.lock().current = Some(1);
+        // Before the current item: current follows its item.
+        let f = c.insert_after(0, vec![info(0)]).unwrap();
+        assert_eq!(titles(&c), ["t0", "t1", "t2", "t3"]);
+        assert_eq!(c.lock().current_item().unwrap().info.title, "t2");
+        c.insert_after(b[1], vec![info(4)]).unwrap();
+        assert_eq!(titles(&c), ["t0", "t1", "t2", "t3", "t4"]);
+        assert_eq!(c.lock().queue[0].id, f[0]);
+        assert!(c.insert_after(9_999, vec![info(5)]).is_none());
+        assert_eq!(c.lock().queue.len(), 5);
+        assert_eq!(c.lock().status, TransportStatus::Stopped);
     }
 
     #[test]

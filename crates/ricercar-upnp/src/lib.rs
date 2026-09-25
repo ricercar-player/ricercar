@@ -1,46 +1,340 @@
-//! ricercar-upnp — a UPnP AV MediaRenderer built on ricercar's engine.
+//! ricercar-upnp — UPnP AV MediaRenderer + OpenHome renderer + MediaServer
+//! built on ricercar's engine.
 //!
-//! The device advertises itself over SSDP, serves descriptions over HTTP,
-//! and maps AVTransport / RenderingControl / ConnectionManager actions onto
-//! the local Controller. Queue state lives in the engine (the renderer owns
-//! the play queue, control points only feed it URIs).
+//! One HTTP server hosts two root devices:
+//! - a MediaRenderer carrying the UPnP AV services (AVTransport,
+//!   RenderingControl, ConnectionManager) and the OpenHome services
+//!   (Product, Playlist, Info, Time, Volume) — both views of the same
+//!   Controller queue;
+//! - a MediaServer (ContentDirectory) browsing the local library.
+//!
+//! GENA eventing is driven by Controller events (plus a 1 s tick for the
+//! playback position and library revision).
 
+mod avt;
+mod cds;
 pub mod desc;
 mod didl;
 mod events;
 mod http;
+mod media;
+mod notify;
+mod openhome;
 mod soap;
 mod ssdp;
+mod xml;
 
 use std::collections::HashMap;
-use std::io::Write;
-use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use ricercar_audio::PcmFormat;
 use ricercar_audio::player::TransportStatus;
-use ricercar_core::Controller;
+use ricercar_core::covers::CoverCache;
+use ricercar_core::{Controller, QueueItem, Repeat, TrackInfo};
 
 use events::Subscribers;
+use soap::{Args, Reply};
 
 /// Exposed for tests and UI integration.
 pub fn xml_escape_pub(s: &str) -> String {
-    desc::xml_escape(s)
+    xml::escape(s)
 }
 
-const CD_NS: &str = "urn:schemas-upnp-org:service:ContentDirectory:1";
-const AVT_NS: &str = "urn:schemas-upnp-org:service:AVTransport:1";
-const RCS_NS: &str = "urn:schemas-upnp-org:service:RenderingControl:1";
-const CMS_NS: &str = "urn:schemas-upnp-org:service:ConnectionManager:1";
+/// Concurrent HTTP connections; more are answered 503 and closed.
+const MAX_CONNS: usize = 64;
 
+/// Every service we host (renderer and server devices).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum Svc {
+    Avt,
+    Rcs,
+    Cms,
+    ServerCms,
+    Cd,
+    OhProduct,
+    OhPlaylist,
+    OhInfo,
+    OhTime,
+    OhVolume,
+}
+
+impl Svc {
+    pub const ALL: [Svc; 10] = [
+        Svc::Avt,
+        Svc::Rcs,
+        Svc::Cms,
+        Svc::ServerCms,
+        Svc::Cd,
+        Svc::OhProduct,
+        Svc::OhPlaylist,
+        Svc::OhInfo,
+        Svc::OhTime,
+        Svc::OhVolume,
+    ];
+
+    pub fn path(self) -> &'static str {
+        match self {
+            Svc::Avt => "avt",
+            Svc::Rcs => "rcs",
+            Svc::Cms => "cms",
+            Svc::ServerCms => "scms",
+            Svc::Cd => "cd",
+            Svc::OhProduct => "ohproduct",
+            Svc::OhPlaylist => "ohplaylist",
+            Svc::OhInfo => "ohinfo",
+            Svc::OhTime => "ohtime",
+            Svc::OhVolume => "ohvolume",
+        }
+    }
+
+    pub fn from_path(p: &str) -> Option<Svc> {
+        Svc::ALL.into_iter().find(|s| s.path() == p)
+    }
+
+    pub fn urn(self) -> &'static str {
+        match self {
+            Svc::Avt => "urn:schemas-upnp-org:service:AVTransport:1",
+            Svc::Rcs => "urn:schemas-upnp-org:service:RenderingControl:1",
+            Svc::Cms | Svc::ServerCms => "urn:schemas-upnp-org:service:ConnectionManager:1",
+            Svc::Cd => "urn:schemas-upnp-org:service:ContentDirectory:1",
+            Svc::OhProduct => "urn:av-openhome-org:service:Product:1",
+            Svc::OhPlaylist => "urn:av-openhome-org:service:Playlist:1",
+            Svc::OhInfo => "urn:av-openhome-org:service:Info:1",
+            Svc::OhTime => "urn:av-openhome-org:service:Time:1",
+            Svc::OhVolume => "urn:av-openhome-org:service:Volume:1",
+        }
+    }
+
+    pub fn service_id(self) -> &'static str {
+        match self {
+            Svc::Avt => "urn:upnp-org:serviceId:AVTransport",
+            Svc::Rcs => "urn:upnp-org:serviceId:RenderingControl",
+            Svc::Cms | Svc::ServerCms => "urn:upnp-org:serviceId:ConnectionManager",
+            Svc::Cd => "urn:upnp-org:serviceId:ContentDirectory",
+            Svc::OhProduct => "urn:av-openhome-org:serviceId:Product",
+            Svc::OhPlaylist => "urn:av-openhome-org:serviceId:Playlist",
+            Svc::OhInfo => "urn:av-openhome-org:serviceId:Info",
+            Svc::OhTime => "urn:av-openhome-org:serviceId:Time",
+            Svc::OhVolume => "urn:av-openhome-org:serviceId:Volume",
+        }
+    }
+
+    fn index(self) -> usize {
+        Svc::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    }
+}
+
+/// Wake-ups for the event thread.
+pub(crate) enum Wake {
+    /// A Controller event: the services it may affect, and whether the
+    /// queue itself changed.
+    Ctl(&'static [Svc], bool),
+    /// State kept in this crate changed (stored metadata, standby…).
+    Dirty,
+    /// Send the initial event to a new subscriber.
+    NewSub(Svc, String),
+}
+
+/// OpenHome Info counters.
 #[derive(Default)]
-struct Inner {
-    current_uri: Option<String>,
-    next_uri: Option<String>,
-    meta_raw: HashMap<String, String>,
-    mute: bool,
-    vol_before_mute: u32,
+pub(crate) struct Counters {
+    pub track: u32,
+    pub details: u32,
+    pub metatext: u32,
+    last_track: Option<(u64, String)>,
+    last_details: Vec<String>,
+    last_metatext: String,
+}
+
+/// A consistent copy of the controller state for one computation.
+pub(crate) struct Snap {
+    pub status: TransportStatus,
+    pub ids: Vec<u64>,
+    pub current: Option<usize>,
+    pub cur: Option<QueueItem>,
+    pub next: Option<QueueItem>,
+    pub pos_ms: u64,
+    pub dur_ms: u64,
+    pub total_ms: u64,
+    pub volume: u32,
+    pub muted: bool,
+    pub shuffle: bool,
+    pub repeat: Repeat,
+    pub format: Option<PcmFormat>,
+    pub stream_title: Option<String>,
+    pub queue_rev: u64,
+}
+
+pub(crate) struct Renderer {
+    pub ctl: Arc<Controller>,
+    pub name: String,
+    udn: String,
+    server_udn: String,
+    /// `ip:port` used in URLs we emit outside of a request (events).
+    pub default_host: String,
+    subs: Vec<Subscribers>,
+    /// Raw DIDL-Lite supplied by control points, by queue item id.
+    meta: Mutex<HashMap<u64, String>>,
+    pub counters: Mutex<Counters>,
+    wake: Mutex<Option<Sender<Wake>>>,
+    pub standby: AtomicBool,
+    covers: OnceLock<Option<CoverCache>>,
+    active_conns: AtomicUsize,
+}
+
+impl Renderer {
+    pub fn subs(&self, svc: Svc) -> &Subscribers {
+        &self.subs[svc.index()]
+    }
+
+    pub fn wake(&self, w: Wake) {
+        if let Some(tx) = self.wake.lock().unwrap().as_ref() {
+            let _ = tx.send(w);
+        }
+    }
+
+    pub fn covers(&self) -> Option<&CoverCache> {
+        self.covers
+            .get_or_init(|| Some(CoverCache::new(CoverCache::default_dir())))
+            .as_ref()
+    }
+
+    pub fn snap(&self) -> Snap {
+        let st = self.ctl.lock();
+        let cur = st.current_item().cloned();
+        let next = st.current.and_then(|i| {
+            st.queue.get(i + 1).cloned().or_else(|| {
+                (st.repeat == Repeat::All)
+                    .then(|| st.queue.first().cloned())
+                    .flatten()
+            })
+        });
+        Snap {
+            status: st.status,
+            ids: st.queue.iter().map(|q| q.id).collect(),
+            current: st.current,
+            cur,
+            next,
+            pos_ms: st.pos_ms,
+            dur_ms: st.dur_ms,
+            total_ms: st.queue.iter().map(|q| q.info.duration_ms).sum(),
+            volume: st.volume,
+            muted: st.muted,
+            shuffle: st.shuffle,
+            repeat: st.repeat,
+            format: st.chain.format,
+            stream_title: st.stream_title.clone(),
+            queue_rev: st.queue_rev,
+        }
+    }
+
+    pub fn store_meta(&self, id: u64, didl: &str) {
+        if !didl.trim().is_empty() {
+            self.meta.lock().unwrap().insert(id, didl.to_string());
+        }
+    }
+
+    /// Forget metadata of items no longer queued. The queue is read while
+    /// holding the metadata lock, so an item inserted concurrently (queued
+    /// first, metadata stored second) is never pruned.
+    pub fn prune_meta(&self) {
+        let mut m = self.meta.lock().unwrap();
+        if !m.is_empty() {
+            let keep: std::collections::HashSet<u64> =
+                self.ctl.lock().queue.iter().map(|q| q.id).collect();
+            m.retain(|k, _| keep.contains(k));
+        }
+    }
+
+    /// DIDL-Lite for a queue item: the control point's own blob when it gave
+    /// one, else generated from what we know.
+    pub fn item_meta(&self, item: &QueueItem, base: &str) -> String {
+        if let Some(m) = self.meta.lock().unwrap().get(&item.id) {
+            return m.clone();
+        }
+        let info = &item.info;
+        let local = info
+            .path
+            .as_deref()
+            .filter(|p| self.ctl.lib.has_path(p))
+            .is_some();
+        let (res_url, art) = if local {
+            (
+                media::media_url(base, &info.uri),
+                Some(media::track_art_url(base, &info.uri)),
+            )
+        } else {
+            let art = info
+                .cover
+                .clone()
+                .filter(|c| c.starts_with("http://") || c.starts_with("https://"));
+            (info.uri.clone(), art)
+        };
+        let mime = mime_for(info);
+        didl::ItemXml {
+            id: &oh_id(item.id).to_string(),
+            parent: "0",
+            info,
+            res_url: &res_url,
+            protocol_info: &media::protocol_info(mime),
+            size: None,
+            channels: None,
+            bitrate: None,
+            art_url: art.as_deref(),
+        }
+        .document()
+    }
+
+    /// Advance the OpenHome Info counters to the given state.
+    pub fn update_counters(&self, s: &Snap) -> (u32, u32, u32) {
+        let mut c = self.counters.lock().unwrap();
+        let track = s.cur.as_ref().map(|q| (q.id, q.info.uri.clone()));
+        if track.is_some() && track != c.last_track {
+            c.track = c.track.wrapping_add(1);
+            c.last_track = track;
+        }
+        let details = openhome::details(self, s)
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<_>>();
+        if details != c.last_details {
+            c.details = c.details.wrapping_add(1);
+            c.last_details = details;
+        }
+        let meta = s.stream_title.clone().unwrap_or_default();
+        if meta != c.last_metatext {
+            c.metatext = c.metatext.wrapping_add(1);
+            c.last_metatext = meta;
+        }
+        (c.track, c.details, c.metatext)
+    }
+}
+
+/// MIME for a queue item: its extension, else its codec.
+pub(crate) fn mime_for(info: &TrackInfo) -> &'static str {
+    let from_ext = media::mime_of(info.path.as_deref().unwrap_or(&info.uri));
+    if from_ext != "application/octet-stream" {
+        return from_ext;
+    }
+    match info.codec.as_deref().unwrap_or("") {
+        "FLAC" => "audio/flac",
+        "MP3" => "audio/mpeg",
+        "WAV" => "audio/wav",
+        "AIFF" => "audio/aiff",
+        "AAC" => "audio/aac",
+        "AAC/ALAC" | "ALAC" => "audio/mp4",
+        "Vorbis" | "Opus" => "audio/ogg",
+        _ => "audio/*",
+    }
+}
+
+/// OpenHome ids are ui4: queue ids that don't fit are never exposed.
+pub(crate) fn oh_id(id: u64) -> u32 {
+    u32::try_from(id).unwrap_or(0)
 }
 
 pub struct RendererHandle {
@@ -51,7 +345,20 @@ pub struct RendererHandle {
 
 impl RendererHandle {
     pub fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
+        if !self.stop.swap(true, Ordering::SeqCst) {
+            // Unblock the accept loop.
+            let _ = TcpStream::connect_timeout(
+                &([127, 0, 0, 1], self.port).into(),
+                Duration::from_millis(200),
+            );
+        }
+    }
+}
+
+impl Drop for RendererHandle {
+    fn drop(&mut self) {
+        self.stop();
+        // `_ssdp` drops next and sends ssdp:byebye.
     }
 }
 
@@ -59,22 +366,31 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
     let listener = TcpListener::bind("0.0.0.0:0")?;
     let port = listener.local_addr()?.port();
     let udn = load_or_create_udn();
-    let server_udn = load_or_create_udn_named("udn-server");
+    let mut server_udn = load_or_create_udn_named("udn-server");
+    if server_udn == udn {
+        // Older versions derived both from the same seed: split them.
+        let _ = std::fs::remove_file(config_dir().join("udn-server"));
+        server_udn = load_or_create_udn_named("udn-server");
+    }
     let ip = ssdp::local_ip();
-    let location = format!("http://{ip}:{port}/device.xml");
 
     let stop = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel::<Wake>();
     let renderer = Arc::new(Renderer {
-        controller,
-        inner: RwLock::new(Inner::default()),
-        avt_subs: Subscribers::default(),
-        rcs_subs: Subscribers::default(),
-        cms_subs: Subscribers::default(),
+        ctl: controller.clone(),
         name: name.to_string(),
         udn: udn.clone(),
         server_udn: server_udn.clone(),
-        cd_subs: Subscribers::default(),
+        default_host: format!("{ip}:{port}"),
+        subs: Svc::ALL.iter().map(|_| Subscribers::default()).collect(),
+        meta: Mutex::new(HashMap::new()),
+        counters: Mutex::new(Counters::default()),
+        wake: Mutex::new(Some(tx.clone())),
+        standby: AtomicBool::new(false),
+        covers: OnceLock::new(),
+        active_conns: AtomicUsize::new(0),
     });
+    renderer.update_counters(&renderer.snap());
 
     // HTTP service
     {
@@ -82,73 +398,56 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
         let r = renderer.clone();
         std::thread::Builder::new()
             .name("ricercar-upnp-http".into())
+            .spawn(move || accept_loop(r, listener, stop_h))?;
+    }
+
+    // Controller events → event thread.
+    {
+        let stop_f = stop.clone();
+        let ctl_rx = controller.subscribe();
+        let tx = tx.clone();
+        std::thread::Builder::new()
+            .name("ricercar-upnp-fwd".into())
             .spawn(move || {
-                listener.set_nonblocking(true).unwrap();
-                while !stop_h.load(Ordering::Relaxed) {
-                    match listener.accept() {
-                        Ok((stream, _peer)) => {
-                            let r2 = r.clone();
-                            std::thread::spawn(move || serve_conn(&r2, stream));
+                while !stop_f.load(Ordering::Relaxed) {
+                    match ctl_rx.recv_timeout(Duration::from_millis(500)) {
+                        Ok(ev) => {
+                            let queue = ev == ricercar_core::CtlEvent::QueueChanged;
+                            if tx.send(Wake::Ctl(notify::affected(&ev), queue)).is_err() {
+                                break;
+                            }
                         }
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(30));
-                        }
-                        Err(_) => std::thread::sleep(Duration::from_millis(100)),
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                 }
             })?;
     }
+    drop(tx);
 
-    // event diff loop (status/uri/volume -> LastChange)
     {
         let stop_e = stop.clone();
         let r = renderer.clone();
         std::thread::Builder::new()
             .name("ricercar-upnp-evt".into())
-            .spawn(move || {
-                let mut last = r.snapshot();
-                loop {
-                    if stop_e.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(400));
-                    r.avt_subs.expire();
-                    r.rcs_subs.expire();
-                    r.cms_subs.expire();
-                    r.cd_subs.expire();
-                    let snap = r.snapshot();
-                    if snap != last {
-                        let (state_t, uri, vol, mute) = snap.clone();
-                        if r.avt_subs.count() > 0 {
-                            let body = avt_last_change(
-                                state_t.clone(),
-                                uri.clone(),
-                                r.meta_raw(uri.as_str()),
-                            );
-                            r.avt_subs.notify(&body);
-                        }
-                        if r.rcs_subs.count() > 0 {
-                            let body = rcs_last_change(vol, mute);
-                            r.rcs_subs.notify(&body);
-                        }
-                        last = snap;
-                    }
-                }
-            })?;
+            .spawn(move || notify::event_loop(r, rx, stop_e))?;
     }
 
-    let ssdp = ssdp::Ssdp::start(vec![
-        ssdp::Device {
-            udn,
-            location: location.clone(),
-            kind: ssdp::Kind::Renderer,
-        },
-        ssdp::Device {
-            udn: server_udn,
-            location: format!("http://{ip}:{port}/server.xml"),
-            kind: ssdp::Kind::Server,
-        },
-    ]);
+    let ssdp = ssdp::Ssdp::start(
+        port,
+        vec![
+            ssdp::Device {
+                udn,
+                path: "/device.xml",
+                kind: ssdp::Kind::Renderer,
+            },
+            ssdp::Device {
+                udn: server_udn,
+                path: "/server.xml",
+                kind: ssdp::Kind::Server,
+            },
+        ],
+    );
     if ssdp.is_none() {
         tracing::warn!("SSDP port 1900 unavailable — renderer not discoverable");
     }
@@ -160,544 +459,193 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
     })
 }
 
-struct Renderer {
-    controller: Arc<Controller>,
-    inner: RwLock<Inner>,
-    avt_subs: Subscribers,
-    rcs_subs: Subscribers,
-    cms_subs: Subscribers,
-    name: String,
-    udn: String,
-    server_udn: String,
-    cd_subs: Subscribers,
-}
+struct ConnGuard<'a>(&'a AtomicUsize);
 
-fn fmt_time(ms: u64) -> String {
-    let s = ms / 1000;
-    format!("{:02}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
-}
-
-fn parse_time(t: &str) -> Option<u64> {
-    let mut parts = t.split(':');
-    let h: u64 = parts.next()?.parse().ok()?;
-    let m: u64 = parts.next()?.parse().ok()?;
-    let s: f64 = parts.next()?.parse().ok()?;
-    Some(((h * 3600 + m * 60) as f64 * 1000.0 + s * 1000.0) as u64)
-}
-
-impl Renderer {
-    fn snapshot(&self) -> (String, String, u32, bool) {
-        let st = self.controller.state.lock().unwrap();
-        let transport = match st.status {
-            TransportStatus::Playing => "PLAYING",
-            TransportStatus::Paused => "PAUSED_PLAYBACK",
-            TransportStatus::Stopped => "STOPPED",
-        };
-        let uri = st.current_uri().unwrap_or_default();
-        let mute = self.inner.read().unwrap().mute;
-        (transport.to_string(), uri, st.volume, mute)
+impl Drop for ConnGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
+}
 
-    fn meta_raw(&self, uri: &str) -> String {
-        self.inner
-            .read()
-            .unwrap()
-            .meta_raw
-            .get(uri)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn avt(&self, action: &str, args: Vec<(String, String)>) -> (Option<String>, u16) {
-        let arg = |k: &str| {
-            args.iter()
-                .find(|(a, _)| a == k)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default()
+fn accept_loop(r: Arc<Renderer>, listener: TcpListener, stop: Arc<AtomicBool>) {
+    for conn in listener.incoming() {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        let Ok(mut stream) = conn else {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
         };
-        match action {
-            "SetAVTransportURI" => {
-                let uri = arg("CurrentURI");
-                let meta = arg("CurrentURIMetaData");
-                let info = didl::parse_didl(&uri, &meta);
-                {
-                    let mut inner = self.inner.write().unwrap();
-                    inner.current_uri = Some(uri.clone());
-                    inner.next_uri = None;
-                    if !meta.is_empty() {
-                        inner.meta_raw.insert(uri.clone(), meta);
-                    }
-                }
-                self.controller.set_remote(&uri, info);
-                (None, 200)
-            }
-            "SetNextAVTransportURI" => {
-                let uri = arg("NextURI");
-                let meta = arg("NextURIMetaData");
-                let info = didl::parse_didl(&uri, &meta);
-                {
-                    let mut inner = self.inner.write().unwrap();
-                    inner.next_uri = Some(uri.clone());
-                    if !meta.is_empty() {
-                        inner.meta_raw.insert(uri.clone(), meta);
-                    }
-                }
-                self.controller.remote_next(&uri, info);
-                (None, 200)
-            }
-            "Play" => {
-                let status = self.controller.state.lock().unwrap().status;
-                match status {
-                    TransportStatus::Paused => self.controller.resume(),
-                    TransportStatus::Stopped => {
-                        let uri = self.inner.read().unwrap().current_uri.clone();
-                        match uri {
-                            Some(u) => self.controller.set_remote(&u, None),
-                            None => return (Some(soap::fault(8012, "no media")), 500),
-                        }
-                    }
-                    TransportStatus::Playing => {}
-                }
-                (Some(soap::response_body("Play", AVT_NS, &[])), 200)
-            }
-            "Pause" => {
-                self.controller.pause();
-                (Some(soap::response_body("Pause", AVT_NS, &[])), 200)
-            }
-            "Stop" => {
-                self.controller.stop();
-                let mut inner = self.inner.write().unwrap();
-                inner.current_uri = None;
-                inner.next_uri = None;
-                (Some(soap::response_body("Stop", AVT_NS, &[])), 200)
-            }
-            "Seek" => {
-                let unit = arg("Unit");
-                let target = arg("Target");
-                let ms = parse_time(&target).unwrap_or(0);
-                if unit != "ABS_TIME" && unit != "REL_TIME" {
-                    return (Some(soap::fault(8020, "unsupported seek mode")), 500);
-                }
-                self.controller.seek_ms(ms);
-                (Some(soap::response_body("Seek", AVT_NS, &[])), 200)
-            }
-            "Next" => {
-                self.controller.next();
-                (Some(soap::response_body(action, AVT_NS, &[])), 200)
-            }
-            "Previous" => {
-                self.controller.prev();
-                (Some(soap::response_body(action, AVT_NS, &[])), 200)
-            }
-            "SetPlayMode" | "GetTransportSettings" | "GetCrossfadeMode" => {
-                (Some(soap::response_body(action, AVT_NS, &[])), 200)
-            }
-            "GetTransportInfo" => {
-                let (t, _, _, _) = self.snapshot();
-                (
-                    Some(soap::response_body(
-                        action,
-                        AVT_NS,
-                        &[
-                            ("CurrentTransportState", t.as_str()),
-                            ("CurrentTransportStatus", "OK"),
-                            ("CurrentSpeed", "1"),
-                        ],
-                    )),
-                    200,
-                )
-            }
-            "GetPositionInfo" => {
-                let st = self.controller.state.lock().unwrap();
-                let dur = st.dur_ms;
-                let pos = st.pos_ms;
-                let track = st.current.map(|i| i + 1).unwrap_or(0);
-                let (uri, meta) = st
-                    .current_uri()
-                    .as_ref()
-                    .map(|u| {
-                        (
-                            u.clone(),
-                            self.inner
-                                .read()
-                                .unwrap()
-                                .meta_raw
-                                .get(u)
-                                .cloned()
-                                .unwrap_or_default(),
-                        )
-                    })
-                    .unwrap_or_default();
-                drop(st);
-                (
-                    Some(soap::response_body(
-                        action,
-                        AVT_NS,
-                        &[
-                            ("Track", &track.to_string()),
-                            ("TrackDuration", &fmt_time(dur)),
-                            ("TrackMetaData", meta.as_str()),
-                            ("TrackURI", uri.as_str()),
-                            ("RelTime", &fmt_time(pos)),
-                            ("AbsTime", &fmt_time(pos)),
-                            ("RelCount", "2147483647"),
-                            ("AbsCount", "2147483647"),
-                        ],
-                    )),
-                    200,
-                )
-            }
-            "GetMediaInfo" => {
-                let st = self.controller.state.lock().unwrap();
-                let cur = st.current_uri().unwrap_or_default();
-                let dur = st.dur_ms;
-                drop(st);
-                let next = self
-                    .inner
-                    .read()
-                    .unwrap()
-                    .next_uri
-                    .clone()
-                    .unwrap_or_default();
-                let cur_meta = self.meta_raw(&cur);
-                let next_meta = self.meta_raw(&next);
-                (
-                    Some(soap::response_body(
-                        action,
-                        AVT_NS,
-                        &[
-                            ("NrTracks", "1"),
-                            ("MediaDuration", &fmt_time(dur)),
-                            ("CurrentURI", cur.as_str()),
-                            ("CurrentURIMetaData", cur_meta.as_str()),
-                            ("NextURI", next.as_str()),
-                            ("NextURIMetaData", next_meta.as_str()),
-                            ("PlayMedium", "NETWORK"),
-                            ("RecordMedium", "NOT_IMPLEMENTED"),
-                            ("WriteStatus", "NOT_IMPLEMENTED"),
-                        ],
-                    )),
-                    200,
-                )
-            }
-            "GetDeviceCapabilities" => (
-                Some(soap::response_body(
-                    action,
-                    AVT_NS,
-                    &[
-                        ("PlayMedia", "0:240p"),
-                        ("RecMedia", "NOT_IMPLEMENTED"),
-                        ("RecQualityModes", "NOT_IMPLEMENTED"),
-                    ],
-                )),
-                200,
-            ),
-            "GetCurrentTransportActions" => {
-                let (t, _, _, _) = self.snapshot();
-                let acts = match t.as_str() {
-                    "PLAYING" => "Stop,Pause,Seek,Next,Previous",
-                    "PAUSED_PLAYBACK" => "Play,Stop,Seek,Next,Previous",
-                    _ => "Play",
-                };
-                (
-                    Some(soap::response_body(action, AVT_NS, &[("Actions", acts)])),
-                    200,
-                )
-            }
-            _ => (Some(soap::fault(401, "invalid action")), 500),
+        let _ = stream.set_read_timeout(Some(http::READ_TIMEOUT));
+        let _ = stream.set_write_timeout(Some(http::WRITE_TIMEOUT));
+        if r.active_conns.fetch_add(1, Ordering::SeqCst) >= MAX_CONNS {
+            r.active_conns.fetch_sub(1, Ordering::SeqCst);
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+            http::write_response(&mut stream, 503, "text/plain", b"busy");
+            continue;
+        }
+        let r2 = r.clone();
+        let spawned = std::thread::Builder::new()
+            .name("ricercar-upnp-conn".into())
+            .spawn(move || {
+                let _guard = ConnGuard(&r2.active_conns);
+                serve_conn(&r2, stream);
+            });
+        if spawned.is_err() {
+            r.active_conns.fetch_sub(1, Ordering::SeqCst);
         }
     }
-
-    fn rcs(&self, action: &str, args: Vec<(String, String)>) -> (Option<String>, u16) {
-        let arg = |k: &str| {
-            args.iter()
-                .find(|(a, _)| a == k)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default()
-        };
-        match action {
-            "GetVolume" => {
-                let v = self.controller.state.lock().unwrap().volume;
-                (
-                    Some(soap::response_body(
-                        action,
-                        RCS_NS,
-                        &[("CurrentVolume", &v.to_string())],
-                    )),
-                    200,
-                )
-            }
-            "SetVolume" => {
-                let v = arg("DesiredVolume").parse::<u32>().unwrap_or(100);
-                self.controller.set_volume(v);
-                (Some(soap::response_body(action, RCS_NS, &[])), 200)
-            }
-            "GetMute" => {
-                let m = self.inner.read().unwrap().mute;
-                (
-                    Some(soap::response_body(
-                        action,
-                        RCS_NS,
-                        &[("CurrentMute", &(m as i32).to_string())],
-                    )),
-                    200,
-                )
-            }
-            "SetMute" => {
-                let want_mute = arg("DesiredMute") == "1" || arg("DesiredMute") == "true";
-                let mut inner = self.inner.write().unwrap();
-                if want_mute && !inner.mute {
-                    inner.mute = true;
-                    let v = self.controller.state.lock().unwrap().volume;
-                    inner.vol_before_mute = v;
-                    self.controller.set_volume(0);
-                } else if !want_mute && inner.mute {
-                    inner.mute = false;
-                    let v = std::mem::take(&mut inner.vol_before_mute);
-                    self.controller.set_volume(v);
-                }
-                (Some(soap::response_body(action, RCS_NS, &[])), 200)
-            }
-            _ => (Some(soap::fault(401, "invalid action")), 500),
-        }
-    }
-
-    fn cms(&self, action: &str) -> (Option<String>, u16) {
-        match action {
-            "GetProtocolInfo" => (
-                Some(soap::response_body(
-                    action,
-                    CMS_NS,
-                    &[
-                        ("Source", ""),
-                        (
-                            "Sink",
-                            "http-get:*:flac:*,http-get:*:wav:*,http-get:*:mpeg:*,http-get:*:mp3:*,http-get:*:ogg:*,http-get:*:m4a:*,http-get:*:mp4:*",
-                        ),
-                    ],
-                )),
-                200,
-            ),
-            "GetCurrentConnectionIDs" => (
-                Some(soap::response_body(
-                    action,
-                    CMS_NS,
-                    &[("ConnectionIDs", "0")],
-                )),
-                200,
-            ),
-            "GetCurrentConnectionInfo" => (
-                Some(soap::response_body(
-                    action,
-                    CMS_NS,
-                    &[
-                        ("RcsID", "-1"),
-                        ("AVTransportID", "-1"),
-                        ("ProtocolInfo", ""),
-                        ("PeerConnectionManager", ""),
-                        ("PeerConnectionID", "-1"),
-                        ("Direction", "Input"),
-                        ("Status", "OK"),
-                    ],
-                )),
-                200,
-            ),
-            _ => (Some(soap::fault(401, "invalid action")), 500),
-        }
-    }
+    // Drop the event channel so the event thread ends too.
+    r.wake.lock().unwrap().take();
 }
 
-fn avt_last_change(transport: String, uri: String, meta: String) -> String {
-    format!(
-        "<u:LastChange xmlns:u=\"{AVT_NS}\"><InstanceID u:val=\"0\"><TransportState u:val=\"{transport}\"/><CurrentURI u:val=\"{uri}\"/><CurrentURIMetaData u:val=\"{meta}\"/><TransportStatus u:val=\"OK\"/></InstanceID></u:LastChange>"
-    )
-}
-
-fn rcs_last_change(vol: u32, mute: bool) -> String {
-    format!(
-        "<u:LastChange xmlns:u=\"{RCS_NS}\"><InstanceID u:val=\"0\"><Volume channel=\"Master\" u:val=\"{vol}\"/><Mute channel=\"Master\" u:val=\"{}\"/></InstanceID></u:LastChange>",
-        if mute { 1 } else { 0 }
-    )
-}
-
-fn serve_conn(r: &Renderer, mut stream: std::net::TcpStream) {
-    use http::read_request;
-    let Some(req) = read_request(&mut stream) else {
+fn serve_conn(r: &Renderer, mut stream: TcpStream) {
+    let Some(req) = http::read_request(&mut stream) else {
         return;
     };
-    match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/device.xml") => {
+    let route = req.route().to_string();
+    let method = req.method.as_str();
+    let xml_type = "text/xml; charset=\"utf-8\"";
+    match (method, route.as_str()) {
+        ("GET" | "HEAD", "/device.xml") => {
             let xml = desc::device_xml(&r.name, &r.udn);
-            http::write_response(&mut stream, 200, "OK", "text/xml", xml.as_bytes());
+            http::respond(&mut stream, 200, xml_type, xml.as_bytes(), method == "HEAD");
         }
-        ("GET", "/svc/avt.xml") => http::write_response(
-            &mut stream,
-            200,
-            "OK",
-            "text/xml",
-            desc::AVT_SCPDL.as_bytes(),
-        ),
-        ("GET", "/svc/rcs.xml") => http::write_response(
-            &mut stream,
-            200,
-            "OK",
-            "text/xml",
-            desc::RCS_SCPDL.as_bytes(),
-        ),
-        ("GET", "/svc/cms.xml") => http::write_response(
-            &mut stream,
-            200,
-            "OK",
-            "text/xml",
-            desc::CMS_SCPDL.as_bytes(),
-        ),
-        ("GET", "/server.xml") => {
+        ("GET" | "HEAD", "/server.xml") => {
             let xml = desc::server_xml(&r.name, &r.server_udn);
-            http::write_response(&mut stream, 200, "OK", "text/xml", xml.as_bytes());
+            http::respond(&mut stream, 200, xml_type, xml.as_bytes(), method == "HEAD");
         }
-        ("GET", "/svc/cd.xml") => http::write_response(
-            &mut stream,
-            200,
-            "OK",
-            "text/xml",
-            desc::CD_SCPDL.as_bytes(),
-        ),
-        ("GET", p) if p.starts_with("/media/") => serve_media(r, &req, &mut stream),
-        ("GET", p) if p.starts_with("/art") => serve_art(r, &req, &mut stream),
-        ("POST", "/ctl/cd") => handle_control(r, CD_NS, &req, &mut stream),
-        ("POST", "/ctl/avt") => handle_control(r, AVT_NS, &req, &mut stream),
-        ("POST", "/ctl/rcs") => handle_control(r, RCS_NS, &req, &mut stream),
-        ("POST", "/ctl/cms") => handle_control(r, CMS_NS, &req, &mut stream),
-        ("SUBSCRIBE", p) if p.starts_with("/evt/") => handle_subscribe(r, p, &req, &mut stream),
-        ("UNSUBSCRIBE", p) if p.starts_with("/evt/") => handle_unsubscribe(r, p, &req, &mut stream),
-        _ => http::write_response(&mut stream, 404, "Not Found", "text/plain", b""),
-    }
-}
-
-fn subs_of<'a>(r: &'a Renderer, path: &str) -> &'a Subscribers {
-    match path.trim_start_matches("/evt/") {
-        "rcs" => &r.rcs_subs,
-        "cms" => &r.cms_subs,
-        "cd" => &r.cd_subs,
-        _ => &r.avt_subs,
-    }
-}
-
-fn handle_control(r: &Renderer, ns: &str, req: &http::Request, stream: &mut std::net::TcpStream) {
-    let soap_action = req.header("soapaction").unwrap_or("").to_string();
-    let ns_owned = soap_action
-        .trim_matches('"')
-        .rsplit_once('#')
-        .map(|(n, _)| n.to_string())
-        .unwrap_or_else(|| ns.to_string());
-    match soap::parse(&req.body) {
-        Ok((action, args)) => {
-            let (body, status) = match ns_owned.as_str() {
-                AVT_NS => r.avt(&action, args),
-                RCS_NS => r.rcs(&action, args),
-                CMS_NS => r.cms(&action),
-                CD_NS => {
-                    let host = req.header("host").unwrap_or("127.0.0.1").to_string();
-                    r.cd(&action, args, &host)
-                }
-                _ => (Some(soap::fault(401, "invalid service")), 500),
-            };
-            match body {
-                Some(b) => http::write_response(
-                    stream,
-                    status,
-                    if status == 200 {
-                        "OK"
-                    } else {
-                        "Internal Server Error"
-                    },
-                    "text/xml; charset=\"utf-8\"",
-                    b.as_bytes(),
-                ),
-                None => http::write_response(
-                    stream,
+        ("GET" | "HEAD", p) if p.starts_with("/svc/") => {
+            let name = p
+                .trim_start_matches("/svc/")
+                .trim_end_matches(".xml")
+                .to_string();
+            match Svc::from_path(&name) {
+                Some(svc) => http::respond(
+                    &mut stream,
                     200,
-                    "OK",
-                    "text/xml; charset=\"utf-8\"",
-                    empty_response(&action, &ns_owned).as_bytes(),
+                    xml_type,
+                    desc::scpd_for(svc).as_bytes(),
+                    method == "HEAD",
                 ),
+                None => http::not_found(&mut stream),
             }
         }
-        Err(_) => {
-            let f = soap::fault(400, "bad request");
-            http::write_response(
-                stream,
-                500,
-                "Internal Server Error",
-                "text/xml",
-                f.as_bytes(),
-            );
-        }
+        ("GET" | "HEAD", p) if p.starts_with("/media/") => media::serve_media(r, &req, &mut stream),
+        ("GET" | "HEAD", "/art") => media::serve_art(r, &req, &mut stream),
+        ("POST", p) if p.starts_with("/ctl/") => match Svc::from_path(&p[5..]) {
+            Some(svc) => handle_control(r, svc, &req, &mut stream),
+            None => http::not_found(&mut stream),
+        },
+        ("SUBSCRIBE", p) if p.starts_with("/evt/") => match Svc::from_path(&p[5..]) {
+            Some(svc) => handle_subscribe(r, svc, &req, &mut stream),
+            None => http::not_found(&mut stream),
+        },
+        ("UNSUBSCRIBE", p) if p.starts_with("/evt/") => match Svc::from_path(&p[5..]) {
+            Some(svc) => handle_unsubscribe(r, svc, &req, &mut stream),
+            None => http::not_found(&mut stream),
+        },
+        _ => http::not_found(&mut stream),
     }
 }
 
-fn empty_response(action: &str, ns: &str) -> String {
-    soap::response_body(action, ns, &[])
+fn handle_control(r: &Renderer, svc: Svc, req: &http::Request, stream: &mut TcpStream) {
+    let (action, args) = match soap::parse(&req.body) {
+        Ok(v) => v,
+        Err(_) => {
+            let f = soap::fault(402, "Invalid Args");
+            return http::write_response(stream, 500, "text/xml; charset=\"utf-8\"", f.as_bytes());
+        }
+    };
+    let base = format!("http://{}", req.header("host").unwrap_or(&r.default_host));
+    let args = Args(args);
+    let reply = match svc {
+        Svc::Avt => r.avt(&action, &args, &base),
+        Svc::Rcs => r.rcs(&action, &args),
+        Svc::Cms => r.cms(&action, false),
+        Svc::ServerCms => r.cms(&action, true),
+        Svc::Cd => r.cd(&action, &args, &base),
+        Svc::OhProduct => r.oh_product(&action, &args),
+        Svc::OhPlaylist => r.oh_playlist(&action, &args, &base),
+        Svc::OhInfo => r.oh_info(&action, &base),
+        Svc::OhTime => r.oh_time(&action),
+        Svc::OhVolume => r.oh_volume(&action, &args),
+    };
+    match reply {
+        Reply::Ok(body) => {
+            http::write_response(stream, 200, "text/xml; charset=\"utf-8\"", body.as_bytes())
+        }
+        Reply::Err(code, desc) => http::write_response(
+            stream,
+            500,
+            "text/xml; charset=\"utf-8\"",
+            soap::fault(code, desc).as_bytes(),
+        ),
+    }
 }
 
-fn handle_subscribe(
-    r: &Renderer,
-    path: &str,
-    req: &http::Request,
-    stream: &mut std::net::TcpStream,
-) {
-    let callback = req.header("callback").unwrap_or("");
-    let nts = req.header("nts").unwrap_or("upnp:event");
+fn handle_subscribe(r: &Renderer, svc: Svc, req: &http::Request, stream: &mut TcpStream) {
     let timeout: u64 = req
         .header("timeout")
-        .and_then(|t| t.strip_prefix("Second-"))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1800);
-    let timeout = timeout.clamp(60, 3600);
-    let subs = subs_of(r, path);
-    if nts.contains("renew") {
-        if let Some(sid) = req.header("sid")
-            && subs.renew(sid, timeout)
-        {
+        .and_then(|t| {
+            let t = t.trim();
+            if t.eq_ignore_ascii_case("infinite") {
+                Some(3600)
+            } else {
+                t.strip_prefix("Second-")
+                    .or_else(|| t.strip_prefix("second-"))
+                    .and_then(|s| s.parse().ok())
+            }
+        })
+        .unwrap_or(1800)
+        .clamp(60, 3600);
+    let subs = r.subs(svc);
+    let callback = req.header("callback");
+    let nt = req.header("nt");
+    if let Some(sid) = req.header("sid") {
+        if callback.is_some() || nt.is_some() {
+            return http::write_response(stream, 400, "text/plain", b"");
+        }
+        if subs.renew(sid, timeout) {
             write_event_response(stream, sid, timeout);
-            return;
+        } else {
+            http::write_response(stream, 412, "text/plain", b"");
         }
-        http::write_response(stream, 412, "Precondition Failed", "text/plain", b"");
-    } else {
-        let cb = callback.trim_matches('<').trim_end_matches('>');
-        if !cb.starts_with("http://") {
-            http::write_response(stream, 412, "Precondition Failed", "text/plain", b"");
-            return;
+        return;
+    }
+    let callbacks = callback.map(events::parse_callbacks).unwrap_or_default();
+    if nt != Some("upnp:event") || callbacks.is_empty() {
+        return http::write_response(stream, 412, "text/plain", b"");
+    }
+    match subs.subscribe(callbacks, timeout) {
+        Some(sid) => {
+            write_event_response(stream, &sid, timeout);
+            r.wake(Wake::NewSub(svc, sid));
         }
-        let (sid, t) = subs.subscribe(cb, timeout);
-        write_event_response(stream, &sid, t);
+        None => http::write_response(stream, 503, "text/plain", b""),
     }
 }
 
-fn write_event_response(stream: &mut std::net::TcpStream, sid: &str, timeout: u64) {
-    let head = format!(
-        "HTTP/1.1 200 OK\r\nSID: {sid}\r\nTIMEOUT: Second-{timeout}\r\nSERVER: Linux/5.0 UPnP/1.1 ricercar/0.1\r\nCONTENT-LENGTH: 0\r\nCONNECTION: close\r\n\r\n"
+fn write_event_response(stream: &mut TcpStream, sid: &str, timeout: u64) {
+    http::write_head(
+        stream,
+        200,
+        &[
+            ("SID", sid.to_string()),
+            ("TIMEOUT", format!("Second-{timeout}")),
+            ("CONTENT-LENGTH", "0".into()),
+        ],
     );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.flush();
 }
 
-fn handle_unsubscribe(
-    r: &Renderer,
-    path: &str,
-    req: &http::Request,
-    stream: &mut std::net::TcpStream,
-) {
+fn handle_unsubscribe(r: &Renderer, svc: Svc, req: &http::Request, stream: &mut TcpStream) {
     let sid = req.header("sid").unwrap_or("");
-    let ok = subs_of(r, path).unsubscribe(sid);
-    let status = if ok { 200 } else { 412 };
-    http::write_response(
-        stream,
-        status,
-        if ok { "OK" } else { "Precondition Failed" },
-        "text/plain",
-        b"",
-    );
+    let status = if r.subs(svc).unsubscribe(sid) {
+        200
+    } else {
+        412
+    };
+    http::write_response(stream, status, "text/plain", b"");
 }
 
 fn load_or_create_udn() -> String {
@@ -714,10 +662,10 @@ fn load_or_create_udn_named(name: &str) -> String {
         }
     }
     let host = std::fs::read_to_string("/etc/machine-id").unwrap_or_default();
-    let mut seed = host.trim().to_string();
-    if seed.is_empty() {
+    let mut seed = format!("{}{name}", host.trim());
+    if host.trim().is_empty() {
         let rnd = std::fs::read("/dev/urandom").unwrap_or_default();
-        seed = format!("{:?}", &rnd[..16.min(rnd.len())]);
+        seed = format!("{:?}{name}", &rnd[..16.min(rnd.len())]);
     }
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in seed.bytes() {
@@ -744,295 +692,4 @@ pub fn config_dir() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(|h| std::path::PathBuf::from(h).join(".config/ricercar"))
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/ricercar"))
-}
-
-// ------------------------------------------------------------- media server
-
-fn fnv(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100_000_000_1b3);
-    }
-    h
-}
-
-fn b36(v: u64) -> String {
-    const D: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    if v == 0 {
-        return "0".into();
-    }
-    let mut v = v;
-    let mut out = Vec::new();
-    while v > 0 {
-        out.push(D[(v % 36) as usize]);
-        v /= 36;
-    }
-    out.reverse();
-    String::from_utf8(out).unwrap()
-}
-
-fn track_id(path: &str) -> String {
-    format!("T{}", b36(fnv(path) % (1 << 60)))
-}
-
-fn pct_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-fn pct_decode(s: &str) -> Option<String> {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
-fn mime_of(path: &str) -> (&'static str, &'static str) {
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match ext.as_str() {
-        "flac" => ("audio/flac", "FLAC"),
-        "mp3" => ("audio/mpeg", "MP3"),
-        "m4a" | "mp4" => ("audio/mp4", "MP4"),
-        "wav" => ("audio/L16", "LPCM"),
-        "ogg" => ("audio/ogg", "OGG"),
-        _ => ("application/octet-stream", "*"),
-    }
-}
-
-fn dlna_duration(ms: u64) -> String {
-    let s = ms / 1000;
-    format!("{}:{:02}:{:02}.000", s / 3600, (s / 60) % 60, s % 60)
-}
-
-fn didl_open() -> String {
-    "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns:res=\"urn:schemas-upnp-org:metadata-1-0/res/\" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">".to_string()
-}
-
-impl Renderer {
-    fn cd(&self, action: &str, args: Vec<(String, String)>, host: &str) -> (Option<String>, u16) {
-        let arg = |k: &str| {
-            args.iter()
-                .find(|(a, _)| a == k)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default()
-        };
-        match action {
-            "GetSearchCapabilities" => (
-                Some(soap::response_body(action, CD_NS, &[("SearchCaps", "")])),
-                200,
-            ),
-            "GetSortCapabilities" => (
-                Some(soap::response_body(action, CD_NS, &[("SortCaps", "")])),
-                200,
-            ),
-            "GetSystemUpdateID" => (
-                Some(soap::response_body(action, CD_NS, &[("Id", "0")])),
-                200,
-            ),
-            "Browse" => {
-                let object_id = arg("ObjectID");
-                let start: usize = arg("StartingIndex").parse().unwrap_or(0);
-                let count: usize = arg("RequestCount").parse().unwrap_or(0);
-                let base = format!("http://{host}");
-                let (result, returned, total) = self.browse(&object_id, start, count, &base);
-                (
-                    Some(soap::response_body(
-                        action,
-                        CD_NS,
-                        &[
-                            ("Result", &result),
-                            ("NumberReturned", &returned.to_string()),
-                            ("TotalMatches", &total.to_string()),
-                            ("UpdateID", "0"),
-                        ],
-                    )),
-                    200,
-                )
-            }
-            _ => (Some(soap::fault(401, "invalid action")), 500),
-        }
-    }
-
-    fn browse(
-        &self,
-        object_id: &str,
-        start: usize,
-        count: usize,
-        base: &str,
-    ) -> (String, usize, usize) {
-        use ricercar_core::meta;
-        let mut out = didl_open();
-        let mut returned = 0usize;
-        let mut total = 0usize;
-        let mut push = |s: &mut String, xml: String| {
-            total += 1;
-            if total > start && (count == 0 || returned < count) {
-                s.push_str(&xml);
-                returned += 1;
-            }
-        };
-        match object_id {
-            "0" => {
-                for a in self.controller.lib.albums(ricercar_core::AlbumSort::Artist) {
-                    let id = format!("A{}", a.id);
-                    push(
-                        &mut out,
-                        format!(
-                            "<container id=\"{id}\" parentID=\"0\" childCount=\"{}\" restricted=\"false\" searchable=\"false\"><dc:title>{}</dc:title><upnp:class>object.container.album.musicAlbum</upnp:class></container>",
-                            a.track_count,
-                            desc::xml_escape(&a.title),
-                        ),
-                    );
-                }
-            }
-            id if id.starts_with('A') => {
-                let album = self.controller.lib.album(&id[1..]);
-                if let Some(a) = album {
-                    for t in self.controller.lib.album_tracks(&a.id) {
-                        let tid = track_id(&t.path);
-                        let pid = id.to_string();
-                        let (mime, pn) = mime_of(&t.path);
-                        let size = std::fs::metadata(&t.path).map(|m| m.len()).unwrap_or(0);
-                        let res_url = format!("{base}/media/{}", pct_encode(&t.uri));
-                        let cover = if meta::uri_to_path(&t.uri)
-                            .map(|p| ricercar_core::meta::cover_bytes(&p).is_some())
-                            .unwrap_or(false)
-                        {
-                            format!(
-                                "<upnp:albumArtURI dlna:profileID=\"JPEG_TN\">{base}/art?u={}</upnp:albumArtURI>",
-                                pct_encode(&t.uri)
-                            )
-                        } else {
-                            String::new()
-                        };
-                        push(
-                            &mut out,
-                            format!(
-                                "<item id=\"{tid}\" parentID=\"{pid}\" restricted=\"true\"><dc:title>{}</dc:title><dc:creator>{}</dc:creator><upnp:artist>{}</upnp:artist><upnp:album>{}</upnp:album><upnp:originalTrackNumber>{}</upnp:originalTrackNumber>{cover}<upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo=\"http-get:*:{}:DLNA.ORG_PN={};DLNA.ORG_OP=01\" size=\"{size}\" duration=\"{}\">{}</res></item>",
-                                desc::xml_escape(&t.title),
-                                desc::xml_escape(t.artist.as_deref().unwrap_or("")),
-                                desc::xml_escape(t.artist.as_deref().unwrap_or("")),
-                                desc::xml_escape(&a.title),
-                                t.track.unwrap_or(0),
-                                mime,
-                                pn,
-                                dlna_duration(t.duration_ms),
-                                desc::xml_escape(&res_url),
-                            ),
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
-        out.push_str("</DIDL-Lite>");
-        (out, returned, total)
-    }
-}
-
-fn serve_media(r: &Renderer, req: &http::Request, stream: &mut std::net::TcpStream) {
-    let Some(rel) = req.path.strip_prefix("/media/") else {
-        http::write_response(stream, 404, "Not Found", "text/plain", b"");
-        return;
-    };
-    let Some(path) = pct_decode(rel) else {
-        http::write_response(stream, 400, "Bad Request", "text/plain", b"");
-        return;
-    };
-    // only paths that are in the indexed library are served
-    let Some(uri) = ricercar_core::meta::uri_to_path(&path) else {
-        http::write_response(stream, 404, "Not Found", "text/plain", b"");
-        return;
-    };
-    let path_str = uri.to_string_lossy().into_owned();
-    if !r.controller.lib.has_path(&path_str) {
-        http::write_response(stream, 404, "Not Found", "text/plain", b"");
-        return;
-    }
-    let Ok(data) = std::fs::read(&path_str) else {
-        http::write_response(stream, 404, "Not Found", "text/plain", b"");
-        return;
-    };
-    let (mime, _) = mime_of(&path_str);
-    let range = req.header("range").map(|s| s.to_string());
-    let (code, reason, body_from, body_to) = match parse_range(range.as_deref(), data.len()) {
-        Some((from, to)) => (206, "Partial Content", from, to),
-        None => (200, "OK", 0, data.len()),
-    };
-    let slice = &data[body_from..body_to];
-    let mut head = format!(
-        "HTTP/1.1 {code} {reason}\r\nCONTENT-TYPE: {mime}\r\nCONTENT-LENGTH: {}\r\nSERVER: Linux/5.0 UPnP/1.1 ricercar/0.1\r\nCONNECTION: close\r\n",
-        slice.len()
-    );
-    if code == 206 {
-        head.push_str(&format!(
-            "CONTENT-RANGE: bytes {}-{}/{}\r\n",
-            body_from,
-            body_to - 1,
-            data.len()
-        ));
-    }
-    head.push_str("\r\n");
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(slice);
-    let _ = stream.flush();
-}
-
-fn parse_range(h: Option<&str>, len: usize) -> Option<(usize, usize)> {
-    let h = h?.trim();
-    let spec = h.strip_prefix("bytes=")?;
-    let (a, b) = spec.split_once('-')?;
-    let (from, to) = if a.is_empty() {
-        let n: usize = b.parse().ok()?;
-        (len.saturating_sub(n), len)
-    } else {
-        let from: usize = a.parse().ok()?;
-        let to: usize = if b.is_empty() {
-            len
-        } else {
-            (b.parse::<usize>().ok()? + 1).min(len)
-        };
-        (from, to)
-    };
-    if from < to && to <= len {
-        Some((from, to))
-    } else {
-        None
-    }
-}
-
-fn serve_art(r: &Renderer, req: &http::Request, stream: &mut std::net::TcpStream) {
-    let query = req.path.split_once('?').map(|(_, q)| q).unwrap_or("");
-    let uri = query
-        .strip_prefix("u=")
-        .and_then(pct_decode)
-        .unwrap_or_default();
-    if uri.is_empty() {
-        http::write_response(stream, 404, "Not Found", "text/plain", b"");
-        return;
-    }
-    match r.controller.cover_for(&uri) {
-        Some((bytes, mime)) => {
-            http::write_response(stream, 200, "OK", &mime, &bytes);
-        }
-        None => http::write_response(stream, 404, "Not Found", "text/plain", b""),
-    }
 }
