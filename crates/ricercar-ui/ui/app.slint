@@ -165,11 +165,13 @@ export component MainWindow inherits Window {
         }
 
         if App.now-playing-open: NowPlayingView {
+            y: 0;
             height: parent.height - 88px;
             close => { App.now-playing-open = false; }
         }
 
         if chain-open: Rectangle {
+            y: 0;
             height: parent.height - 88px;
             TouchArea { clicked => { chain-open = false; } }
             ChainPanel {

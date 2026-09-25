@@ -11,6 +11,9 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if !args.no_mpris && ricercar_daemon::forward_to_running(&args) {
+        return;
+    }
     match ricercar_daemon::startup(args, ricercar_daemon::Hooks::default()) {
         Ok(ctx) => ctx.wait_until_quit(),
         Err(e) => {

@@ -142,6 +142,8 @@ pub struct State {
     pub now_path: Option<String>,
     pub covers_dirty: bool,
     pub search_serial: u64,
+    /// Raw colour picked from the playing cover (made readable per theme).
+    pub cover_rgb: Option<[u8; 3]>,
 }
 
 pub struct Ui {
@@ -154,6 +156,8 @@ pub struct Ui {
     pub timers: RefCell<Vec<slint::Timer>>,
     pub extras: RefCell<crate::extras::Extras>,
     pub player: RefCell<crate::player::PlayerView>,
+    pub tray: RefCell<Option<ksni::blocking::Handle<crate::tray::Tray>>>,
+    pub visible: std::cell::Cell<bool>,
 }
 
 impl Ui {
@@ -316,6 +320,41 @@ impl Ui {
     }
 }
 
+/// Show or hide the main window (tray icon, MPRIS Raise).
+pub fn toggle_window(ui: &Rc<Ui>) {
+    if ui.visible.get() {
+        let _ = ui.window.hide();
+        ui.visible.set(false);
+    } else {
+        let _ = ui.window.show();
+        ui.visible.set(true);
+    }
+    sync_tray(ui);
+}
+
+/// Push playback state and title to the tray menu.
+pub fn sync_tray(ui: &Ui) {
+    let Some(h) = ui.tray.borrow().as_ref().cloned() else {
+        return;
+    };
+    let app = ui.app();
+    let playing = app.get_playing();
+    let title = if app.get_has_track() {
+        format!("{} — {}", app.get_title(), app.get_artist())
+    } else {
+        String::new()
+    };
+    let visible = ui.visible.get();
+    // ksni's blocking update round-trips to its D-Bus thread: do it off the UI thread.
+    std::thread::spawn(move || {
+        h.update(|t| {
+            t.playing = playing;
+            t.title = title;
+            t.visible = visible;
+        });
+    });
+}
+
 pub fn model<T: Clone + 'static>(m: &Rc<VecModel<T>>) -> ModelRc<T> {
     ModelRc::from(m.clone())
 }
@@ -328,6 +367,8 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         on_raise: Some(Arc::new(|| {
             post(|ui| {
                 let _ = ui.window.show();
+                ui.visible.set(true);
+                sync_tray(ui);
             });
         })),
         on_quit: Some(Arc::new(|| {
@@ -336,8 +377,15 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
             });
         })),
     };
+    let snapshot = std::env::var_os("RICERCAR_SNAPSHOT").map(std::path::PathBuf::from);
+    if snapshot.is_some() {
+        crate::snapshot::install();
+    }
     let ctx = Rc::new(ricercar_daemon::startup(args, hooks)?);
     let window = MainWindow::new()?;
+    // Wayland app-id / X11 class matching ricercar.desktop (icon, grouping);
+    // needs the backend (created above) and must precede `show()`.
+    let _ = slint::set_xdg_app_id("ricercar");
 
     let loader = Loader::new(
         ctx.covers.clone(),
@@ -360,6 +408,8 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         timers: RefCell::new(Vec::new()),
         extras: RefCell::new(crate::extras::Extras::default()),
         player: RefCell::new(crate::player::PlayerView::default()),
+        tray: RefCell::new(None),
+        visible: std::cell::Cell::new(true),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
 
@@ -368,6 +418,10 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     crate::player::wire(&ui);
     crate::extras::wire(&ui);
     ui.navigate(Page::Home, "", true);
+    let snapshot_mode = snapshot.is_some();
+    if let Some(dir) = snapshot {
+        crate::snapshot::start(&ui, dir);
+    }
 
     // Covers arrive in bursts; patch models at most every 60 ms.
     let t = slint::Timer::default();
@@ -378,7 +432,30 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     );
     ui.timers.borrow_mut().push(t);
 
-    window.run()?;
+    let tray_enabled = !snapshot_mode && ctx.config.read().unwrap().ui.tray;
+    if tray_enabled {
+        *ui.tray.borrow_mut() = crate::tray::spawn();
+    }
+    window.window().on_close_requested(|| {
+        let mut keep = false;
+        with_ui(|ui| {
+            let cfg = ui.ctx.config.read().unwrap().ui.clone();
+            keep = cfg.close_to_tray && ui.tray.borrow().is_some();
+            if keep {
+                ui.visible.set(false);
+                crate::app::sync_tray(ui);
+            }
+        });
+        if keep {
+            slint::CloseRequestResponse::HideWindow
+        } else {
+            let _ = slint::quit_event_loop();
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
+    window.show()?;
+    slint::run_event_loop_until_quit()?;
+    let _ = window.hide();
     ctx.shutdown();
     UI.with(|u| *u.borrow_mut() = None);
     Ok(())

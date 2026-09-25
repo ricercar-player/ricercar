@@ -19,9 +19,13 @@ jobs:
       - name: system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libfontconfig1-dev pkg-config clang libclang-dev
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libxkbcommon-dev pkg-config clang libclang-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
+      - name: French catalogue up to date
+        run: |
+          python3 crates/ricercar-ui/tools/gen_po.py
+          git diff --exit-code crates/ricercar-ui/lang
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: tests
         run: dbus-run-session -- cargo test --workspace

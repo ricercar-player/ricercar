@@ -240,6 +240,7 @@ export component SettingsPage inherits PageScroll {
                             Text { text: d.name; font-size: Theme.fs-sm; color: Theme.text2; }
                         }
                         if d.hardware: Badge { y: (parent.height - self.height) / 2; text: @tr("BIT-PERFECT"); tint: Theme.good; }
+                        if d.shared: Badge { y: (parent.height - self.height) / 2; text: @tr("SHARED"); tint: Theme.warn; }
                     }
                 }
             }
@@ -449,6 +450,11 @@ export component SettingsPage inherits PageScroll {
                 label: @tr("Colours from the album cover");
                 hint: @tr("Tint the interface with the playing album's colours.");
                 Toggle { y: (parent.height - self.height) / 2; checked <=> App.adaptive-colors; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Keep playing in the tray when the window is closed");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.close-to-tray; toggled => { App.settings-changed(); } }
             }
             Divider { }
             Row {

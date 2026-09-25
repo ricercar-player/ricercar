@@ -1,0 +1,49 @@
+# Maintainer: ricercar-player
+pkgname=ricercar-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Bit-perfect music player and UPnP/OpenHome network receiver for Linux"
+arch=('x86_64' 'aarch64')
+url="https://github.com/ricercar-player/ricercar"
+license=('MIT')
+depends=('alsa-lib' 'fontconfig' 'libxkbcommon' 'gcc-libs')
+optdepends=('xdg-desktop-portal: folder picker for the library settings'
+            'pipewire-alsa: play through the system mixer when not bit-perfect')
+makedepends=('cargo' 'git')
+provides=('ricercar')
+conflicts=('ricercar')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  printf "0.1.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --frozen --release -p ricercar-ui -p ricercar-cli -p ricercar-daemon
+}
+
+check() {
+  cd "$pkgname"
+  cargo test --frozen --release -p ricercar-core -p ricercar-audio
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/ricercar "$pkgdir/usr/bin/ricercar"
+  install -Dm755 target/release/ricercar-cli "$pkgdir/usr/bin/ricercar-cli"
+  install -Dm755 target/release/ricercar-daemon "$pkgdir/usr/bin/ricercar-daemon"
+  install -Dm644 dist/ricercar.desktop "$pkgdir/usr/share/applications/ricercar.desktop"
+  install -Dm644 dist/ricercar.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/ricercar.svg"
+  install -Dm644 dist/ricercar.service "$pkgdir/usr/lib/systemd/user/ricercar.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

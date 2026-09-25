@@ -108,6 +108,7 @@ impl Loader {
         if self.missing.contains(&id) || !self.in_flight.insert(id.clone()) {
             return None;
         }
+        tracing::debug!(target: "covers", "request {id}");
         let mut q = self.shared.queue.lock().unwrap();
         // Most recent requests first: they are what the user looks at.
         q.push_front(Job {
@@ -133,6 +134,7 @@ impl Loader {
     }
 
     pub fn arrived(&mut self, id: String, buf: Option<SharedPixelBuffer<Rgba8Pixel>>) {
+        tracing::debug!(target: "covers", "arrived {id} ok={}", buf.is_some());
         self.in_flight.remove(&id);
         match buf {
             Some(b) => {

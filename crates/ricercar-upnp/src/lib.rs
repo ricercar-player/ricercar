@@ -174,6 +174,7 @@ pub(crate) struct Renderer {
     pub name: String,
     udn: String,
     server_udn: String,
+    media_server: bool,
     /// `ip:port` used in URLs we emit outside of a request (events).
     pub default_host: String,
     subs: Vec<Subscribers>,
@@ -363,6 +364,16 @@ impl Drop for RendererHandle {
 }
 
 pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Result<RendererHandle> {
+    start_with(controller, name, true)
+}
+
+/// Start the renderer; `media_server` also exposes the library as a UPnP
+/// MediaServer (ContentDirectory + file serving).
+pub fn start_with(
+    controller: Arc<Controller>,
+    name: &str,
+    media_server: bool,
+) -> std::io::Result<RendererHandle> {
     let listener = TcpListener::bind("0.0.0.0:0")?;
     let port = listener.local_addr()?.port();
     let udn = load_or_create_udn();
@@ -381,6 +392,7 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
         name: name.to_string(),
         udn: udn.clone(),
         server_udn: server_udn.clone(),
+        media_server,
         default_host: format!("{ip}:{port}"),
         subs: Svc::ALL.iter().map(|_| Subscribers::default()).collect(),
         meta: Mutex::new(HashMap::new()),
@@ -446,7 +458,10 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
                 path: "/server.xml",
                 kind: ssdp::Kind::Server,
             },
-        ],
+        ]
+        .into_iter()
+        .filter(|d| media_server || d.kind != ssdp::Kind::Server)
+        .collect(),
     );
     if ssdp.is_none() {
         tracing::warn!("SSDP port 1900 unavailable — renderer not discoverable");
@@ -506,6 +521,14 @@ fn serve_conn(r: &Renderer, mut stream: TcpStream) {
     let route = req.route().to_string();
     let method = req.method.as_str();
     let xml_type = "text/xml; charset=\"utf-8\"";
+    let server_route = route == "/server.xml"
+        || route.starts_with("/media/")
+        || ["cd", "scms"]
+            .iter()
+            .any(|s| route.ends_with(&format!("/{s}")) || route.ends_with(&format!("/{s}.xml")));
+    if server_route && !r.media_server {
+        return http::not_found(&mut stream);
+    }
     match (method, route.as_str()) {
         ("GET" | "HEAD", "/device.xml") => {
             let xml = desc::device_xml(&r.name, &r.udn);

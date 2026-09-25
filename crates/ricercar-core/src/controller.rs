@@ -177,7 +177,7 @@ pub enum CtlEvent {
     VolumeChanged,
     Seeked(u64),
     /// A play was long enough to count (history, scrobblers).
-    Played(TrackInfo),
+    Played(Box<TrackInfo>),
     StreamTitle(String),
     Error(String),
 }
@@ -439,7 +439,7 @@ impl Controller {
                                     if let Some(p) = &info.path {
                                         lib.record_play(p);
                                     }
-                                    events.publish(CtlEvent::Played(info));
+                                    events.publish(CtlEvent::Played(Box::new(info)));
                                 }
                             }
                             Some(EngineEvent::Status { status }) => bridge.on_status(status),
@@ -455,7 +455,7 @@ impl Controller {
                             last_save = Instant::now();
                             let rev = {
                                 let st = bridge.lock_state();
-                                st.queue_rev ^ st.pos_ms / 5000
+                                st.queue_rev ^ (st.pos_ms / 5000)
                             };
                             if rev != saved_rev {
                                 saved_rev = rev;
@@ -477,6 +477,14 @@ impl Controller {
             pending: &self.pending,
             events: &self.events,
         }
+    }
+
+    /// The audio chain as the engine actually configured it (container,
+    /// bit-perfect state including gain and mute).
+    pub fn engine_chain(&self) -> ChainInfo {
+        let p = self.player();
+        let st = p.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.chain.clone()
     }
 
     pub fn device_name(&self) -> String {

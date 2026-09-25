@@ -13,17 +13,24 @@ use crate::images::{Lookup, Source};
 use crate::text::{long_duration, quality, t};
 use crate::{GenreCard, Page, PlaylistItem};
 
-const GENRE_TINTS: &[u32] = &[
-    0x8c4a3b, 0x3b5f8c, 0x6b3b8c, 0x3b8c6b, 0x8c7a3b, 0x8c3b62, 0x2f6f7a, 0x5a6b2f, 0x7a4a2f,
-    0x3b4a8c,
-];
-
-fn tint(name: &str) -> slint::Color {
-    let h = name
-        .bytes()
-        .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-    let c = GENRE_TINTS[(h as usize) % GENRE_TINTS.len()];
-    slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+/// Genre tile colour: hues spread by the golden angle so neighbours never
+/// look alike, at a saturation/lightness that keeps white text readable.
+fn tint(index: usize) -> slint::Color {
+    let h = (index as f64 * 137.508 + 18.0) % 360.0;
+    let (s, l) = (0.42, 0.34);
+    let c = (1.0 - (2.0 * l - 1.0_f64).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let to = |v: f64| ((v + m) * 255.0).round() as u8;
+    slint::Color::from_rgb_u8(to(r), to(g), to(b))
 }
 
 fn album_sort(i: i32) -> AlbumSort {
@@ -113,8 +120,9 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
             let rows: Vec<_> = lib
                 .genres()
                 .into_iter()
-                .map(|g| GenreCard {
-                    tint: tint(&g.name),
+                .enumerate()
+                .map(|(i, g)| GenreCard {
+                    tint: tint(i),
                     name: g.name.into(),
                     albums: g.album_count as i32,
                 })
@@ -186,7 +194,16 @@ fn load_album(ui: &Rc<Ui>, id: &str) {
     );
     app.set_al_hires(a.is_hires());
     app.set_al_fav(a.favorite);
-    app.set_al_path(a.dir.clone().into());
+    let roots = ui.ctx.config.read().unwrap().library.roots.clone();
+    let shown = roots
+        .iter()
+        .find_map(|r| {
+            let rel = std::path::Path::new(&a.dir).strip_prefix(r).ok()?;
+            let name = r.file_name()?.to_string_lossy();
+            Some(format!("{name}/{}", rel.display()))
+        })
+        .unwrap_or_else(|| a.dir.clone());
+    app.set_al_path(shown.into());
     let src = Source::Track {
         key: a.id.clone(),
         path: a.cover_path.clone().into(),
@@ -251,7 +268,15 @@ fn load_playlist(ui: &Rc<Ui>, id: i64) {
     app.set_pl_id(id as i32);
     app.set_pl_name(p.name.into());
     app.set_pl_count(tracks.len() as i32);
-    app.set_pl_duration(long_duration(tracks.iter().map(|t| t.duration_ms).sum()).into());
+    let total: u64 = tracks.iter().map(|t| t.duration_ms).sum();
+    app.set_pl_duration(
+        if total > 0 {
+            long_duration(total)
+        } else {
+            String::new()
+        }
+        .into(),
+    );
     let cover = tracks.first().map(|t| {
         ui.cover(
             &t.album_id,
@@ -335,6 +360,7 @@ pub fn visible(ui: &Rc<Ui>, list: &str, first: usize, last: usize) {
             None => Vec::new(),
         },
     };
+    tracing::debug!(target: "covers", "visible {list} {first}..{last}: {} to load", keys.len());
     if keys.is_empty() {
         return;
     }
@@ -453,7 +479,7 @@ pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
             refresh_playlists(ui);
             ui.toast(t("Removed from the playlist"), false);
         }
-        a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], &[tr.path.clone()]),
+        a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], std::slice::from_ref(&tr.path)),
         _ => {}
     }
 }

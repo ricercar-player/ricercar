@@ -61,7 +61,7 @@ fn registration_and_props() {
         Some("org.mpris.MediaPlayer2.ricercar"),
         "/org/mpris/MediaPlayer2",
         Some("org.mpris.MediaPlayer2.Player"),
-        "OpenURI",
+        "OpenUri",
         &(fixture.as_str(),),
     )
     .unwrap();

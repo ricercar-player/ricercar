@@ -417,7 +417,9 @@ export component AlbumTile inherits Rectangle {
             }
         }
     }
-    cov := Cover {
+    Cover {
+        x: 0;
+        y: 0;
         width: root.size;
         height: root.size;
         source: root.cover;
@@ -425,31 +427,6 @@ export component AlbumTile inherits Rectangle {
         drop-shadow-offset-y: ta.has-hover ? 8px : 3px;
         drop-shadow-color: #00000059;
         animate drop-shadow-blur, drop-shadow-offset-y { duration: Theme.calm; easing: ease-out; }
-        Rectangle {
-            background: #00000000;
-            opacity: ta.has-hover || play-ta.has-hover ? 1 : 0;
-            animate opacity { duration: Theme.quick; }
-            play-btn := Rectangle {
-                x: parent.width - self.width - 10px;
-                y: parent.height - self.height - 10px;
-                width: 44px;
-                height: 44px;
-                border-radius: 22px;
-                background: play-ta.pressed ? Theme.accent.darker(0.15) : Theme.accent;
-                drop-shadow-blur: 10px;
-                drop-shadow-color: #00000080;
-                Icon {
-                    x: (parent.width - self.width) / 2 + 1px;
-                    source: root.current && root.playing ? Icons.pause-fill : Icons.play-fill;
-                    size: 18px;
-                    tint: Theme.on-accent;
-                }
-                play-ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.play(); }
-                }
-            }
-        }
         if hires: Rectangle {
             x: 8px;
             y: 8px;
@@ -462,24 +439,51 @@ export component AlbumTile inherits Rectangle {
                 tint: #f0cf8a;
             }
         }
+        Rectangle {
+            opacity: ta.has-hover || play-ta.has-hover || (root.current && root.playing) ? 1 : 0;
+            animate opacity { duration: Theme.quick; }
+            x: parent.width - self.width - 10px;
+            y: parent.height - self.height - 10px;
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: play-ta.pressed ? Theme.accent.darker(0.15) : Theme.accent;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000080;
+            Icon {
+                x: (parent.width - self.width) / 2 + (root.current && root.playing ? 0 : 1px);
+                source: root.current && root.playing ? Icons.pause-fill : Icons.play-fill;
+                size: 18px;
+                tint: Theme.on-accent;
+            }
+            play-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.play(); }
+            }
+        }
     }
-    VerticalLayout {
-        y: root.size + 8px;
-        height: 44px;
-        spacing: 2px;
-        Text {
-            text: root.title;
-            font-size: Theme.fs-md;
-            font-weight: 600;
-            color: root.current ? Theme.accent : Theme.text;
-            overflow: elide;
-        }
-        Text {
-            text: root.subtitle;
-            font-size: Theme.fs-sm;
-            color: Theme.text2;
-            overflow: elide;
-        }
+    Text {
+        x: 0;
+        y: root.size + 10px;
+        width: root.size;
+        height: 20px;
+        text: root.title;
+        font-size: Theme.fs-md;
+        font-weight: 600;
+        color: root.current ? Theme.accent : Theme.text;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Text {
+        x: 0;
+        y: root.size + 30px;
+        width: root.size;
+        height: 18px;
+        text: root.subtitle;
+        font-size: Theme.fs-sm;
+        color: Theme.text2;
+        overflow: elide;
+        vertical-alignment: center;
     }
 }
 

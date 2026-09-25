@@ -1,10 +1,15 @@
 [Desktop Entry]
 Type=Application
 Name=ricercar
-GenericName=Music player
-Comment=Bit-perfect player and UPnP renderer
-Exec=ricercar-ui %U
+GenericName=Music Player
+GenericName[fr]=Lecteur de musique
+Comment=Bit-perfect music player and network receiver
+Comment[fr]=Lecteur de musique bit-perfect et récepteur réseau
+Exec=ricercar %U
 Icon=ricercar
 Terminal=false
 Categories=AudioVideo;Audio;Player;
+Keywords=music;player;flac;hi-res;bit-perfect;upnp;dlna;openhome;
+MimeType=audio/flac;audio/x-flac;audio/wav;audio/x-wav;audio/aiff;audio/x-aiff;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/x-vorbis+ogg;audio/x-mpegurl;
 StartupNotify=true
+StartupWMClass=ricercar

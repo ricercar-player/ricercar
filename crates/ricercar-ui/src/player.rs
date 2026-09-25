@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use ricercar_audio::{DeviceKind, TransportStatus};
 use ricercar_core::{CtlEvent, CtlState, Origin, PlayContext, Repeat, TrackInfo};
 use ricercar_online::lyrics::{LyricLine as Line, LyricsSource};
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use slint::{Model, ModelRc, VecModel};
 
 use crate::app::{LARGE, THUMB, Ui, post, with_ui};
 use crate::images::{Lookup, Source};
@@ -165,10 +165,8 @@ fn tick(ui: &Rc<Ui>) {
         match ev {
             CtlEvent::QueueChanged => queue_changed = true,
             CtlEvent::Error(msg) => ui.toast(short_error(&msg), true),
-            CtlEvent::Played(_) => {
-                if app.get_page() == Page::Home {
-                    ui.st.borrow_mut().lib_rev = 0;
-                }
+            CtlEvent::Played(_) if app.get_page() == Page::Home => {
+                ui.st.borrow_mut().lib_rev = 0;
             }
             _ => {}
         }
@@ -176,6 +174,7 @@ fn tick(ui: &Rc<Ui>) {
 
     // ---- transport
     let playing = st.status == TransportStatus::Playing;
+    let tray_dirty = app.get_playing() != playing;
     app.set_playing(playing);
     app.set_pos_ms(st.pos_ms.min(i32::MAX as u64) as i32);
     app.set_dur_ms(st.dur_ms.min(i32::MAX as u64) as i32);
@@ -203,6 +202,9 @@ fn tick(ui: &Rc<Ui>) {
         pv.now_title = title_now;
     }
     update_chain(ui, &st);
+    if tray_dirty || changed {
+        crate::app::sync_tray(ui);
+    }
 
     if queue_changed || st.queue_rev != ui.st.borrow().queue_rev || changed {
         rebuild_queue(ui, &st);
@@ -219,6 +221,7 @@ fn tick(ui: &Rc<Ui>) {
             -1
         }
     };
+    tracing::trace!(target: "lyrics", idx, pos = st.pos_ms, "lyric line");
     if idx != ui.player.borrow().lyric_index {
         ui.player.borrow_mut().lyric_index = idx;
         app.set_lyric_index(idx);
@@ -286,9 +289,8 @@ fn on_track_changed(ui: &Rc<Ui>, st: &CtlState, info: Option<&TrackInfo>) {
         app.set_cover(Default::default());
         app.set_cover_large(Default::default());
         app.set_backdrop(Default::default());
-        ui.window
-            .global::<crate::Theme>()
-            .set_cover_accent(slint::Color::from_argb_u8(0, 0, 0, 0));
+        ui.st.borrow_mut().cover_rgb = None;
+        crate::extras::apply_cover_accent(ui);
         set_lyrics(ui, Vec::new(), false, t("Nothing is playing"), "");
         ui.st.borrow_mut().now_path = None;
         mark_playing(ui, None);
@@ -376,11 +378,8 @@ fn on_track_changed(ui: &Rc<Ui>, st: &CtlState, info: Option<&TrackInfo>) {
                                 .map(slint::Image::from_rgba8)
                                 .unwrap_or_default(),
                         );
-                        let accent = art
-                            .accent
-                            .map(|[r, g, b]| slint::Color::from_rgb_u8(r, g, b))
-                            .unwrap_or(slint::Color::from_argb_u8(0, 0, 0, 0));
-                        ui.window.global::<crate::Theme>().set_cover_accent(accent);
+                        ui.st.borrow_mut().cover_rgb = art.accent;
+                        crate::extras::apply_cover_accent(ui);
                     });
                 });
             }
@@ -389,9 +388,8 @@ fn on_track_changed(ui: &Rc<Ui>, st: &CtlState, info: Option<&TrackInfo>) {
             app.set_cover(Default::default());
             app.set_cover_large(Default::default());
             app.set_backdrop(Default::default());
-            ui.window
-                .global::<crate::Theme>()
-                .set_cover_accent(slint::Color::from_argb_u8(0, 0, 0, 0));
+            ui.st.borrow_mut().cover_rgb = None;
+            crate::extras::apply_cover_accent(ui);
         }
     }
 
@@ -449,7 +447,8 @@ pub fn refill_now_cover(ui: &Ui) {
 fn update_chain(ui: &Ui, st: &CtlState) {
     let app = ui.app();
     let info = st.track();
-    let c = &st.chain;
+    let chain = ui.ctx.ctl.engine_chain();
+    let c = &chain;
     let fmt = c.format;
     let sig = format!(
         "{:?}{:?}{}{}{}{}{:?}",
@@ -488,18 +487,20 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     app.set_codec(info.codec.clone().unwrap_or_default().into());
     app.set_hires(!lossy && ricercar_core::library::is_hires(rate, bits));
     app.set_chain_known(fmt.is_some());
-    app.set_bitperfect(fmt.is_some() && c.bit_perfect);
+    // Bit-perfect means untouched samples reaching a real DAC: a null or
+    // shared device never qualifies, whatever the engine's own flag says.
+    let hardware = c.device_kind == DeviceKind::Hardware;
+    app.set_bitperfect(fmt.is_some() && c.bit_perfect && hardware);
     app.set_device_label(c.device.clone().into());
 
     let mut hops = Vec::new();
     let src_val = match (info.codec.as_deref(), fmt) {
         (codec, Some(f)) => format!(
-            "{}{} bit · {} kHz · {} ch{}",
+            "{}{} kHz · {} ch{}",
             codec.map(|c| format!("{c} · ")).unwrap_or_default(),
-            f.bits,
             khz(f.sample_rate),
             f.channels,
-            if lossy { " (lossy)" } else { "" }
+            if lossy { " · lossy" } else { "" }
         ),
         (Some(c), None) => c.to_string(),
         _ => "—".into(),
@@ -509,16 +510,29 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         value: src_val.into(),
         state: if lossy { 1 } else { 0 },
     });
-    let vol_state = if st.muted || st.volume < 100 { 1 } else { 0 };
-    hops.push(ChainHop {
-        label: t("Volume").into(),
-        value: if st.muted {
-            "0 % (mute)".into()
+    if let Some(f) = fmt {
+        hops.push(ChainHop {
+            label: t("Decoder").into(),
+            value: format!("{} {}-bit integer PCM", t("Decoded to"), f.bits).into(),
+            state: if lossy { 1 } else { 0 },
+        });
+    }
+    // Volume only appears when it changes the samples.
+    let gain_touch = st.muted || st.volume < 100 || (!c.bit_perfect && hardware && c.volume == 100);
+    if gain_touch {
+        let value = if st.muted {
+            t("Muted").to_string()
+        } else if st.volume < 100 {
+            format!("{} {} %", t("Software volume"), st.volume)
         } else {
-            format!("{} %", st.volume).into()
-        },
-        state: vol_state,
-    });
+            t("ReplayGain / preamp").to_string()
+        };
+        hops.push(ChainHop {
+            label: t("Processing").into(),
+            value: value.into(),
+            state: 1,
+        });
+    }
     if let Some(f) = fmt {
         hops.push(ChainHop {
             label: t("Output format").into(),
@@ -532,16 +546,14 @@ fn update_chain(ui: &Ui, st: &CtlState) {
             state: 0,
         });
     }
-    let dev_state = match c.device_kind {
-        DeviceKind::Hardware => 0,
-        DeviceKind::Virtual => 1,
-        _ => 2,
-    };
-    let dev_desc = match c.device_kind {
-        DeviceKind::Hardware => format!("{} (exclusive, hw)", c.device),
-        DeviceKind::Virtual => format!("{} (shared: may resample / mix)", c.device),
-        DeviceKind::Null => format!("{} (discarding)", c.device),
-        DeviceKind::File => c.device.clone(),
+    let (dev_desc, dev_state) = match c.device_kind {
+        DeviceKind::Hardware => (format!("{} · {}", c.device, t("exclusive, no mixer")), 0),
+        DeviceKind::Virtual => (
+            format!("{} · {}", c.device, t("shared: may resample or mix")),
+            1,
+        ),
+        DeviceKind::Null => (t("Null sink: audio discarded").to_string(), 1),
+        DeviceKind::File => (format!("{} · {}", c.device, t("written to a file")), 1),
     };
     hops.push(ChainHop {
         label: t("Device").into(),

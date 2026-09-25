@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+ksni = { version = "0.3.6", default-features = false, features = ["blocking", "async-io"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal", "pollster"] }
 ricercar-audio = { version = "0.1.0", path = "../ricercar-audio" }

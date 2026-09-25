@@ -27,6 +27,52 @@ pub struct Extras {
     fav_model: Option<Rc<VecModel<StationRow>>>,
 }
 
+fn luminance(c: [f64; 3]) -> f64 {
+    let lin = |v: f64| {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+}
+
+fn contrast(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// An accent usable as text on the theme background (WCAG 4.5:1): lifted
+/// toward white on dark, pushed toward black on light, hue preserved.
+pub fn readable_accent(rgb: [u8; 3], dark: bool) -> slint::Color {
+    let bg = if dark {
+        [0x0f, 0x0f, 0x11]
+    } else {
+        [0xf6, 0xf5, 0xf2]
+    };
+    let bg = bg.map(|v| v as f64 / 255.0);
+    let target = if dark { 1.0 } else { 0.0 };
+    let mut c = rgb.map(|v| v as f64 / 255.0);
+    for _ in 0..40 {
+        if contrast(c, bg) >= 4.6 {
+            break;
+        }
+        c = c.map(|v| v + (target - v) * 0.08);
+    }
+    let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    slint::Color::from_rgb_u8(r, g, b)
+}
+
+pub fn apply_cover_accent(ui: &Ui) {
+    let dark = ui.ctx.config.read().unwrap().ui.theme == ThemeCfg::Dark;
+    let c = match ui.st.borrow().cover_rgb {
+        Some(rgb) => readable_accent(rgb, dark),
+        None => slint::Color::from_argb_u8(0, 0, 0, 0),
+    };
+    ui.window.global::<crate::Theme>().set_cover_accent(c);
+}
+
 fn parse_hex(s: &str) -> Option<slint::Color> {
     let s = s.trim_start_matches('#');
     let v = u32::from_str_radix(s, 16).ok()?;
@@ -274,6 +320,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_lyrics_online(cfg.online.lyrics);
     app.set_covers_online(cfg.online.cover_art);
     app.set_notifications(cfg.ui.notifications);
+    app.set_close_to_tray(cfg.ui.close_to_tray);
     app.set_theme_dark(cfg.ui.theme == ThemeCfg::Dark);
     app.set_adaptive_colors(cfg.ui.adaptive_colors);
     app.set_accent_choice(
@@ -306,22 +353,33 @@ fn refresh_devices(ui: &Ui) {
         .filter(|d| d.kind != ricercar_audio::DeviceKind::Null)
         .map(|d| DeviceRow {
             hardware: d.kind == ricercar_audio::DeviceKind::Hardware,
+            shared: d.kind == ricercar_audio::DeviceKind::Virtual,
             selected: d.name == current,
-            desc: match &d.card_name {
-                Some(card) if !d.description.contains(card.as_str()) => {
-                    format!("{card} — {}", d.description)
-                }
-                _ => d.description.clone(),
-            }
-            .into(),
+            desc: d
+                .description
+                .trim_end_matches(" (not bit-perfect)")
+                .to_string()
+                .into(),
             name: d.name.into(),
         })
         .collect();
     if !rows.iter().any(|r| r.selected) {
+        let null = current == "null";
         rows.push(DeviceRow {
-            name: current.clone().into(),
-            desc: current.into(),
+            desc: if null {
+                t("Null sink").into()
+            } else {
+                current.clone()
+            }
+            .into(),
+            name: if null {
+                t("Discards audio (testing)").into()
+            } else {
+                current
+            }
+            .into(),
             hardware: false,
+            shared: false,
             selected: true,
         });
     }
@@ -334,9 +392,11 @@ pub fn apply_theme(ui: &Ui) {
     let theme = ui.window.global::<crate::Theme>();
     theme.set_dark(cfg.theme == ThemeCfg::Dark);
     theme.set_adaptive(cfg.adaptive_colors);
+    let dark = cfg.theme == ThemeCfg::Dark;
     if let Some(c) = parse_hex(&cfg.accent) {
-        theme.set_base_accent(c);
+        theme.set_base_accent(readable_accent([c.red(), c.green(), c.blue()], dark));
     }
+    apply_cover_accent(ui);
     ui.app().set_theme_dark(cfg.theme == ThemeCfg::Dark);
 }
 
@@ -364,6 +424,7 @@ fn settings_changed(ui: &Rc<Ui>) {
         c.online.lyrics = app.get_lyrics_online();
         c.online.cover_art = app.get_covers_online();
         c.ui.notifications = app.get_notifications();
+        c.ui.close_to_tray = app.get_close_to_tray();
         c.ui.theme = if app.get_theme_dark() {
             ThemeCfg::Dark
         } else {

@@ -13,7 +13,7 @@ use walkdir::WalkDir;
 use crate::meta::{TagInfo, file_uri, read_tags};
 
 pub const SUPPORTED_EXTS: &[&str] = &[
-    "flac", "wav", "aiff", "aif", "aifc", "mp3", "ogg", "oga", "opus", "m4a", "mp4", "alac",
+    "flac", "wav", "aiff", "aif", "aifc", "mp3", "ogg", "oga", "m4a", "mp4", "alac",
 ];
 
 const SCHEMA_VERSION: i32 = 2;

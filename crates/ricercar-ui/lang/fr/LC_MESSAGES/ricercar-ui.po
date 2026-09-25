@@ -205,6 +205,10 @@ msgid "BIT-PERFECT"
 msgstr "BIT-PERFECT"
 
 msgctxt "SettingsPage"
+msgid "SHARED"
+msgstr "PARTAGÉ"
+
+msgctxt "SettingsPage"
 msgid "Rescan devices"
 msgstr "Détecter les périphériques"
 
@@ -415,6 +419,10 @@ msgid "Tint the interface with the playing album's colours."
 msgstr "Teinte l'interface avec les couleurs de l'album en cours."
 
 msgctxt "SettingsPage"
+msgid "Keep playing in the tray when the window is closed"
+msgstr "Continuer la lecture dans la zone de notification à la fermeture"
+
+msgctxt "SettingsPage"
 msgid "Track change notifications"
 msgstr "Notifications de changement de titre"
 
@@ -603,8 +611,8 @@ msgid "Your library is empty"
 msgstr "Votre bibliothèque est vide"
 
 msgctxt "HomePage"
-msgid "Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, MP3, Ogg and Opus files and watches them for changes. Streams pushed from a UPnP app on your phone play here too."
-msgstr "Ajoutez les dossiers qui contiennent votre musique dans les Réglages. ricercar indexe les fichiers FLAC, WAV, AIFF, ALAC, MP3, Ogg et Opus et suit leurs modifications. Les flux envoyés depuis une appli UPnP de votre téléphone sont lus ici aussi."
+msgid "Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, AAC, MP3 and Ogg Vorbis files and watches them for changes. Streams pushed from a UPnP app on your phone play here too."
+msgstr "Ajoutez les dossiers qui contiennent votre musique dans les Réglages. ricercar indexe les fichiers FLAC, WAV, AIFF, ALAC, AAC, MP3 et Ogg Vorbis et suit leurs modifications. Les flux envoyés depuis une appli UPnP de votre téléphone sont lus ici aussi."
 
 msgctxt "HomePage"
 msgid "Add a music folder"
@@ -703,10 +711,6 @@ msgid "Add a music folder in Settings to fill your library."
 msgstr "Ajoutez un dossier de musique dans les Réglages pour remplir votre bibliothèque."
 
 msgctxt "AlbumPage"
-msgid "Album"
-msgstr "Album"
-
-msgctxt "AlbumPage"
 msgid "{n} track"
 msgid_plural "{n} tracks"
 msgstr[0] "{n} titre"
@@ -745,10 +749,6 @@ msgid "{n} album"
 msgid_plural "{n} albums"
 msgstr[0] "{n} album"
 msgstr[1] "{n} albums"
-
-msgctxt "ArtistPage"
-msgid "Artist"
-msgstr "Artiste"
 
 msgctxt "ArtistPage"
 msgid "{n} album"
@@ -851,10 +851,6 @@ msgstr "Albums"
 msgctxt "FavoritesPage"
 msgid "Tracks"
 msgstr "Titres"
-
-msgctxt "PlaylistPage"
-msgid "Playlist"
-msgstr "Playlist"
 
 msgctxt "PlaylistPage"
 msgid "{n} track"

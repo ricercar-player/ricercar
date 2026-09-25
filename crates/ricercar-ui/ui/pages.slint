@@ -52,13 +52,14 @@ export component PageScroll inherits Rectangle {
         VerticalLayout {
             padding-top: 56px;
             padding-bottom: 40px;
+            alignment: start;
             @children
         }
     }
     TopBar {
         y: 0;
         title: root.title;
-        fade: max(0, min(1, (-sv.content-y - root.fade-at + 60px) / 60px));
+        fade: max(0, min(1, (-sv.content-y - root.fade-at) / 60px));
     }
 }
 
@@ -66,6 +67,7 @@ component Stat inherits VerticalLayout {
     in property <string> value;
     in property <string> label;
     spacing: 2px;
+    alignment: start;
     Text { text: value; font-family: Theme.display; font-size: Theme.fs-2xl; font-weight: 700; color: Theme.text; }
     Text { text: label; font-size: Theme.fs-sm; color: Theme.text2; }
 }
@@ -79,7 +81,7 @@ component EmptyState inherits VerticalLayout {
     alignment: center;
     spacing: 10px;
     padding: 48px;
-    Icon { x: (parent.width - self.width) / 2; source: icon; size: 44px; tint: Theme.text3; }
+    HorizontalLayout { alignment: center; Icon { source: icon; size: 44px; tint: Theme.text3; } }
     Text { text: title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
     Text { text: body; font-size: Theme.fs-md; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
     if action != "": HorizontalLayout {
@@ -120,7 +122,7 @@ export component HomePage inherits PageScroll {
         if App.lib-tracks == 0 && !App.scanning: EmptyState {
             icon: Icons.library;
             title: @tr("Your library is empty");
-            body: @tr("Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, MP3, Ogg and Opus files and watches them for changes. Streams pushed from a UPnP app on your phone play here too.");
+            body: @tr("Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, AAC, MP3 and Ogg Vorbis files and watches them for changes. Streams pushed from a UPnP app on your phone play here too.");
             action: @tr("Add a music folder");
             act => { App.add-root(); }
         }
@@ -276,12 +278,6 @@ export component AlbumPage inherits PageScroll {
                 alignment: end;
                 spacing: 8px;
                 padding-bottom: 4px;
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    Text { text: @tr("Album"); font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; vertical-alignment: center; }
-                    if App.al-hires: Badge { y: (parent.height - self.height) / 2; text: "HI-RES"; tint: #f0cf8a; }
-                }
                 Text {
                     text: App.al-title;
                     font-family: Theme.display;
@@ -294,7 +290,7 @@ export component AlbumPage inherits PageScroll {
                     max-height: 150px;
                 }
                 HorizontalLayout {
-                    spacing: 6px;
+                    spacing: 0;
                     alignment: start;
                     Text {
                         text: App.al-artist;
@@ -310,6 +306,10 @@ export component AlbumPage inherits PageScroll {
                         text: (App.al-year != "" ? " · " + App.al-year : "") + " · " + @tr("{n} track" | "{n} tracks" % App.al-count) + " · " + App.al-duration;
                         font-size: Theme.fs-md;
                         color: Theme.text2;
+                    }
+                    if App.al-hires: HorizontalLayout {
+                        padding-left: 10px;
+                        Badge { y: (parent.height - self.height) / 2; text: "HI-RES"; tint: Theme.hires; }
                     }
                 }
                 if App.al-quality != "": Text {
@@ -462,7 +462,6 @@ export component ArtistPage inherits PageScroll {
     fade-at: 220px;
     Rectangle {
         height: 280px;
-        clip: true;
         Rectangle {
             y: -56px;
             height: parent.height + 56px;
@@ -481,13 +480,12 @@ export component ArtistPage inherits PageScroll {
             alignment: end;
             spacing: 6px;
             padding-bottom: 12px;
-            Text { text: @tr("Artist"); font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; }
             Text {
                 text: App.ar-name;
                 font-family: Theme.display;
-                font-size: App.ar-name.character-count > 30 ? Theme.fs-3xl : 64px;
+                font-size: App.ar-name.character-count > 30 ? Theme.fs-3xl : Theme.fs-hero;
                 font-weight: 800;
-                letter-spacing: -1.6px;
+                letter-spacing: -1.2px;
                 color: Theme.text;
                 overflow: elide;
             }
@@ -745,7 +743,6 @@ export component PlaylistPage inherits PageScroll {
             alignment: end;
             spacing: 8px;
             padding-bottom: 40px;
-            Text { text: @tr("Playlist"); font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; }
             Text {
                 text: App.pl-name;
                 font-family: Theme.display;

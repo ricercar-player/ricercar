@@ -25,6 +25,8 @@ pub struct Args {
     /// Do not touch the saved session (tests, one-off runs).
     pub no_session: bool,
     pub headless: bool,
+    /// Files or URIs to play right away.
+    pub open: Vec<String>,
 }
 
 impl Args {
@@ -46,6 +48,7 @@ impl Args {
                 "--no-session" => out.no_session = true,
                 "--headless" => out.headless = true,
                 "-h" | "--help" => return Err(usage()),
+                other if !other.starts_with('-') => out.open.push(other.to_string()),
                 other => return Err(format!("unknown argument: {other}\n{}", usage())),
             }
         }
@@ -54,7 +57,7 @@ impl Args {
 }
 
 pub fn usage() -> String {
-    "usage: ricercar [--headless] [--config FILE] [--device NAME] [--name NAME] [--db PATH]
+    "usage: ricercar [FILE|URI]... [--headless] [--config FILE] [--device NAME] [--name NAME] [--db PATH]
                 [--library DIR]... [--no-mpris] [--no-upnp] [--no-session]
        ricercar --print-devices
 
@@ -75,6 +78,67 @@ pub fn print_devices() {
             },
         );
     }
+}
+
+/// A command-line argument as a playable URI (paths become file:// URIs).
+pub fn to_uri(arg: &str) -> String {
+    if arg.contains("://") {
+        return arg.to_string();
+    }
+    let p = std::fs::canonicalize(arg).unwrap_or_else(|_| PathBuf::from(arg));
+    ricercar_core::meta::file_uri(&p)
+}
+
+/// When ricercar already runs, hand it the files to play (or bring it to
+/// the front) over MPRIS and return true: one instance owns the DAC.
+pub fn forward_to_running(args: &Args) -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let owned = conn
+        .call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus"),
+            "NameHasOwner",
+            &(ricercar_mpris::BUS_NAME,),
+        )
+        .ok()
+        .and_then(|m| m.body().deserialize::<bool>().ok())
+        .unwrap_or(false);
+    if !owned {
+        return false;
+    }
+    let call = |iface: &str, member: &str, uri: Option<&str>| {
+        let r = match uri {
+            Some(u) => conn.call_method(
+                Some(ricercar_mpris::BUS_NAME),
+                ricercar_mpris::PATH,
+                Some(iface),
+                member,
+                &(u,),
+            ),
+            None => conn.call_method(
+                Some(ricercar_mpris::BUS_NAME),
+                ricercar_mpris::PATH,
+                Some(iface),
+                member,
+                &(),
+            ),
+        };
+        if let Err(e) = r {
+            eprintln!("ricercar: {member}: {e}");
+        }
+    };
+    match args.open.first() {
+        Some(first) => call(
+            "org.mpris.MediaPlayer2.Player",
+            "OpenUri",
+            Some(&to_uri(first)),
+        ),
+        None => call("org.mpris.MediaPlayer2", "Raise", None),
+    }
+    true
 }
 
 /// Front-end callbacks for desktop integration (MPRIS Raise/Quit).
@@ -157,7 +221,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     let quit = Arc::new(AtomicBool::new(false));
 
     let renderer = if cfg.network.renderer && !args.no_upnp {
-        match ricercar_upnp::start_renderer(ctl.clone(), &cfg.network.name) {
+        match ricercar_upnp::start_with(ctl.clone(), &cfg.network.name, cfg.network.media_server) {
             Ok(handle) => {
                 tracing::info!(
                     "UPnP renderer \"{}\" on port {}",
@@ -201,6 +265,15 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
 
     let config = Arc::new(RwLock::new(cfg));
     scrobble::spawn(ctl.clone(), config.clone());
+
+    if !args.open.is_empty() {
+        let infos = args
+            .open
+            .iter()
+            .map(|a| ricercar_core::TrackInfo::from_uri(&to_uri(a)))
+            .collect();
+        ctl.play_tracks(infos, 0, ricercar_core::PlayContext::None);
+    }
 
     Ok(AppContext {
         renderer_port: renderer.as_ref().map(|r| r.port),

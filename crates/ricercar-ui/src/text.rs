@@ -28,6 +28,23 @@ pub fn t(en: &'static str) -> &'static str {
     }
     match en {
         "Good morning" => "Bonjour",
+        "Hide window" => "Masquer la fenêtre",
+        "Decoded to" => "Décodé en",
+        "Muted" => "Sourdine",
+        "Software volume" => "Volume logiciel",
+        "ReplayGain / preamp" => "ReplayGain / préampli",
+        "exclusive, no mixer" => "exclusif, sans mixeur",
+        "shared: may resample or mix" => "partagé : peut rééchantillonner ou mixer",
+        "Null sink: audio discarded" => "Sortie nulle : audio ignoré",
+        "written to a file" => "écrit dans un fichier",
+        "Null sink" => "Sortie nulle",
+        "Discards audio (testing)" => "Ignore l'audio (tests)",
+        "Show window" => "Afficher la fenêtre",
+        "Pause" => "Pause",
+        "Play" => "Lecture",
+        "Next" => "Suivant",
+        "Previous" => "Précédent",
+        "Quit" => "Quitter",
         "Good afternoon" => "Bon après-midi",
         "Good evening" => "Bonsoir",
         "Good night" => "Bonne nuit",
@@ -107,7 +124,9 @@ pub fn long_duration(ms: u64) -> String {
     let mins = (ms + 30_000) / 60_000;
     match mins {
         0..=59 => format!("{mins} min"),
-        60..=5999 if mins % 60 != 0 && mins < 600 => format!("{} h {} min", mins / 60, mins % 60),
+        60..=5999 if !mins.is_multiple_of(60) && mins < 600 => {
+            format!("{} h {} min", mins / 60, mins % 60)
+        }
         _ => format!("{} h", mins / 60),
     }
 }
@@ -131,7 +150,7 @@ pub fn quality(
 }
 
 pub fn khz(rate: u32) -> String {
-    if rate % 1000 == 0 {
+    if rate.is_multiple_of(1000) {
         format!("{}", rate / 1000)
     } else {
         format!("{:.1}", rate as f64 / 1000.0)

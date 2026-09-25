@@ -92,7 +92,7 @@ export component QueueList inherits Rectangle {
             spacing: 8px;
             padding: 32px;
             vertical-stretch: 1;
-            Icon { x: (parent.width - self.width) / 2; source: Icons.list-music; size: 36px; tint: Theme.text3; }
+            HorizontalLayout { alignment: center; Icon { source: Icons.list-music; size: 36px; tint: Theme.text3; } }
             Text { text: @tr("The queue is empty"); font-size: Theme.fs-lg; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
             Text { text: @tr("Play an album or add tracks with “Add to queue”."); font-size: Theme.fs-sm; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
         }
@@ -190,10 +190,11 @@ component LyricsView inherits Rectangle {
                 text: l.text == "" ? "♪" : l.text;
                 wrap: word-wrap;
                 font-family: Theme.display;
-                font-size: App.lyrics-synced ? 30px : 20px;
+                font-size: !App.lyrics-synced ? 20px : is-current ? 34px : 30px;
+                animate font-size { duration: 260ms; easing: ease-out; }
                 font-weight: 700;
                 letter-spacing: -0.3px;
-                color: !App.lyrics-synced ? Theme.text.with-alpha(0.85) : is-current ? #ffffff : i < App.lyric-index ? #ffffff59 : #ffffff38;
+                color: !App.lyrics-synced ? #ffffffd9 : is-current ? #ffffff : i < App.lyric-index ? #ffffff59 : #ffffff73;
                 animate color { duration: 300ms; }
                 TouchArea {
                     enabled: App.lyrics-synced;
@@ -206,7 +207,7 @@ component LyricsView inherits Rectangle {
     if App.lyrics.length == 0: VerticalLayout {
         alignment: center;
         spacing: 8px;
-        Icon { x: (parent.width - self.width) / 2; source: Icons.mic-vocal; size: 36px; tint: #ffffff66; }
+        HorizontalLayout { alignment: center; Icon { source: Icons.mic-vocal; size: 36px; tint: #ffffff66; } }
         Text {
             text: App.lyrics-status;
             font-size: Theme.fs-lg;
@@ -217,6 +218,7 @@ component LyricsView inherits Rectangle {
         }
     }
     if App.lyrics-source != "" && App.lyrics.length > 0: Text {
+        x: 0;
         y: parent.height - 22px;
         text: App.lyrics-source;
         font-size: Theme.fs-xs;
@@ -246,16 +248,24 @@ component ChainView inherits VerticalLayout {
     }
     for hop[i] in App.chain: HorizontalLayout {
         spacing: 16px;
-        VerticalLayout {
+        Rectangle {
             width: 16px;
-            padding-top: 6px;
-            alignment: start;
             Rectangle {
+                x: 2px;
+                y: 6px;
                 width: 12px;
                 height: 12px;
                 border-radius: 6px;
                 border-width: 2px;
                 border-color: hop.state == 0 ? Theme.good : hop.state == 1 ? Theme.warn : #ffffff66;
+            }
+            // spine joining this hop to the next
+            if i + 1 < App.chain.length: Rectangle {
+                x: 7px;
+                y: 20px;
+                width: 2px;
+                height: parent.height + 4px;
+                background: (hop.state == 0 ? Theme.good : hop.state == 1 ? Theme.warn : #ffffff66).with-alpha(0.5);
             }
         }
         VerticalLayout {
@@ -300,7 +310,7 @@ export component NowPlayingView inherits Rectangle {
                 width: cover-size;
                 height: cover-size;
                 radius: Theme.r-lg;
-                source: App.cover-large;
+                source: App.cover-large.width > 0 ? App.cover-large : App.cover;
                 placeholder: App.live ? Icons.radio : Icons.music;
                 drop-shadow-blur: 40px;
                 drop-shadow-offset-y: 18px;
@@ -357,7 +367,6 @@ export component NowPlayingView inherits Rectangle {
                             width: tl.preferred-width + 28px;
                             border-radius: self.height / 2;
                             background: i == App.np-tab ? #ffffff : ttt.has-hover ? #ffffff1a : transparent;
-                            animate background { duration: Theme.quick; }
                             tl := Text {
                                 text: t;
                                 font-size: Theme.fs-sm;

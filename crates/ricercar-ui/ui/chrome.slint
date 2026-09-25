@@ -267,16 +267,23 @@ export component ChainPanel inherits Rectangle {
         }
         for hop[i] in App.chain: HorizontalLayout {
             spacing: 12px;
-            VerticalLayout {
+            Rectangle {
                 width: 12px;
-                alignment: start;
-                padding-top: 4px;
                 Rectangle {
+                    x: 2px;
+                    y: 4px;
                     width: 8px;
                     height: 8px;
                     border-radius: 4px;
                     border-width: 2px;
                     border-color: hop.state == 0 ? Theme.good : hop.state == 1 ? Theme.warn : Theme.text3;
+                }
+                if i + 1 < App.chain.length: Rectangle {
+                    x: 5px;
+                    y: 14px;
+                    width: 2px;
+                    height: parent.height - 2px;
+                    background: (hop.state == 0 ? Theme.good : hop.state == 1 ? Theme.warn : Theme.text3).with-alpha(0.45);
                 }
             }
             VerticalLayout {
@@ -328,9 +335,11 @@ export component PlayerBar inherits Rectangle {
         padding-left: 16px;
         padding-right: 16px;
         spacing: 16px;
-        // ---- now playing
+        // ---- now playing (sides start from zero and stretch equally, so the
+        // transport stays centred whatever the title length)
         HorizontalLayout {
-            min-width: 240px;
+            min-width: 180px;
+            preferred-width: 0px;
             horizontal-stretch: 1;
             spacing: 14px;
             alignment: start;
@@ -396,8 +405,7 @@ export component PlayerBar inherits Rectangle {
         }
         // ---- transport
         VerticalLayout {
-            horizontal-stretch: 1.4;
-            max-width: 720px;
+            width: 520px;
             alignment: center;
             spacing: 4px;
             HorizontalLayout {
@@ -487,7 +495,8 @@ export component PlayerBar inherits Rectangle {
         }
         // ---- tools
         HorizontalLayout {
-            min-width: 240px;
+            min-width: 180px;
+            preferred-width: 0px;
             horizontal-stretch: 1;
             alignment: end;
             spacing: 6px;

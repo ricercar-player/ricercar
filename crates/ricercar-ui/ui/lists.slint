@@ -25,8 +25,9 @@ export component TrackHeader inherits Rectangle {
         padding-right: 16px;
         spacing: 16px;
         Text { width: 28px; text: "#"; color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: right; }
-        Text { horizontal-stretch: 3; text: @tr("Title"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
-        if show-album: Text { horizontal-stretch: 2; text: @tr("Album"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
+        if show-cover: Rectangle { width: 38px; }
+        Text { horizontal-stretch: 3; min-width: 0px; preferred-width: 0px; text: @tr("Title"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
+        if show-album: Text { horizontal-stretch: 2; min-width: 0px; preferred-width: 0px; text: @tr("Album"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
         if show-plays: Text { width: 56px; text: @tr("Plays"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: right; }
         Rectangle { width: 30px; }
         Icon { y: (parent.height - self.height) / 2; width: 44px; size: 15px; source: Icons.clock; tint: Theme.text3; }
@@ -101,32 +102,37 @@ export component TrackLine inherits Rectangle {
         }
         VerticalLayout {
             horizontal-stretch: 3;
+            min-width: 0px;
+            preferred-width: 0px;
             alignment: center;
-            spacing: 2px;
-            HorizontalLayout {
+            spacing: 3px;
+            Text {
+                text: item.title;
+                font-size: Theme.fs-md;
+                font-weight: 500;
+                color: item.playing ? Theme.accent : Theme.text;
+                overflow: elide;
+            }
+            if (show-artist && item.artist != "") || (item.hires && show-album): HorizontalLayout {
                 spacing: 6px;
-                Text {
-                    text: item.title;
-                    font-size: Theme.fs-md;
-                    font-weight: 500;
-                    color: item.playing ? Theme.accent : Theme.text;
-                    overflow: elide;
-                }
-                if item.hires && show-artist: Badge {
+                if item.hires && show-album: Badge {
                     y: (parent.height - self.height) / 2;
                     text: item.fmt;
                     tint: Theme.text3;
                 }
-            }
-            if show-artist && item.artist != "": Text {
-                text: item.artist;
-                font-size: Theme.fs-sm;
-                color: Theme.text2;
-                overflow: elide;
+                if show-artist && item.artist != "": Text {
+                    text: item.artist;
+                    font-size: Theme.fs-sm;
+                    color: Theme.text2;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
             }
         }
         if show-album: Text {
             horizontal-stretch: 2;
+            min-width: 0px;
+            preferred-width: 0px;
             text: item.album;
             font-size: Theme.fs-base;
             color: al.has-hover ? Theme.text : Theme.text2;
@@ -139,7 +145,7 @@ export component TrackLine inherits Rectangle {
         }
         if show-plays: Text {
             width: 56px;
-            text: item.plays;
+            text: item.plays > 0 ? item.plays : "";
             font-size: Theme.fs-base;
             color: Theme.text2;
             vertical-alignment: center;
