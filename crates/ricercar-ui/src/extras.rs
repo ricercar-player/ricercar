@@ -655,9 +655,7 @@ pub fn wire(ui: &Rc<Ui>) {
             debounce(ui, "radio", 400, move |ui| radio_text_search(ui, &q));
         })
     });
-    app.on_text_setting_edited(|| {
-        with_ui(|ui| debounce(ui, "settings", 700, settings_changed))
-    });
+    app.on_text_setting_edited(|| with_ui(|ui| debounce(ui, "settings", 700, settings_changed)));
     app.on_lb_edited(|| {
         with_ui(|ui| {
             debounce(ui, "lb", 900, |ui| {
