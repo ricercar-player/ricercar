@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::io::{self, Read, Seek, SeekFrom};
 
 use symphonia::core::audio::GenericAudioBufferRef;
 use symphonia::core::codecs::CodecParameters;
@@ -12,6 +11,7 @@ use symphonia::core::units::TimeBase;
 
 use crate::error::{AudioError, Result};
 use crate::fmt::PcmFormat;
+use crate::http;
 
 /// A decoded track ready (or nearly ready) to be pumped into a sink.
 pub struct TrackSource {
@@ -27,89 +27,21 @@ pub struct TrackSource {
     pub end_of_stream: bool,
     scratch: Vec<i32>,
     pub seekable: bool,
+    time_base: Option<TimeBase>,
+    titles: Option<crossbeam_channel::Receiver<String>>,
 }
 
-/// Intrinsic sample width (in bits) of the decoded buffer. For lossy codecs
-/// that decode to float, the content is scaled into the full i32 range; we
-/// keep 24 bits of it, like every other lossy player.
-fn intrinsic_bits(b: &GenericAudioBufferRef) -> u8 {
+/// Integer width of the decoded buffer; `None` for float output (lossy
+/// codecs), whose full-scale content we keep 24 bits of, like every other
+/// lossy player.
+fn native_bits(b: &GenericAudioBufferRef) -> Option<u8> {
     use GenericAudioBufferRef as G;
     match b {
-        G::U8(_) | G::S8(_) => 8,
-        G::U16(_) | G::S16(_) => 16,
-        G::U24(_) | G::S24(_) => 24,
-        G::F32(_) | G::F64(_) => 32,
-        G::U32(_) | G::S32(_) => 32,
-    }
-}
-
-/// Non-seekable read-ahead ring: a reader thread prefetches from a slow source
-/// (HTTP) so the audio thread is not blocked by network hiccups.
-pub struct Prefetch {
-    rx: crossbeam_channel::Receiver<io::Result<Vec<u8>>>,
-    buf: VecDeque<u8>,
-}
-
-impl Prefetch {
-    fn start(reader: Box<dyn Read + Send + 'static>) -> Prefetch {
-        let (tx, rx) = crossbeam_channel::unbounded::<io::Result<Vec<u8>>>();
-        std::thread::Builder::new()
-            .name("ricercar-prefetch".into())
-            .spawn(move || {
-                let mut reader = reader;
-                let mut chunk = vec![0u8; 256 * 1024];
-                loop {
-                    match reader.read(&mut chunk) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if tx.send(Ok(chunk[..n].to_vec())).is_err() {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Err(io::Error::new(e.kind(), e.to_string())));
-                            break;
-                        }
-                    }
-                }
-            })
-            .ok();
-        Prefetch {
-            rx,
-            buf: VecDeque::new(),
-        }
-    }
-}
-
-impl Read for Prefetch {
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if self.buf.is_empty() {
-            match self.rx.recv() {
-                Ok(Ok(chunk)) => self.buf.extend(chunk),
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Ok(0), // producer gone => EOF
-            }
-        }
-        let n = std::cmp::min(out.len(), self.buf.len());
-        for slot in out.iter_mut().take(n) {
-            *slot = self.buf.pop_front().unwrap();
-        }
-        Ok(n)
-    }
-}
-
-impl Seek for Prefetch {
-    fn seek(&mut self, _p: SeekFrom) -> io::Result<u64> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "not seekable"))
-    }
-}
-
-impl MediaSource for Prefetch {
-    fn is_seekable(&self) -> bool {
-        false
-    }
-    fn byte_len(&self) -> Option<u64> {
-        None
+        G::U8(_) | G::S8(_) => Some(8),
+        G::U16(_) | G::S16(_) => Some(16),
+        G::U24(_) | G::S24(_) => Some(24),
+        G::U32(_) | G::S32(_) => Some(32),
+        G::F32(_) | G::F64(_) => None,
     }
 }
 
@@ -142,19 +74,6 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn open_http(uri: &str) -> Result<Box<dyn MediaSource + Send + 'static>> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(10))
-        .timeout_read(std::time::Duration::from_secs(30))
-        .build();
-    let resp = agent
-        .get(uri)
-        .call()
-        .map_err(|e| AudioError::UnsupportedSource(format!("http fetch {uri}: {e}")))?;
-    let reader = Box::new(resp.into_reader());
-    Ok(Box::new(Prefetch::start(reader)))
-}
-
 fn extension_of(uri: &str) -> Option<String> {
     let path = uri.rsplit_once(['?', '#']).map_or(uri, |a| a.0);
     let ext = path.rsplit_once('.')?.1.to_lowercase();
@@ -167,23 +86,18 @@ fn extension_of(uri: &str) -> Option<String> {
 
 impl TrackSource {
     pub fn open(uri: &str) -> Result<TrackSource> {
-        let (mss, seekable): (MediaSourceStream<'static>, bool) =
+        let (src, seekable, titles): (Box<dyn MediaSource>, bool, _) =
             if let Some(path) = path_from_uri(uri) {
                 let file = std::fs::File::open(&path)
                     .map_err(|e| AudioError::UnsupportedSource(format!("open {path}: {e}")))?;
-                (
-                    MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default()),
-                    true,
-                )
+                (Box::new(file), true, None)
             } else if uri.starts_with("http://") || uri.starts_with("https://") {
-                let src: Box<dyn MediaSource + Send + 'static> = open_http(uri)?;
-                (
-                    MediaSourceStream::new(src, MediaSourceStreamOptions::default()),
-                    false,
-                )
+                let h = http::open(uri)?;
+                (h.source, h.seekable, h.titles)
             } else {
                 return Err(AudioError::UnsupportedSource(uri.into()));
             };
+        let mss = MediaSourceStream::new(src, MediaSourceStreamOptions::default());
 
         let mut hint = Hint::new();
         if let Some(ext) = extension_of(uri) {
@@ -235,6 +149,8 @@ impl TrackSource {
             end_of_stream: false,
             scratch: Vec::new(),
             seekable,
+            time_base: tb,
+            titles,
         })
     }
 
@@ -264,20 +180,22 @@ impl TrackSource {
                             let spec = buf.spec();
                             let rate = spec.rate();
                             let channels = spec.channels().count() as u16;
-                            let intrinsic = intrinsic_bits(&buf) as u32;
+                            let native = native_bits(&buf);
                             self.scratch.clear();
                             buf.copy_to_vec_interleaved::<i32>(&mut self.scratch);
-                            let _ = buf;
                             let bits = self
                                 .decoder
                                 .codec_params()
                                 .bits_per_sample
-                                .unwrap_or(if intrinsic == 32 { 24 } else { intrinsic })
-                                as u8;
-                            // symphonia left-aligns content inside the sample
-                            // type; right-shift back to LSB alignment so the
-                            // container stage can re-align losslessly.
-                            let rshift = intrinsic.saturating_sub(bits as u32).min(31);
+                                .map(|b| b as u8)
+                                .or(native)
+                                .unwrap_or(24)
+                                .clamp(1, 32);
+                            // Conversion to i32 scales every sample type to
+                            // full range (content MSB-aligned); shift back to
+                            // LSB alignment so the container stage can
+                            // re-align losslessly.
+                            let rshift = 32 - bits as u32;
                             if rshift > 0 {
                                 for v in self.scratch.iter_mut() {
                                     *v >>= rshift;
@@ -317,11 +235,20 @@ impl TrackSource {
         }
     }
 
-    /// Accurate seek (seekable sources only).
-    pub fn seek_ms(&mut self, ms: u64) -> Result<()> {
+    /// Latest stream title announced by the source (internet radio), if a
+    /// new one arrived since the last call.
+    pub fn take_stream_title(&mut self) -> Option<String> {
+        self.titles.as_ref().and_then(|rx| rx.try_iter().last())
+    }
+
+    /// Seek (seekable sources only). Returns the position actually reached:
+    /// the demuxer lands on a packet boundary at or before the request, and
+    /// that is where playback resumes.
+    pub fn seek_ms(&mut self, ms: u64) -> Result<std::time::Duration> {
         let time = symphonia::core::units::Time::try_from_secs_f64(ms as f64 / 1000.0)
             .ok_or_else(|| AudioError::Decode("seek out of range".into()))?;
-        self.reader
+        let seeked = self
+            .reader
             .seek(
                 SeekMode::Accurate,
                 SeekTo::Time {
@@ -333,6 +260,10 @@ impl TrackSource {
         self.decoder.reset();
         self.pending.clear();
         self.end_of_stream = false;
-        Ok(())
+        let actual = self
+            .time_base
+            .and_then(|tb| tb.calc_time(seeked.actual_ts))
+            .map_or(ms as f64 / 1000.0, |t| t.as_secs_f64().max(0.0));
+        Ok(std::time::Duration::from_secs_f64(actual))
     }
 }
