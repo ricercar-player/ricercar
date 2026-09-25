@@ -12,3 +12,4 @@ ricercar-mpris.workspace = true
 ricercar-upnp.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+zbus = "5.19.0"

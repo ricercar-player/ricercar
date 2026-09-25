@@ -193,7 +193,7 @@ impl Renderer {
             TransportStatus::Paused => "PAUSED_PLAYBACK",
             TransportStatus::Stopped => "STOPPED",
         };
-        let uri = st.current_uri.clone().unwrap_or_default();
+        let uri = st.current_uri().unwrap_or_default();
         let mute = self.inner.read().unwrap().mute;
         (transport.to_string(), uri, st.volume, mute)
     }
@@ -311,9 +311,9 @@ impl Renderer {
                 let st = self.controller.state.lock().unwrap();
                 let dur = st.dur_ms;
                 let pos = st.pos_ms;
-                let track = st.queue_index.map(|i| i + 1).unwrap_or(0);
+                let track = st.current.map(|i| i + 1).unwrap_or(0);
                 let (uri, meta) = st
-                    .current_uri
+                    .current_uri()
                     .as_ref()
                     .map(|u| {
                         (
@@ -349,7 +349,7 @@ impl Renderer {
             }
             "GetMediaInfo" => {
                 let st = self.controller.state.lock().unwrap();
-                let cur = st.current_uri.clone().unwrap_or_default();
+                let cur = st.current_uri().unwrap_or_default();
                 let dur = st.dur_ms;
                 drop(st);
                 let next = self
@@ -772,13 +772,6 @@ fn b36(v: u64) -> String {
     String::from_utf8(out).unwrap()
 }
 
-fn album_id(album: &str, artist: Option<&str>) -> String {
-    format!(
-        "A{}",
-        b36(fnv(&format!("{album}|{}", artist.unwrap_or(""))) % (1 << 60))
-    )
-}
-
 fn track_id(path: &str) -> String {
     format!("T{}", b36(fnv(path) % (1 << 60)))
 }
@@ -898,31 +891,22 @@ impl Renderer {
         };
         match object_id {
             "0" => {
-                for a in self.controller.lib.albums() {
-                    let id = album_id(&a.album, a.album_artist.as_deref());
+                for a in self.controller.lib.albums(ricercar_core::AlbumSort::Artist) {
+                    let id = format!("A{}", a.id);
                     push(
                         &mut out,
                         format!(
                             "<container id=\"{id}\" parentID=\"0\" childCount=\"{}\" restricted=\"false\" searchable=\"false\"><dc:title>{}</dc:title><upnp:class>object.container.album.musicAlbum</upnp:class></container>",
                             a.track_count,
-                            desc::xml_escape(&a.album),
+                            desc::xml_escape(&a.title),
                         ),
                     );
                 }
             }
             id if id.starts_with('A') => {
-                let album = self
-                    .controller
-                    .lib
-                    .albums()
-                    .into_iter()
-                    .find(|a| album_id(&a.album, a.album_artist.as_deref()) == id);
+                let album = self.controller.lib.album(&id[1..]);
                 if let Some(a) = album {
-                    for t in self
-                        .controller
-                        .lib
-                        .album_tracks(&a.album, a.album_artist.as_deref())
-                    {
+                    for t in self.controller.lib.album_tracks(&a.id) {
                         let tid = track_id(&t.path);
                         let pid = id.to_string();
                         let (mime, pn) = mime_of(&t.path);
@@ -946,7 +930,7 @@ impl Renderer {
                                 desc::xml_escape(&t.title),
                                 desc::xml_escape(t.artist.as_deref().unwrap_or("")),
                                 desc::xml_escape(t.artist.as_deref().unwrap_or("")),
-                                desc::xml_escape(&a.album),
+                                desc::xml_escape(&a.title),
                                 t.track.unwrap_or(0),
                                 mime,
                                 pn,

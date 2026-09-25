@@ -54,7 +54,7 @@ pub fn parse_didl(uri: &str, meta: &str) -> Option<TrackInfo> {
         title: title.unwrap_or_default(),
         artist,
         album,
-        duration_ms: 0,
         cover: art,
+        ..Default::default()
     })
 }

@@ -1,182 +1,284 @@
+//! Shared startup for the headless daemon and the desktop app: config,
+//! library, engine, UPnP, MPRIS.
+
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use ricercar_audio::device::list_devices;
+use ricercar_core::config::{self, Config};
+use ricercar_core::covers::CoverCache;
 use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub device: String,
-    pub name: String,
-    pub db: PathBuf,
+/// Command-line overrides on top of the config file.
+#[derive(Debug, Clone, Default)]
+pub struct Args {
+    pub config: Option<PathBuf>,
+    pub device: Option<String>,
+    pub name: Option<String>,
+    pub db: Option<PathBuf>,
     pub roots: Vec<PathBuf>,
-    pub mpris: bool,
-    pub upnp: bool,
+    pub no_mpris: bool,
+    pub no_upnp: bool,
+    /// Do not touch the saved session (tests, one-off runs).
+    pub no_session: bool,
+    pub headless: bool,
 }
 
-impl Config {
-    pub fn from_args(args: impl Iterator<Item = String>) -> Result<Self, String> {
-        let mut cfg = Config {
-            device: "default".into(),
-            name: "ricercar".into(),
-            db: default_db(),
-            roots: Vec::new(),
-            mpris: true,
-            upnp: true,
-        };
+impl Args {
+    pub fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
+        let mut out = Args::default();
         let mut args = args.peekable();
+        let mut value = |args: &mut std::iter::Peekable<_>, flag: &str| -> Result<String, String> {
+            args.next().ok_or_else(|| format!("{flag} needs a value"))
+        };
         while let Some(a) = args.next() {
             match a.as_str() {
-                "--device" => {
-                    cfg.device = args.next().ok_or("--device needs a value")?;
-                }
-                "--name" => {
-                    cfg.name = args.next().ok_or("--name needs a value")?;
-                }
-                "--db" => {
-                    cfg.db = args.next().ok_or("--db needs a value")?.into();
-                }
-                "--library" => {
-                    cfg.roots
-                        .push(args.next().ok_or("--library needs a value")?.into());
-                }
-                "--no-mpris" => cfg.mpris = false,
-                "--no-upnp" => cfg.upnp = false,
+                "--config" => out.config = Some(value(&mut args, "--config")?.into()),
+                "--device" => out.device = Some(value(&mut args, "--device")?),
+                "--name" => out.name = Some(value(&mut args, "--name")?),
+                "--db" => out.db = Some(value(&mut args, "--db")?.into()),
+                "--library" => out.roots.push(value(&mut args, "--library")?.into()),
+                "--no-mpris" => out.no_mpris = true,
+                "--no-upnp" => out.no_upnp = true,
+                "--no-session" => out.no_session = true,
+                "--headless" => out.headless = true,
                 "-h" | "--help" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n{}", usage())),
             }
         }
-        if let Ok(music) = std::env::var("RICERCAR_LIBRARY") {
-            for p in music.split(':') {
-                if !p.is_empty() && !cfg.roots.iter().any(|r| r == p) {
-                    cfg.roots.push(p.into());
-                }
-            }
-        }
-        Ok(cfg)
+        Ok(out)
     }
 }
 
-fn usage() -> String {
-    "usage: ricercar-daemon [--device NAME] [--name NAME] [--db PATH] [--library DIR]... [--no-mpris] [--no-upnp]"
-        .into()
-}
+pub fn usage() -> String {
+    "usage: ricercar [--headless] [--config FILE] [--device NAME] [--name NAME] [--db PATH]
+                [--library DIR]... [--no-mpris] [--no-upnp] [--no-session]
+       ricercar --print-devices
 
-fn default_db() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join(".local/share"))
-                .unwrap_or_else(|_| std::env::temp_dir())
-        });
-    base.join("ricercar").join("library.db")
+Settings live in ~/.config/ricercar/config.toml; flags override them for this run."
+        .into()
 }
 
 pub fn print_devices() {
     for d in list_devices() {
         println!(
-            "{}  {}{}{}",
+            "{:<14} {}{}",
             d.name,
             d.description,
-            if d.kind.is_bit_perfect() {
-                " [bit-perfect]"
-            } else {
-                ""
-            },
-            if d.kind == ricercar_audio::DeviceKind::Virtual {
-                " [virtual]"
+            if d.kind.is_bit_perfect() && d.kind == ricercar_audio::DeviceKind::Hardware {
+                "  [bit-perfect]"
             } else {
                 ""
             },
         );
     }
+}
+
+/// Front-end callbacks for desktop integration (MPRIS Raise/Quit).
+#[derive(Clone, Default)]
+pub struct Hooks {
+    pub on_raise: Option<Arc<dyn Fn() + Send + Sync>>,
+    pub on_quit: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 pub struct AppContext {
     pub ctl: Arc<Controller>,
+    pub lib: Arc<Library>,
+    pub covers: Arc<CoverCache>,
+    pub config: Arc<RwLock<Config>>,
+    pub config_path: PathBuf,
     pub quit: Arc<AtomicBool>,
+    pub renderer_port: Option<u16>,
     _renderer: Option<ricercar_upnp::RendererHandle>,
-    _watcher: Option<WatcherHandle>,
+    watcher: Arc<RwLock<Option<WatcherHandle>>>,
+    _mpris: Option<zbus::blocking::Connection>,
 }
 
-pub fn startup(cfg: Config) -> Result<AppContext, Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
+pub fn init_logging() {
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,symphonia=warn".into()),
         )
-        .init();
+        .try_init();
+}
 
-    if let Some(parent) = cfg.db.parent() {
-        let _ = std::fs::create_dir_all(parent);
+pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::error::Error>> {
+    init_logging();
+    let config_path = args.config.clone().unwrap_or_else(Config::default_path);
+    let first_run = !config_path.exists();
+    let mut cfg = Config::load(&config_path);
+    if let Some(d) = &args.device {
+        cfg.audio.device = d.clone();
     }
-    let lib = Arc::new(Library::open(&cfg.db)?);
-    for root in &cfg.roots {
-        let n = ricercar_core::watcher::scan(&lib, root);
-        tracing::info!(%n, root = %root.display(), "scanned");
+    if let Some(n) = &args.name {
+        cfg.network.name = n.clone();
     }
-    let _watcher = if cfg.roots.is_empty() {
-        None
-    } else {
-        Some(WatcherHandle::start(lib.clone(), cfg.roots.clone()))
-    };
+    for r in &args.roots {
+        if !cfg.library.roots.contains(r) {
+            cfg.library.roots.push(r.clone());
+        }
+    }
+    if let Ok(env_roots) = std::env::var("RICERCAR_LIBRARY") {
+        for p in env_roots.split(':').filter(|p| !p.is_empty()) {
+            let p = PathBuf::from(p);
+            if !cfg.library.roots.contains(&p) {
+                cfg.library.roots.push(p);
+            }
+        }
+    }
+    if first_run && args.config.is_none() {
+        // Persist detected defaults (music dir) so the settings page shows them.
+        let _ = cfg.save(&config_path);
+    }
 
-    let ctl = Arc::new(Controller::new(lib.clone(), &cfg.device));
-    tracing::info!(device = %cfg.device, "audio engine up");
+    let db = args
+        .db
+        .clone()
+        .unwrap_or_else(|| config::data_dir().join("library.db"));
+    let lib = Arc::new(Library::open(&db)?);
+    let covers = Arc::new(CoverCache::new(CoverCache::default_dir()));
+
+    let ctl = Arc::new(Controller::new(lib.clone(), &cfg.audio.device));
+    if !args.no_session {
+        ctl.enable_session(
+            config::data_dir().join("session.json"),
+            cfg.audio.restore_session,
+        );
+    }
+    tracing::info!(device = %cfg.audio.device, "audio engine up");
+
+    let watcher = Arc::new(RwLock::new(None));
+    rescan_in_background(&lib, &cfg, &watcher);
 
     let quit = Arc::new(AtomicBool::new(false));
 
-    let renderer = if cfg.upnp {
-        let handle = ricercar_upnp::start_renderer(ctl.clone(), &cfg.name)?;
-        let ip = local_ip().unwrap_or_else(|| "127.0.0.1".into());
-        tracing::info!(
-            "UPnP MediaRenderer \"{}\" at http://{}:{}/device.xml",
-            cfg.name,
-            ip,
-            handle.port
-        );
-        Some(handle)
+    let renderer = if cfg.network.renderer && !args.no_upnp {
+        match ricercar_upnp::start_renderer(ctl.clone(), &cfg.network.name) {
+            Ok(handle) => {
+                tracing::info!(
+                    "UPnP renderer \"{}\" on port {}",
+                    cfg.network.name,
+                    handle.port
+                );
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("UPnP unavailable: {e}");
+                None
+            }
+        }
     } else {
         None
     };
 
-    if cfg.mpris {
-        match ricercar_mpris::serve(ctl.clone()) {
+    let mpris = if !args.no_mpris {
+        let opts = ricercar_mpris::MprisOptions {
+            covers: Some(covers.clone()),
+            on_raise: hooks.on_raise.clone(),
+            on_quit: Some(hooks.on_quit.clone().unwrap_or_else(|| {
+                let q = quit.clone();
+                Arc::new(move || q.store(true, Ordering::SeqCst))
+            })),
+        };
+        match ricercar_mpris::serve_with(ctl.clone(), opts) {
             Ok(conn) => {
-                ricercar_mpris::spawn_event_loop(conn, quit.clone());
+                ricercar_mpris::spawn_event_loop(conn.clone(), ctl.clone(), quit.clone());
                 tracing::info!("MPRIS: {}", ricercar_mpris::BUS_NAME);
+                Some(conn)
             }
-            Err(e) => tracing::warn!("mpris unavailable: {e}"),
+            Err(e) => {
+                tracing::warn!("MPRIS unavailable: {e}");
+                None
+            }
         }
-    }
+    } else {
+        None
+    };
 
     Ok(AppContext {
+        renderer_port: renderer.as_ref().map(|r| r.port),
         ctl,
+        lib,
+        covers,
+        config: Arc::new(RwLock::new(cfg)),
+        config_path,
         quit,
         _renderer: renderer,
-        _watcher,
+        watcher,
+        _mpris: mpris,
     })
 }
 
+/// Incremental scan of the configured roots off the calling thread, then
+/// (re)start the filesystem watcher.
+fn rescan_in_background(
+    lib: &Arc<Library>,
+    cfg: &Config,
+    watcher: &Arc<RwLock<Option<WatcherHandle>>>,
+) {
+    let lib = lib.clone();
+    let roots = cfg.library.roots.clone();
+    let watch = cfg.library.watch;
+    let watcher = watcher.clone();
+    std::thread::Builder::new()
+        .name("ricercar-scan".into())
+        .spawn(move || {
+            let t = std::time::Instant::now();
+            let r = lib.scan_roots(&roots);
+            tracing::info!(
+                added = r.added,
+                updated = r.updated,
+                removed = r.removed,
+                total = r.total,
+                "library scanned in {:.1?}",
+                t.elapsed()
+            );
+            let new = (watch && !roots.is_empty()).then(|| WatcherHandle::start(lib, roots));
+            *watcher.write().unwrap() = new;
+        })
+        .expect("spawn scan");
+}
+
 impl AppContext {
+    /// Persist the config and apply library changes (roots/watch).
+    pub fn update_config(&self, f: impl FnOnce(&mut Config)) {
+        let (old_roots, cfg) = {
+            let mut c = self.config.write().unwrap();
+            let old = c.library.clone();
+            f(&mut c);
+            (old, c.clone())
+        };
+        if let Err(e) = cfg.save(&self.config_path) {
+            tracing::warn!("save config: {e}");
+        }
+        if cfg.audio.device != self.ctl.device_name() {
+            self.ctl.set_device(&cfg.audio.device);
+        }
+        if old_roots != cfg.library {
+            self.lib.retain_roots(&cfg.library.roots);
+            rescan_in_background(&self.lib, &cfg, &self.watcher);
+        }
+    }
+
+    pub fn rescan(&self) {
+        let cfg = self.config.read().unwrap().clone();
+        rescan_in_background(&self.lib, &cfg, &self.watcher);
+    }
+
     pub fn wait_until_quit(&self) {
         let q = self.quit.clone();
         let _ = ctrlc::set_handler(move || q.store(true, Ordering::SeqCst));
         while !self.quit.load(Ordering::Relaxed) {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
+        self.shutdown();
+    }
+
+    pub fn shutdown(&self) {
+        self.quit.store(true, Ordering::SeqCst);
+        self.ctl.shutdown();
         tracing::info!("bye");
     }
-}
-
-pub fn run(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
-    startup(cfg)?.wait_until_quit();
-    Ok(())
-}
-
-fn local_ip() -> Option<String> {
-    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.connect(("8.8.8.8", 80)).ok()?;
-    sock.local_addr().ok().map(|a| a.ip().to_string())
 }

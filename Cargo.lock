@@ -4400,13 +4400,7 @@ dependencies = [
 name = "ricercar-cli"
 version = "0.1.0"
 dependencies = [
- "image",
- "ricercar-core",
- "ricercar-ui",
  "serde",
- "slint",
- "tracing",
- "tracing-subscriber",
  "zbus",
 ]
 
@@ -4415,11 +4409,17 @@ name = "ricercar-core"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "image",
  "lofty",
  "notify",
+ "rayon",
  "ricercar-audio",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
+ "toml",
  "tracing",
  "ureq",
  "walkdir",
@@ -4436,6 +4436,7 @@ dependencies = [
  "ricercar-upnp",
  "tracing",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]
