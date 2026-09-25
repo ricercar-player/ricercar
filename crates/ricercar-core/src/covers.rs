@@ -108,7 +108,11 @@ fn sanitize(key: &str) -> String {
 
 /// A saturated, readable accent colour from an image (r, g, b).
 pub fn accent_color(path: &Path) -> Option<[u8; 3]> {
-    let img = image::open(path).ok()?.thumbnail(48, 48).to_rgb8();
+    accent_of(&image::open(path).ok()?)
+}
+
+pub fn accent_of(img: &image::DynamicImage) -> Option<[u8; 3]> {
+    let img = img.thumbnail(48, 48).to_rgb8();
     let mut bins = [[0f64; 4]; 12]; // weight, r, g, b
     for p in img.pixels() {
         let [r, g, b] = p.0.map(|c| c as f64 / 255.0);

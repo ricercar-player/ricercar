@@ -10,6 +10,8 @@ use ricercar_core::config::{self, Config};
 use ricercar_core::covers::CoverCache;
 use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
+mod scrobble;
+
 /// Command-line overrides on top of the config file.
 #[derive(Debug, Clone, Default)]
 pub struct Args {
@@ -29,7 +31,7 @@ impl Args {
     pub fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
         let mut out = Args::default();
         let mut args = args.peekable();
-        let mut value = |args: &mut std::iter::Peekable<_>, flag: &str| -> Result<String, String> {
+        let value = |args: &mut std::iter::Peekable<_>, flag: &str| -> Result<String, String> {
             args.next().ok_or_else(|| format!("{flag} needs a value"))
         };
         while let Some(a) = args.next() {
@@ -197,12 +199,15 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         None
     };
 
+    let config = Arc::new(RwLock::new(cfg));
+    scrobble::spawn(ctl.clone(), config.clone());
+
     Ok(AppContext {
         renderer_port: renderer.as_ref().map(|r| r.port),
         ctl,
         lib,
         covers,
-        config: Arc::new(RwLock::new(cfg)),
+        config,
         config_path,
         quit,
         _renderer: renderer,

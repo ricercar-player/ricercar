@@ -1,0 +1,522 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, Page, ChainHop } from "state.slint";
+import { Icon, IconButton, Cover, SeekBar, TextField, Badge } from "widgets.slint";
+
+component NavItem inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> active;
+    in property <string> trailing;
+    callback clicked();
+    height: 36px;
+    border-radius: Theme.r-md;
+    background: active ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    animate background { duration: Theme.quick; }
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-action-default => { clicked(); }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            source: icon;
+            size: 18px;
+            tint: active ? Theme.accent : ta.has-hover ? Theme.text : Theme.text2;
+        }
+        Text {
+            text: root.text;
+            font-size: Theme.fs-md;
+            font-weight: active ? 600 : 500;
+            color: active || ta.has-hover ? Theme.text : Theme.text2;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if trailing != "": Text {
+            text: root.trailing;
+            font-size: Theme.fs-xs;
+            color: Theme.text3;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    callback focus-search();
+    callback new-playlist();
+    width: 240px;
+    background: Theme.panel;
+    public function focus-search-field() {
+        search.focus-field();
+    }
+    VerticalLayout {
+        padding: 12px;
+        padding-top: 18px;
+        spacing: 2px;
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-bottom: 14px;
+            spacing: 10px;
+            Image {
+                width: 26px;
+                height: 26px;
+                source: @image-url("../../../dist/ricercar.svg");
+            }
+            Text {
+                text: "ricercar";
+                font-family: Theme.display;
+                font-size: 21px;
+                font-weight: 800;
+                letter-spacing: -0.4px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+        }
+        search := TextField {
+            icon: Icons.search;
+            placeholder: @tr("Search");
+            clearable: true;
+            text <=> App.search-text;
+            edited(t) => {
+                App.search(t);
+            }
+            accepted(t) => {
+                App.search(t);
+            }
+            escape => {
+                App.search-text = "";
+                App.search("");
+            }
+        }
+        Rectangle { height: 14px; }
+        NavItem {
+            icon: Icons.house;
+            text: @tr("Home");
+            active: App.page == Page.home;
+            clicked => { App.navigate(Page.home, ""); }
+        }
+        NavItem {
+            icon: Icons.disc-3;
+            text: @tr("Albums");
+            active: App.page == Page.albums || App.page == Page.album;
+            clicked => { App.navigate(Page.albums, ""); }
+        }
+        NavItem {
+            icon: Icons.users-round;
+            text: @tr("Artists");
+            active: App.page == Page.artists || App.page == Page.artist;
+            clicked => { App.navigate(Page.artists, ""); }
+        }
+        NavItem {
+            icon: Icons.music;
+            text: @tr("Tracks");
+            active: App.page == Page.tracks;
+            clicked => { App.navigate(Page.tracks, ""); }
+        }
+        NavItem {
+            icon: Icons.tag;
+            text: @tr("Genres");
+            active: App.page == Page.genres || App.page == Page.genre;
+            clicked => { App.navigate(Page.genres, ""); }
+        }
+        NavItem {
+            icon: Icons.heart;
+            text: @tr("Favorites");
+            active: App.page == Page.favorites;
+            clicked => { App.navigate(Page.favorites, ""); }
+        }
+        NavItem {
+            icon: Icons.radio;
+            text: @tr("Radio");
+            active: App.page == Page.radio;
+            clicked => { App.navigate(Page.radio, ""); }
+        }
+        Rectangle { height: 18px; }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 4px;
+            height: 30px;
+            Text {
+                text: @tr("Playlists");
+                font-size: Theme.fs-xs;
+                font-weight: 700;
+                letter-spacing: 0.6px;
+                color: Theme.text3;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            IconButton {
+                icon: Icons.plus;
+                size: 26px;
+                icon-size: 15px;
+                tooltip: @tr("New playlist");
+                clicked => { root.new-playlist(); }
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 2px;
+                alignment: start;
+                for p in App.playlists: NavItem {
+                    icon: Icons.list-music;
+                    text: p.name;
+                    trailing: p.tracks;
+                    active: App.page == Page.playlist && App.pl-id == p.id;
+                    clicked => { App.navigate(Page.playlist, p.id); }
+                }
+                if App.playlists.length == 0: Text {
+                    text: "   " + @tr("No playlists yet");
+                    font-size: Theme.fs-sm;
+                    color: Theme.text3;
+                }
+            }
+        }
+        if App.scanning: HorizontalLayout {
+            padding: 10px;
+            spacing: 8px;
+            Icon { y: (parent.height - self.height) / 2; source: Icons.refresh-cw; size: 14px; tint: Theme.text3; }
+            Text {
+                text: App.scan-total > 0 ? @tr("Indexing {} / {}", App.scan-done, App.scan-total) : @tr("Scanning library…");
+                font-size: Theme.fs-xs;
+                color: Theme.text3;
+                vertical-alignment: center;
+            }
+        }
+        NavItem {
+            icon: Icons.settings;
+            text: @tr("Settings");
+            active: App.page == Page.settings;
+            clicked => { App.navigate(Page.settings, ""); }
+        }
+    }
+    Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
+}
+
+component QualityChip inherits Rectangle {
+    callback clicked();
+    height: 24px;
+    width: lay.preferred-width;
+    border-radius: 12px;
+    background: ta.has-hover ? Theme.selected : Theme.hover;
+    animate background { duration: Theme.quick; }
+    accessible-role: button;
+    accessible-label: App.bitperfect ? "Bit-perfect " + App.quality : App.quality;
+    lay := HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 10px;
+        spacing: 6px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 7px;
+            height: 7px;
+            border-radius: 3.5px;
+            background: !App.chain-known ? Theme.text3 : App.bitperfect ? Theme.good : Theme.warn;
+        }
+        Text {
+            text: App.codec == "" ? App.quality : App.codec + " " + App.quality;
+            font-size: Theme.fs-xs;
+            font-weight: 700;
+            color: App.hires ? Theme.text : Theme.text2;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Signal path popover content: source → decoder → container → device.
+export component ChainPanel inherits Rectangle {
+    width: 330px;
+    height: lay.preferred-height;
+    border-radius: Theme.r-lg;
+    background: Theme.overlay;
+    border-width: 1px;
+    border-color: Theme.line;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 10px;
+    drop-shadow-color: #00000080;
+    lay := VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: 9px;
+                height: 9px;
+                border-radius: 4.5px;
+                background: !App.chain-known ? Theme.text3 : App.bitperfect ? Theme.good : Theme.warn;
+            }
+            Text {
+                text: !App.chain-known ? @tr("Signal path") : App.bitperfect ? @tr("Bit-perfect") : @tr("Altered signal path");
+                font-size: Theme.fs-md;
+                font-weight: 700;
+                color: Theme.text;
+            }
+        }
+        for hop[i] in App.chain: HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                width: 12px;
+                alignment: start;
+                padding-top: 4px;
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    border-width: 2px;
+                    border-color: hop.state == 0 ? Theme.good : hop.state == 1 ? Theme.warn : Theme.text3;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                Text { text: hop.label; font-size: Theme.fs-xs; color: Theme.text3; }
+                Text { text: hop.value; font-size: Theme.fs-base; color: Theme.text; wrap: word-wrap; }
+            }
+        }
+        Text {
+            text: App.bitperfect ? @tr("Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing.") : @tr("Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback.");
+            wrap: word-wrap;
+            font-size: Theme.fs-sm;
+            color: Theme.text2;
+        }
+    }
+}
+
+component VolumeControl inherits HorizontalLayout {
+    spacing: 4px;
+    IconButton {
+        y: (parent.height - self.height) / 2;
+        icon: App.muted || App.volume == 0 ? Icons.volume-x : App.volume < 0.5 ? Icons.volume-1 : Icons.volume-2;
+        tooltip: @tr("Mute");
+        clicked => { App.toggle-mute(); }
+    }
+    SeekBar {
+        y: (parent.height - self.height) / 2;
+        width: 96px;
+        value: App.muted ? 0 : App.volume;
+        fill: App.volume < 1 ? Theme.warn : Theme.text2;
+        seek(v) => { App.set-volume(v); }
+        moved(v) => { App.set-volume(v); }
+    }
+}
+
+export component PlayerBar inherits Rectangle {
+    callback show-chain(length, length);
+    height: 88px;
+    background: Theme.panel;
+    Rectangle { height: 1px; y: 0; background: Theme.line; }
+    private property <int> shown-pos: App.pos-ms;
+    function mmss(ms: int) -> string {
+        let s = floor(ms / 1000);
+        let m = floor(s / 60);
+        let sec = mod(s, 60);
+        m + ":" + (sec < 10 ? "0" : "") + sec
+    }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        // ---- now playing
+        HorizontalLayout {
+            min-width: 240px;
+            horizontal-stretch: 1;
+            spacing: 14px;
+            alignment: start;
+            Cover {
+                y: (parent.height - self.height) / 2;
+                width: 58px;
+                height: 58px;
+                radius: 6px;
+                source: App.cover;
+                placeholder: App.live ? Icons.radio : Icons.music;
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { App.now-playing-open = true; }
+                }
+                if App.has-track: Rectangle {
+                    background: cta.has-hover ? #00000080 : transparent;
+                    cta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.now-playing-open = true; }
+                    }
+                    if cta.has-hover: Icon { source: Icons.maximize-2; size: 18px; tint: #ffffff; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                horizontal-stretch: 1;
+                Text {
+                    text: App.has-track ? App.title : @tr("Nothing playing");
+                    font-size: Theme.fs-md;
+                    font-weight: 600;
+                    color: App.has-track ? Theme.text : Theme.text3;
+                    overflow: elide;
+                    TouchArea {
+                        mouse-cursor: App.album-id != "" ? pointer : default;
+                        clicked => { App.go-to-album(); }
+                    }
+                }
+                Text {
+                    text: App.artist;
+                    font-size: Theme.fs-sm;
+                    color: ata.has-hover ? Theme.text : Theme.text2;
+                    overflow: elide;
+                    ata := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.go-to-artist(); }
+                    }
+                }
+                if App.origin != "": Text {
+                    text: App.origin;
+                    font-size: Theme.fs-xs;
+                    color: Theme.accent;
+                    overflow: elide;
+                }
+            }
+            if App.has-track && !App.live: IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: App.fav ? Icons.heart-fill : Icons.heart;
+                tint: App.fav ? Theme.accent : Theme.text2;
+                tooltip: @tr("Favorite");
+                clicked => { App.toggle-fav(); }
+            }
+        }
+        // ---- transport
+        VerticalLayout {
+            horizontal-stretch: 1.4;
+            max-width: 720px;
+            alignment: center;
+            spacing: 4px;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.shuffle;
+                    icon-size: 17px;
+                    active: App.shuffle;
+                    tooltip: @tr("Shuffle");
+                    clicked => { App.toggle-shuffle(); }
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.skip-back-fill;
+                    icon-size: 19px;
+                    tint: Theme.text;
+                    enabled: App.has-track;
+                    tooltip: @tr("Previous");
+                    clicked => { App.prev(); }
+                }
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: pta.pressed ? Theme.text2 : Theme.text;
+                    transform-scale: pta.has-hover ? 1.06 : 1;
+                    animate transform-scale { duration: Theme.quick; easing: ease-out; }
+                    accessible-role: button;
+                    accessible-label: App.playing ? "Pause" : "Play";
+                    accessible-action-default => { App.play-pause(); }
+                    Icon {
+                        x: (parent.width - self.width) / 2 + (App.playing ? 0 : 1px);
+                        source: App.playing ? Icons.pause-fill : Icons.play-fill;
+                        size: 18px;
+                        tint: Theme.bg;
+                    }
+                    pta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.play-pause(); }
+                    }
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.skip-forward-fill;
+                    icon-size: 19px;
+                    tint: Theme.text;
+                    enabled: App.can-next;
+                    tooltip: @tr("Next");
+                    clicked => { App.next(); }
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: App.repeat == 2 ? Icons.repeat-1 : Icons.repeat;
+                    icon-size: 17px;
+                    active: App.repeat > 0;
+                    tooltip: @tr("Repeat");
+                    clicked => { App.cycle-repeat(); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    width: 44px;
+                    text: App.live ? "" : mmss(shown-pos);
+                    font-size: Theme.fs-xs;
+                    color: Theme.text2;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                seek := SeekBar {
+                    horizontal-stretch: 1;
+                    enabled: App.has-track && App.dur-ms > 0;
+                    value: App.dur-ms > 0 ? App.pos-ms / App.dur-ms : 0;
+                    seek(v) => { App.seek(v * App.dur-ms); }
+                }
+                Text {
+                    width: 44px;
+                    text: App.live ? @tr("LIVE") : App.dur-ms > 0 ? mmss(App.dur-ms) : "";
+                    font-size: Theme.fs-xs;
+                    font-weight: App.live ? 700 : 400;
+                    color: App.live ? Theme.bad : Theme.text2;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        // ---- tools
+        HorizontalLayout {
+            min-width: 240px;
+            horizontal-stretch: 1;
+            alignment: end;
+            spacing: 6px;
+            if App.has-track && App.quality != "": qc := QualityChip {
+                y: (parent.height - self.height) / 2;
+                clicked => { root.show-chain(self.absolute-position.x, self.absolute-position.y); }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.mic-vocal;
+                active: App.now-playing-open && App.np-tab == 0;
+                tooltip: @tr("Lyrics");
+                clicked => {
+                    if App.now-playing-open && App.np-tab == 0 {
+                        App.now-playing-open = false;
+                    } else {
+                        App.np-tab = 0;
+                        App.now-playing-open = true;
+                    }
+                }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.list-music;
+                active: App.queue-open;
+                tooltip: @tr("Queue");
+                clicked => { App.queue-open = !App.queue-open; }
+            }
+            VolumeControl { }
+        }
+    }
+}

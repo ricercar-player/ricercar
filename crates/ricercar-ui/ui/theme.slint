@@ -1,0 +1,57 @@
+import "../assets/fonts/Inter-Regular.ttf";
+import "../assets/fonts/Inter-Medium.ttf";
+import "../assets/fonts/Inter-SemiBold.ttf";
+import "../assets/fonts/Inter-Bold.ttf";
+import "../assets/fonts/InterDisplay-Bold.ttf";
+import "../assets/fonts/InterDisplay-ExtraBold.ttf";
+
+export global Theme {
+    in-out property <bool> dark: true;
+    /// Base accent (settings) and the cover-derived one while playing.
+    in-out property <color> base-accent: #d4a35a;
+    in-out property <color> cover-accent: transparent;
+    in-out property <bool> adaptive: true;
+
+    out property <color> accent: adaptive && cover-accent.alpha > 0 ? cover-accent : base-accent;
+    out property <color> accent-soft: accent.with-alpha(dark ? 0.16 : 0.14);
+    out property <color> on-accent: #121008;
+
+    out property <color> bg: dark ? #0f0f11 : #f6f5f2;
+    out property <color> panel: dark ? #141417 : #eeede8;
+    out property <color> raised: dark ? #1c1c21 : #ffffff;
+    out property <color> overlay: dark ? #232329 : #ffffff;
+    out property <color> hover: dark ? #ffffff0d : #0000000a;
+    out property <color> press: dark ? #ffffff17 : #00000014;
+    out property <color> selected: dark ? #ffffff14 : #00000010;
+    out property <color> line: dark ? #ffffff12 : #00000014;
+    out property <color> line-strong: dark ? #ffffff24 : #00000026;
+    out property <color> scrim: #000000a6;
+
+    out property <color> text: dark ? #f3f2ef : #151518;
+    out property <color> text2: dark ? #b3b2b9 : #55545c;
+    out property <color> text3: dark ? #8a8990 : #75747c;
+
+    out property <color> good: dark ? #4cc38a : #1f8a57;
+    out property <color> warn: dark ? #e5ad4a : #a86a06;
+    out property <color> bad: dark ? #ef5f5f : #c9302c;
+
+    out property <string> font: "Inter";
+    out property <string> display: "Inter Display";
+
+    out property <length> fs-xs: 11px;
+    out property <length> fs-sm: 12px;
+    out property <length> fs-base: 13px;
+    out property <length> fs-md: 14px;
+    out property <length> fs-lg: 16px;
+    out property <length> fs-xl: 20px;
+    out property <length> fs-2xl: 26px;
+    out property <length> fs-3xl: 36px;
+    out property <length> fs-hero: 56px;
+
+    out property <length> r-sm: 4px;
+    out property <length> r-md: 8px;
+    out property <length> r-lg: 12px;
+
+    out property <duration> quick: 140ms;
+    out property <duration> calm: 260ms;
+}

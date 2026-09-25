@@ -1,0 +1,566 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, QueueRow, MenuEntry, Page } from "state.slint";
+import { Icon, IconButton, Button, Cover, Segmented, TextField, NowBars, Badge } from "widgets.slint";
+import { TrackMenu } from "lists.slint";
+
+// ------------------------------------------------------------------ queue
+
+component QueueLine inherits Rectangle {
+    in property <QueueRow> item;
+    in property <int> index;
+    in property <length> row-h: 58px;
+    out property <bool> dragging: grip.pressed;
+    callback drop-at(int, int);
+    height: row-h;
+    border-radius: Theme.r-md;
+    background: item.current ? Theme.accent-soft : ta.has-hover || grip.pressed ? Theme.hover : transparent;
+    z: grip.pressed ? 10 : 0;
+    // Drop indicator: a bar where the dragged row will land.
+    private property <int> drag-steps: grip.pressed ? round((grip.mouse-y - grip.pressed-y) / row-h) : 0;
+    if drag-steps != 0: Rectangle {
+        y: drag-steps > 0 ? (drag-steps + 1) * root.row-h - 1px : drag-steps * root.row-h - 1px;
+        height: 2px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        double-clicked => { App.queue-play(root.item.id); }
+    }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 8px;
+        spacing: 10px;
+        Rectangle {
+            width: 18px;
+            opacity: ta.has-hover || grip.pressed ? 1 : 0;
+            Icon { source: Icons.grip-vertical; size: 16px; tint: Theme.text3; }
+            grip := TouchArea {
+                mouse-cursor: grab;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.up && e.button == PointerEventButton.left {
+                        let steps = round((self.mouse-y - self.pressed-y) / root.row-h);
+                        if steps != 0 { root.drop-at(root.index, root.index + steps); }
+                    }
+                }
+            }
+        }
+        Cover {
+            y: (parent.height - self.height) / 2;
+            width: 42px;
+            height: 42px;
+            radius: Theme.r-sm;
+            source: item.cover;
+            placeholder: Icons.music;
+            if item.current: Rectangle {
+                background: #00000080;
+                NowBars { animated: App.playing; }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: item.title; font-size: Theme.fs-md; font-weight: 500; color: item.current ? Theme.accent : Theme.text; overflow: elide; }
+            Text { text: item.artist; font-size: Theme.fs-sm; color: Theme.text2; overflow: elide; }
+        }
+        if !ta.has-hover || item.current: Text {
+            text: item.dur;
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            vertical-alignment: center;
+        }
+        if ta.has-hover && !item.current: IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 28px;
+            icon-size: 15px;
+            icon: Icons.x;
+            tooltip: @tr("Remove");
+            clicked => { App.queue-remove(root.item.id); }
+        }
+    }
+}
+
+export component QueueList inherits Rectangle {
+    in property <bool> compact;
+    private property <int> first-upcoming: App.queue-current + 1;
+    VerticalLayout {
+        spacing: 8px;
+        if App.queue.length == 0: VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding: 32px;
+            vertical-stretch: 1;
+            Icon { x: (parent.width - self.width) / 2; source: Icons.list-music; size: 36px; tint: Theme.text3; }
+            Text { text: @tr("The queue is empty"); font-size: Theme.fs-lg; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
+            Text { text: @tr("Play an album or add tracks with “Add to queue”."); font-size: Theme.fs-sm; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
+        }
+        if App.queue.length > 0: ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 2px;
+                alignment: start;
+                if App.queue-current >= 0: Text {
+                    text: @tr("Now playing");
+                    font-size: Theme.fs-xs;
+                    font-weight: 700;
+                    letter-spacing: 0.6px;
+                    color: Theme.text3;
+                    height: 28px;
+                    vertical-alignment: center;
+                }
+                for q[i] in App.queue: VerticalLayout {
+                    if i == first-upcoming: Text {
+                        text: @tr("Next up") + " · " + App.queue-meta;
+                        font-size: Theme.fs-xs;
+                        font-weight: 700;
+                        letter-spacing: 0.6px;
+                        color: Theme.text3;
+                        height: 36px;
+                        vertical-alignment: bottom;
+                    }
+                    if !q.past: QueueLine {
+                        item: q;
+                        index: i;
+                        drop-at(from, to) => { App.queue-move(from, max(first-upcoming, min(App.queue.length - 1, to))); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component QueuePanel inherits Rectangle {
+    width: 360px;
+    background: Theme.panel;
+    Rectangle { x: 0; width: 1px; background: Theme.line; }
+    VerticalLayout {
+        padding: 16px;
+        padding-top: 14px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: @tr("Queue"); font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+            if App.queue.length > 1: Button {
+                text: @tr("Clear");
+                clicked => { App.queue-clear(); }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.x;
+                tooltip: @tr("Close");
+                clicked => { App.queue-open = false; }
+            }
+        }
+        if App.context-label != "": Text {
+            text: App.context-label;
+            font-size: Theme.fs-sm;
+            color: Theme.text2;
+            overflow: elide;
+        }
+        QueueList { vertical-stretch: 1; }
+    }
+}
+
+// ------------------------------------------------------------------ now playing
+
+component LyricsView inherits Rectangle {
+    private property <length> target-y;
+    public function recenter() {
+        if App.lyric-index >= 0 {
+            flick.content-y = min(0, -(root.target-y - flick.height * 0.36));
+        }
+    }
+    flick := Flickable {
+        content-height: col.preferred-height;
+        animate content-y { duration: 420ms; easing: ease-out; }
+        col := VerticalLayout {
+            padding-top: 160px;
+            padding-bottom: 320px;
+            spacing: 14px;
+            for l[i] in App.lyrics: Text {
+                property <bool> is-current: App.lyrics-synced && i == App.lyric-index;
+                changed is-current => {
+                    if self.is-current {
+                        root.target-y = self.y;
+                        root.recenter();
+                    }
+                }
+                text: l.text == "" ? "♪" : l.text;
+                wrap: word-wrap;
+                font-family: Theme.display;
+                font-size: App.lyrics-synced ? 30px : 20px;
+                font-weight: 700;
+                letter-spacing: -0.3px;
+                color: !App.lyrics-synced ? Theme.text.with-alpha(0.85) : is-current ? #ffffff : i < App.lyric-index ? #ffffff59 : #ffffff38;
+                animate color { duration: 300ms; }
+                TouchArea {
+                    enabled: App.lyrics-synced;
+                    mouse-cursor: App.lyrics-synced ? pointer : default;
+                    clicked => { App.seek(l.ms); }
+                }
+            }
+        }
+    }
+    if App.lyrics.length == 0: VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+        Icon { x: (parent.width - self.width) / 2; source: Icons.mic-vocal; size: 36px; tint: #ffffff66; }
+        Text {
+            text: App.lyrics-status;
+            font-size: Theme.fs-lg;
+            font-weight: 600;
+            color: #ffffffb3;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+    if App.lyrics-source != "" && App.lyrics.length > 0: Text {
+        y: parent.height - 22px;
+        text: App.lyrics-source;
+        font-size: Theme.fs-xs;
+        color: #ffffff66;
+    }
+}
+
+component ChainView inherits VerticalLayout {
+    spacing: 18px;
+    alignment: start;
+    HorizontalLayout {
+        spacing: 12px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            border-radius: 6px;
+            background: !App.chain-known ? #ffffff66 : App.bitperfect ? Theme.good : Theme.warn;
+        }
+        Text {
+            text: !App.chain-known ? @tr("Signal path") : App.bitperfect ? @tr("Bit-perfect") : @tr("Altered signal path");
+            font-family: Theme.display;
+            font-size: 30px;
+            font-weight: 800;
+            color: #ffffff;
+        }
+    }
+    for hop[i] in App.chain: HorizontalLayout {
+        spacing: 16px;
+        VerticalLayout {
+            width: 16px;
+            padding-top: 6px;
+            alignment: start;
+            Rectangle {
+                width: 12px;
+                height: 12px;
+                border-radius: 6px;
+                border-width: 2px;
+                border-color: hop.state == 0 ? Theme.good : hop.state == 1 ? Theme.warn : #ffffff66;
+            }
+        }
+        VerticalLayout {
+            spacing: 2px;
+            Text { text: hop.label; font-size: Theme.fs-sm; color: #ffffff99; }
+            Text { text: hop.value; font-size: Theme.fs-xl; font-weight: 600; color: #ffffff; wrap: word-wrap; }
+        }
+    }
+    Text {
+        text: App.bitperfect ? @tr("Every sample reaches the DAC exactly as it is in the file.") : @tr("Volume below 100 %, ReplayGain, mute or a shared (non hw:) device alters the samples.");
+        font-size: Theme.fs-md;
+        color: #ffffffb3;
+        wrap: word-wrap;
+    }
+}
+
+export component NowPlayingView inherits Rectangle {
+    callback close();
+    background: #0b0b0d;
+    clip: true;
+    // blurred, darkened cover backdrop
+    Image {
+        width: 100%;
+        height: 100%;
+        source: App.backdrop;
+        image-fit: cover;
+        opacity: 0.9;
+    }
+    Rectangle { background: @linear-gradient(90deg, #000000b3 0%, #00000080 55%, #000000b3 100%); }
+    Rectangle { background: Theme.accent.with-alpha(0.08); }
+    TouchArea { }
+    private property <length> cover-size: min(root.height - 190px, root.width * 0.36);
+    HorizontalLayout {
+        padding: 48px;
+        padding-top: 72px;
+        spacing: 56px;
+        VerticalLayout {
+            width: cover-size;
+            alignment: center;
+            spacing: 16px;
+            Cover {
+                width: cover-size;
+                height: cover-size;
+                radius: Theme.r-lg;
+                source: App.cover-large;
+                placeholder: App.live ? Icons.radio : Icons.music;
+                drop-shadow-blur: 40px;
+                drop-shadow-offset-y: 18px;
+                drop-shadow-color: #000000b3;
+            }
+            Text {
+                text: App.title;
+                font-family: Theme.display;
+                font-size: Theme.fs-2xl;
+                font-weight: 800;
+                color: #ffffff;
+                wrap: word-wrap;
+                max-height: 80px;
+                overflow: elide;
+            }
+            Text {
+                text: App.artist + (App.album != "" ? " — " + App.album : "");
+                font-size: Theme.fs-lg;
+                color: #ffffffb3;
+                overflow: elide;
+            }
+            if App.quality != "": HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: !App.chain-known ? #ffffff66 : App.bitperfect ? Theme.good : Theme.warn;
+                }
+                Text {
+                    text: (App.codec != "" ? App.codec + " · " : "") + App.quality + (App.bitperfect ? " · " + @tr("bit-perfect") : "");
+                    font-size: Theme.fs-sm;
+                    font-weight: 600;
+                    color: #ffffffcc;
+                }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 18px;
+            HorizontalLayout {
+                alignment: start;
+                Rectangle {
+                    height: 34px;
+                    width: tabs.preferred-width;
+                    border-radius: 17px;
+                    background: #ffffff1a;
+                    tabs := HorizontalLayout {
+                        padding: 3px;
+                        spacing: 2px;
+                        for t[i] in [@tr("Lyrics"), @tr("Queue"), @tr("Signal path")]: Rectangle {
+                            width: tl.preferred-width + 28px;
+                            border-radius: self.height / 2;
+                            background: i == App.np-tab ? #ffffff : ttt.has-hover ? #ffffff1a : transparent;
+                            animate background { duration: Theme.quick; }
+                            tl := Text {
+                                text: t;
+                                font-size: Theme.fs-sm;
+                                font-weight: 700;
+                                color: i == App.np-tab ? #111111 : #ffffffcc;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ttt := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { App.np-tab = i; }
+                            }
+                        }
+                    }
+                }
+            }
+            if App.np-tab == 0: LyricsView { vertical-stretch: 1; }
+            if App.np-tab == 1: QueueList { vertical-stretch: 1; }
+            if App.np-tab == 2: ChainView { vertical-stretch: 1; }
+        }
+    }
+    IconButton {
+        x: 20px;
+        y: 18px;
+        icon: Icons.chevron-down;
+        size: 38px;
+        icon-size: 22px;
+        tint: #ffffff;
+        tooltip: @tr("Close");
+        clicked => { root.close(); }
+    }
+}
+
+// ------------------------------------------------------------------ menus
+
+component MenuLine inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> danger;
+    in property <bool> submenu;
+    callback clicked();
+    height: 34px;
+    border-radius: Theme.r-sm;
+    background: ta.has-hover ? Theme.hover : transparent;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+        Icon { y: (parent.height - self.height) / 2; source: icon; size: 16px; tint: danger ? Theme.bad : Theme.text2; }
+        Text { text: root.text; font-size: Theme.fs-base; color: danger ? Theme.bad : Theme.text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        if submenu: Icon { y: (parent.height - self.height) / 2; source: Icons.chevron-right; size: 14px; tint: Theme.text3; }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Context menu for tracks and albums, drawn as an overlay (window coords).
+export component ContextMenu inherits Rectangle {
+    in property <bool> is-album;
+    in property <length> win-w;
+    in property <length> win-h;
+    callback dismiss();
+    callback new-playlist-for(bool);
+    private property <bool> playlists-mode;
+    private property <length> menu-w: 236px;
+    TouchArea {
+        clicked => { root.dismiss(); }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right { root.dismiss(); }
+        }
+    }
+    panel := Rectangle {
+        x: min(TrackMenu.x, root.win-w - root.menu-w - 8px);
+        y: min(TrackMenu.y, root.win-h - self.height - 8px);
+        width: menu-w;
+        height: lay.preferred-height;
+        border-radius: Theme.r-md;
+        background: Theme.overlay;
+        border-width: 1px;
+        border-color: Theme.line-strong;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #00000099;
+        TouchArea { }
+        lay := VerticalLayout {
+            padding: 5px;
+            spacing: 0;
+            if !playlists-mode: VerticalLayout {
+                MenuLine { text: @tr("Play"); icon: Icons.play; clicked => { act("play"); } }
+                if is-album: MenuLine { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { act("shuffle"); } }
+                MenuLine { text: @tr("Play next"); icon: Icons.list-plus; clicked => { act("next"); } }
+                MenuLine { text: @tr("Add to queue"); icon: Icons.list-end; clicked => { act("queue"); } }
+                MenuLine { text: @tr("Add to playlist"); icon: Icons.list-music; submenu: true; clicked => { root.playlists-mode = true; } }
+                Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+                if !is-album: MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
+                MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
+                MenuLine { text: @tr("Favorite / unfavorite"); icon: Icons.heart; clicked => { act("fav"); } }
+                MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
+                if !is-album && TrackMenu.list == "playlist": MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
+            }
+            if playlists-mode: VerticalLayout {
+                MenuLine { text: @tr("Back"); icon: Icons.chevron-left; clicked => { root.playlists-mode = false; } }
+                Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+                MenuLine { text: @tr("New playlist…"); icon: Icons.plus; clicked => { root.playlists-mode = false; root.new-playlist-for(root.is-album); } }
+                for p in App.playlists: MenuLine {
+                    text: p.name;
+                    icon: Icons.list-music;
+                    clicked => { act("pl:" + p.id); }
+                }
+            }
+        }
+    }
+    function act(a: string) {
+        root.playlists-mode = false;
+        if root.is-album {
+            App.album-action(TrackMenu.album-id, a);
+        } else {
+            App.track-action(TrackMenu.list, TrackMenu.index, a);
+        }
+        root.dismiss();
+    }
+}
+
+// ------------------------------------------------------------------ dialogs
+
+export component Dialog inherits Rectangle {
+    in property <string> title;
+    in property <string> body;
+    in property <string> confirm-text: @tr("OK");
+    in property <bool> with-input;
+    in property <bool> danger;
+    in-out property <string> value;
+    callback confirm(string);
+    callback cancel();
+    background: Theme.scrim;
+    TouchArea { clicked => { root.cancel(); } }
+    public function focus-input() {
+        if with-input { field.focus-field(); }
+    }
+    Rectangle {
+        width: 420px;
+        height: lay.preferred-height;
+        border-radius: Theme.r-lg;
+        background: Theme.overlay;
+        border-width: 1px;
+        border-color: Theme.line;
+        drop-shadow-blur: 40px;
+        drop-shadow-offset-y: 16px;
+        drop-shadow-color: #000000b3;
+        TouchArea { }
+        lay := VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+            Text { text: root.title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; }
+            if root.body != "": Text { text: root.body; font-size: Theme.fs-md; color: Theme.text2; wrap: word-wrap; }
+            field := TextField {
+                visible: root.with-input;
+                height: root.with-input ? 36px : 0;
+                text <=> root.value;
+                accepted(t) => { root.confirm(t); }
+                escape => { root.cancel(); }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 10px;
+                padding-top: 6px;
+                Button { text: @tr("Cancel"); clicked => { root.cancel(); } }
+                Button {
+                    text: root.confirm-text;
+                    primary: !root.danger;
+                    danger: root.danger;
+                    enabled: !root.with-input || root.value != "";
+                    clicked => { root.confirm(root.value); }
+                }
+            }
+        }
+    }
+}
+
+export component Toast inherits Rectangle {
+    in property <string> text;
+    in property <bool> error;
+    height: 44px;
+    width: min(lay.preferred-width, 560px);
+    border-radius: 22px;
+    background: Theme.overlay;
+    border-width: 1px;
+    border-color: error ? Theme.bad.with-alpha(0.6) : Theme.line-strong;
+    drop-shadow-blur: 20px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: #00000099;
+    lay := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 20px;
+        spacing: 10px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            source: error ? Icons.circle-alert : Icons.circle-check;
+            size: 18px;
+            tint: error ? Theme.bad : Theme.good;
+        }
+        Text { text: root.text; font-size: Theme.fs-base; font-weight: 500; color: Theme.text; vertical-alignment: center; overflow: elide; }
+    }
+}

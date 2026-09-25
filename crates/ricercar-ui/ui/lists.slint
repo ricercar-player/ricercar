@@ -1,0 +1,374 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, TrackRow, AlbumCard } from "state.slint";
+import { Icon, IconButton, Cover, NowBars, AlbumTile, Badge } from "widgets.slint";
+
+/// Shared by every track table: opens the context menu at window coordinates.
+export global TrackMenu {
+    in-out property <string> list;
+    in-out property <int> index;
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <int> serial;
+    in-out property <string> album-id;
+    in-out property <int> album-serial;
+}
+
+export component TrackHeader inherits Rectangle {
+    in property <bool> show-album: true;
+    in property <bool> show-cover;
+    in property <bool> show-plays;
+    height: 34px;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        Text { width: 28px; text: "#"; color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: right; }
+        Text { horizontal-stretch: 3; text: @tr("Title"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
+        if show-album: Text { horizontal-stretch: 2; text: @tr("Album"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; }
+        if show-plays: Text { width: 56px; text: @tr("Plays"); color: Theme.text3; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: right; }
+        Rectangle { width: 30px; }
+        Icon { y: (parent.height - self.height) / 2; width: 44px; size: 15px; source: Icons.clock; tint: Theme.text3; }
+        Rectangle { width: 30px; }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+}
+
+export component TrackLine inherits Rectangle {
+    in property <TrackRow> item;
+    in property <int> index;
+    in property <string> list;
+    in property <bool> show-album: true;
+    in property <bool> show-cover;
+    in property <bool> show-plays;
+    in property <bool> show-artist: true;
+    in property <bool> alternate;
+    height: 52px;
+    border-radius: Theme.r-md;
+    background: ta.pressed ? Theme.press : ta.has-hover || more.has-hover ? Theme.hover : transparent;
+    animate background { duration: 90ms; }
+    accessible-role: list-item;
+    accessible-label: item.title + ", " + item.artist;
+    accessible-action-default => { App.track-activate(list, index); }
+    ta := TouchArea {
+        double-clicked => { App.track-activate(root.list, root.index); }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                TrackMenu.list = root.list;
+                TrackMenu.index = root.index;
+                TrackMenu.x = root.absolute-position.x + self.mouse-x;
+                TrackMenu.y = root.absolute-position.y + self.mouse-y;
+                TrackMenu.serial += 1;
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        Rectangle {
+            width: 28px;
+            if item.playing && !ta.has-hover: NowBars {
+                x: parent.width - self.width;
+                animated: App.playing;
+            }
+            if ta.has-hover: Icon {
+                x: parent.width - self.width;
+                source: Icons.play-fill;
+                size: 14px;
+                tint: Theme.text;
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { App.track-activate(root.list, root.index); }
+                }
+            }
+            if !item.playing && !ta.has-hover: Text {
+                width: 100%;
+                text: item.n;
+                font-size: Theme.fs-md;
+                color: Theme.text2;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+        if show-cover: Cover {
+            y: (parent.height - self.height) / 2;
+            width: 38px;
+            height: 38px;
+            radius: Theme.r-sm;
+            source: item.cover;
+        }
+        VerticalLayout {
+            horizontal-stretch: 3;
+            alignment: center;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: item.title;
+                    font-size: Theme.fs-md;
+                    font-weight: 500;
+                    color: item.playing ? Theme.accent : Theme.text;
+                    overflow: elide;
+                }
+                if item.hires && show-artist: Badge {
+                    y: (parent.height - self.height) / 2;
+                    text: item.fmt;
+                    tint: Theme.text3;
+                }
+            }
+            if show-artist && item.artist != "": Text {
+                text: item.artist;
+                font-size: Theme.fs-sm;
+                color: Theme.text2;
+                overflow: elide;
+            }
+        }
+        if show-album: Text {
+            horizontal-stretch: 2;
+            text: item.album;
+            font-size: Theme.fs-base;
+            color: al.has-hover ? Theme.text : Theme.text2;
+            vertical-alignment: center;
+            overflow: elide;
+            al := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { App.album-activate(item.album-id); }
+            }
+        }
+        if show-plays: Text {
+            width: 56px;
+            text: item.plays;
+            font-size: Theme.fs-base;
+            color: Theme.text2;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+        Rectangle {
+            width: 30px;
+            if item.fav || ta.has-hover || more.has-hover: IconButton {
+                size: 28px;
+                icon-size: 16px;
+                icon: item.fav ? Icons.heart-fill : Icons.heart;
+                tint: item.fav ? Theme.accent : Theme.text2;
+                tooltip: @tr("Favorite");
+                clicked => { App.track-action(root.list, root.index, "fav"); }
+            }
+        }
+        Text {
+            width: 44px;
+            text: item.dur;
+            font-size: Theme.fs-base;
+            color: Theme.text2;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+        Rectangle {
+            width: 30px;
+            opacity: ta.has-hover || more.has-hover ? 1 : 0;
+            more := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    TrackMenu.list = root.list;
+                    TrackMenu.index = root.index;
+                    TrackMenu.x = root.absolute-position.x + root.width - 200px;
+                    TrackMenu.y = root.absolute-position.y + root.height - 6px;
+                    TrackMenu.serial += 1;
+                }
+            }
+            Icon { source: Icons.ellipsis; size: 18px; tint: more.has-hover ? Theme.text : Theme.text2; }
+        }
+    }
+}
+
+/// Non-virtualized table (album/playlist pages live inside a scrolling page).
+export component TrackTable inherits VerticalLayout {
+    in property <[TrackRow]> rows;
+    in property <string> list;
+    in property <bool> show-album: true;
+    in property <bool> show-cover;
+    in property <bool> show-plays;
+    in property <bool> show-artist: true;
+    in property <bool> header: true;
+    in property <int> limit: 100000;
+    spacing: 0;
+    if header: TrackHeader {
+        show-album: root.show-album;
+        show-cover: root.show-cover;
+        show-plays: root.show-plays;
+    }
+    if header: Rectangle { height: 8px; }
+    for row[i] in rows: VerticalLayout {
+        if i < limit && row.disc != "": HorizontalLayout {
+            padding-left: 16px;
+            padding-top: i == 0 ? 4px : 20px;
+            padding-bottom: 6px;
+            spacing: 10px;
+            Icon { y: (parent.height - self.height) / 2; source: Icons.disc-3; size: 16px; tint: Theme.text3; }
+            Text { text: row.disc; font-size: Theme.fs-sm; font-weight: 700; color: Theme.text2; vertical-alignment: center; }
+        }
+        if i < limit: TrackLine {
+            item: row;
+            index: i;
+            list: root.list;
+            show-album: root.show-album;
+            show-cover: root.show-cover;
+            show-plays: root.show-plays;
+            show-artist: root.show-artist;
+        }
+    }
+}
+
+/// Virtualized table for very long lists (all tracks).
+export component TrackListView inherits VerticalLayout {
+    in property <[TrackRow]> rows;
+    in property <string> list;
+    in property <length> top-padding;
+    TrackHeader { show-cover: true; }
+    private property <int> first: max(0, floor(-lv.content-y / 52px));
+    private property <string> window-key: first + ":" + lv.height / 1px + ":" + rows.length;
+    changed window-key => {
+        App.visible(list, first, min(rows.length, first + ceil(lv.height / 52px) + 2));
+    }
+    lv := ListView {
+        vertical-stretch: 1;
+        for row[i] in rows: TrackLine {
+            item: row;
+            index: i;
+            list: root.list;
+            show-cover: true;
+        }
+    }
+}
+
+/// Horizontally scrolling shelf of album tiles (home page rows).
+export component AlbumShelf inherits Flickable {
+    in property <[AlbumCard]> albums;
+    in property <string> playing-album;
+    in property <length> tile: 176px;
+    height: tile + 60px;
+    content-width: max(self.width, albums.length * (tile + 22px));
+    interactive: true;
+    HorizontalLayout {
+        spacing: 22px;
+        alignment: start;
+        for a in albums: AlbumTile {
+            size: root.tile;
+            cover: a.cover;
+            title: a.title;
+            subtitle: a.artist;
+            hires: a.hires;
+            current: a.id == root.playing-album && App.has-track;
+            playing: App.playing;
+            open => { App.album-activate(a.id); }
+            play => {
+                if a.id == root.playing-album && App.has-track { App.play-pause(); } else { App.album-action(a.id, "play"); }
+            }
+            menu(mx, my) => {
+                TrackMenu.album-id = a.id;
+                TrackMenu.x = self.absolute-position.x + mx;
+                TrackMenu.y = self.absolute-position.y + my;
+                TrackMenu.album-serial += 1;
+            }
+        }
+    }
+}
+
+/// Responsive grid of album tiles, virtualized row by row.
+export component AlbumGrid inherits Rectangle {
+    in property <[AlbumCard]> albums;
+    in property <string> playing-album;
+    in property <length> min-tile: 168px;
+    in property <length> gap: 24px;
+    in property <length> side: 32px;
+    private property <int> cols: max(1, floor((self.width - 2 * side + gap) / (min-tile + gap)));
+    private property <length> tile: (self.width - 2 * side - (cols - 1) * gap) / cols;
+    private property <int> rows: ceil(albums.length / cols);
+    private property <length> row-h: tile + 52px + 28px;
+    private property <int> first-row: max(0, floor(-lv.content-y / row-h));
+    private property <int> last-row: first-row + ceil(self.height / row-h) + 1;
+    private property <string> window-key: first-row + ":" + last-row + ":" + cols + ":" + albums.length;
+    changed window-key => {
+        App.visible("albums", first-row * cols, min(albums.length, (last-row + 1) * cols));
+    }
+    init => {
+        App.visible("albums", 0, min(albums.length, (last-row + 1) * cols));
+    }
+    lv := ListView {
+        for r in rows: HorizontalLayout {
+            padding-left: side;
+            padding-right: side;
+            padding-bottom: 28px;
+            spacing: gap;
+            alignment: start;
+            for c in cols: Rectangle {
+                width: tile;
+                height: tile + 52px;
+                property <int> idx: r * cols + c;
+                property <AlbumCard> a: albums[idx];
+                if idx < albums.length: AlbumTile {
+                    size: tile;
+                    cover: a.cover;
+                    title: a.title;
+                    subtitle: a.year == "" ? a.artist : a.artist + " · " + a.year;
+                    hires: a.hires;
+                    current: a.id == root.playing-album && App.has-track;
+                    playing: App.playing;
+                    open => { App.album-activate(a.id); }
+                    play => {
+                        if a.id == root.playing-album && App.has-track { App.play-pause(); } else { App.album-action(a.id, "play"); }
+                    }
+                    menu(mx, my) => {
+                        TrackMenu.album-id = a.id;
+                        TrackMenu.x = self.absolute-position.x + mx;
+                        TrackMenu.y = self.absolute-position.y + my;
+                        TrackMenu.album-serial += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Non-virtualized grid for pages that already scroll (artist, genre, search).
+export component AlbumFlow inherits Rectangle {
+    in property <[AlbumCard]> albums;
+    in property <string> playing-album;
+    in property <length> min-tile: 168px;
+    in property <length> gap: 24px;
+    private property <int> cols: max(1, floor((self.width + gap) / (min-tile + gap)));
+    private property <length> tile: (self.width - (cols - 1) * gap) / cols;
+    private property <int> rows: ceil(albums.length / cols);
+    height: rows * (tile + 52px + 28px);
+    for r in rows: HorizontalLayout {
+        y: r * (tile + 52px + 28px);
+        height: tile + 52px;
+        spacing: gap;
+        alignment: start;
+        for c in cols: Rectangle {
+            width: tile;
+            property <int> idx: r * cols + c;
+            property <AlbumCard> a: albums[idx];
+            if idx < albums.length: AlbumTile {
+                size: tile;
+                cover: a.cover;
+                title: a.title;
+                subtitle: a.year == "" ? a.artist : a.year;
+                hires: a.hires;
+                current: a.id == root.playing-album && App.has-track;
+                playing: App.playing;
+                open => { App.album-activate(a.id); }
+                play => {
+                    if a.id == root.playing-album && App.has-track { App.play-pause(); } else { App.album-action(a.id, "play"); }
+                }
+                menu(mx, my) => {
+                    TrackMenu.album-id = a.id;
+                    TrackMenu.x = self.absolute-position.x + mx;
+                    TrackMenu.y = self.absolute-position.y + my;
+                    TrackMenu.album-serial += 1;
+                }
+            }
+        }
+    }
+}

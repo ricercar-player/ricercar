@@ -1,0 +1,844 @@
+import { ScrollView, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, Page, AlbumCard, TrackRow } from "state.slint";
+import { Icon, IconButton, Button, PlayButton, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile } from "widgets.slint";
+import { TrackTable, TrackListView, AlbumShelf, AlbumGrid, AlbumFlow, TrackMenu } from "lists.slint";
+
+/// Top bar with history arrows and a title that appears once scrolled.
+export component TopBar inherits Rectangle {
+    in property <string> title;
+    in property <float> fade; // 0..1
+    height: 56px;
+    background: Theme.bg.with-alpha(fade * 0.96);
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 8px;
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.chevron-left;
+            enabled: App.can-back;
+            tooltip: @tr("Back");
+            clicked => { App.back(); }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.chevron-right;
+            enabled: App.can-forward;
+            tooltip: @tr("Forward");
+            clicked => { App.forward(); }
+        }
+        Text {
+            text: root.title;
+            opacity: fade;
+            font-size: Theme.fs-lg;
+            font-weight: 700;
+            color: Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+    if fade > 0.5: Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+}
+
+/// A scrolling page: content below a fading top bar.
+export component PageScroll inherits Rectangle {
+    in property <string> title;
+    in property <length> fade-at: 200px;
+    in-out property <length> scroll-y <=> sv.content-y;
+    sv := ScrollView {
+        VerticalLayout {
+            padding-top: 56px;
+            padding-bottom: 40px;
+            @children
+        }
+    }
+    TopBar {
+        y: 0;
+        title: root.title;
+        fade: max(0, min(1, (-sv.content-y - root.fade-at + 60px) / 60px));
+    }
+}
+
+component Stat inherits VerticalLayout {
+    in property <string> value;
+    in property <string> label;
+    spacing: 2px;
+    Text { text: value; font-family: Theme.display; font-size: Theme.fs-2xl; font-weight: 700; color: Theme.text; }
+    Text { text: label; font-size: Theme.fs-sm; color: Theme.text2; }
+}
+
+component EmptyState inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> body;
+    in property <string> action;
+    callback act();
+    alignment: center;
+    spacing: 10px;
+    padding: 48px;
+    Icon { x: (parent.width - self.width) / 2; source: icon; size: 44px; tint: Theme.text3; }
+    Text { text: title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
+    Text { text: body; font-size: Theme.fs-md; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
+    if action != "": HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        Button { text: action; primary: true; clicked => { root.act(); } }
+    }
+}
+
+// ------------------------------------------------------------------ home
+
+export component HomePage inherits PageScroll {
+    title: App.greeting;
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: App.greeting;
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if App.lib-tracks > 0: Button {
+                y: (parent.height - self.height) / 2;
+                text: @tr("Shuffle library");
+                icon: Icons.shuffle;
+                clicked => { App.shuffle-all(); }
+            }
+        }
+        if App.lib-tracks == 0 && !App.scanning: EmptyState {
+            icon: Icons.library;
+            title: @tr("Your library is empty");
+            body: @tr("Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, MP3, Ogg and Opus files and watches them for changes. Streams pushed from a UPnP app on your phone play here too.");
+            action: @tr("Add a music folder");
+            act => { App.add-root(); }
+        }
+        if App.lib-tracks == 0 && App.scanning: EmptyState {
+            icon: Icons.refresh-cw;
+            title: @tr("Indexing your music…");
+            body: App.scan-total > 0 ? @tr("{} of {} files read", App.scan-done, App.scan-total) : @tr("Looking for audio files");
+        }
+        if App.home-played.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 12px;
+            SectionTitle { text: @tr("Recently played"); }
+            AlbumShelf { albums: App.home-played; playing-album: App.album-id; }
+        }
+        if App.home-added.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle {
+                text: @tr("Recently added");
+                action: @tr("Show all");
+                action-clicked => {
+                    App.album-sort = 3;
+                    App.albums-sort-changed();
+                    App.navigate(Page.albums, "");
+                }
+            }
+            AlbumShelf { albums: App.home-added; playing-album: App.album-id; }
+        }
+        if App.home-tracks.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("On repeat"); }
+            TrackTable { rows: App.home-tracks; list: "home-tracks"; show-cover: true; show-plays: true; header: false; }
+        }
+        if App.home-top.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Most played albums"); }
+            AlbumShelf { albums: App.home-top; playing-album: App.album-id; }
+        }
+        if App.lib-tracks > 0: HorizontalLayout {
+            padding-top: 28px;
+            spacing: 48px;
+            alignment: start;
+            Stat { value: App.lib-albums; label: @tr("albums"); }
+            Stat { value: App.lib-artists; label: @tr("artists"); }
+            Stat { value: App.lib-tracks; label: @tr("tracks"); }
+            Stat { value: App.lib-hires; label: @tr("hi-res tracks"); }
+            Stat { value: App.lib-duration; label: @tr("of music"); }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ albums
+
+export component AlbumsPage inherits Rectangle {
+    VerticalLayout {
+        Rectangle { height: 56px; }
+        HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            Text {
+                text: @tr("Albums");
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Text {
+                text: App.albums.length;
+                font-size: Theme.fs-lg;
+                color: Theme.text3;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Segmented {
+                y: (parent.height - self.height) / 2;
+                options: [@tr("A–Z"), @tr("Artist"), @tr("Year"), @tr("Added")];
+                selected <=> App.album-sort;
+                changed => { App.albums-sort-changed(); }
+            }
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 32px;
+                width: hr.preferred-width + 24px;
+                border-radius: 16px;
+                background: App.albums-hires-only ? Theme.accent-soft : Theme.hover;
+                border-width: 1px;
+                border-color: App.albums-hires-only ? Theme.accent : transparent;
+                hr := Text {
+                    text: @tr("Hi-Res");
+                    font-size: Theme.fs-sm;
+                    font-weight: 600;
+                    color: App.albums-hires-only ? Theme.accent : Theme.text2;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        App.albums-hires-only = !App.albums-hires-only;
+                        App.albums-sort-changed();
+                    }
+                }
+            }
+        }
+        if App.albums.length == 0: EmptyState {
+            icon: Icons.disc-3;
+            title: App.albums-hires-only ? @tr("No hi-res albums") : @tr("No albums yet");
+            body: App.albums-hires-only ? @tr("None of your albums is above 16 bit / 48 kHz.") : @tr("Add a music folder in Settings to fill your library.");
+        }
+        AlbumGrid {
+            vertical-stretch: 1;
+            albums: App.albums;
+            playing-album: App.album-id;
+        }
+    }
+    TopBar { y: 0; }
+}
+
+// ------------------------------------------------------------------ album
+
+export component AlbumPage inherits PageScroll {
+    title: App.al-title;
+    fade-at: 250px;
+    private property <bool> is-current: App.album-id == App.al-id && App.has-track;
+    Rectangle {
+        height: 300px;
+        // cover-tinted header wash
+        Rectangle {
+            y: -56px;
+            height: parent.height + 56px;
+            background: @linear-gradient(180deg, Theme.accent.with-alpha(Theme.dark ? 0.20 : 0.14) 0%, Theme.bg.with-alpha(0) 100%);
+        }
+        HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-top: 8px;
+            spacing: 28px;
+            Cover {
+                width: 232px;
+                height: 232px;
+                source: App.al-cover;
+                drop-shadow-blur: 30px;
+                drop-shadow-offset-y: 12px;
+                drop-shadow-color: #00000080;
+            }
+            VerticalLayout {
+                alignment: end;
+                spacing: 8px;
+                padding-bottom: 4px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: @tr("Album"); font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; vertical-alignment: center; }
+                    if App.al-hires: Badge { y: (parent.height - self.height) / 2; text: "HI-RES"; tint: #f0cf8a; }
+                }
+                Text {
+                    text: App.al-title;
+                    font-family: Theme.display;
+                    font-size: App.al-title.character-count > 40 ? Theme.fs-3xl : Theme.fs-hero;
+                    font-weight: 800;
+                    letter-spacing: -1.2px;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    max-height: 150px;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Text {
+                        text: App.al-artist;
+                        font-size: Theme.fs-md;
+                        font-weight: 700;
+                        color: art.has-hover ? Theme.accent : Theme.text;
+                        art := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { App.artist-activate(App.al-artist); }
+                        }
+                    }
+                    Text {
+                        text: (App.al-year != "" ? " · " + App.al-year : "") + " · " + @tr("{n} track" | "{n} tracks" % App.al-count) + " · " + App.al-duration;
+                        font-size: Theme.fs-md;
+                        color: Theme.text2;
+                    }
+                }
+                if App.al-quality != "": Text {
+                    text: App.al-quality + (App.al-genre != "" ? " · " + App.al-genre : "");
+                    font-size: Theme.fs-sm;
+                    color: Theme.text3;
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 20px;
+        padding-bottom: 16px;
+        spacing: 12px;
+        alignment: start;
+        PlayButton {
+            playing: is-current && App.playing;
+            clicked => {
+                if is-current { App.play-pause(); } else { App.album-action(App.al-id, "play"); }
+            }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 44px;
+            icon-size: 22px;
+            icon: Icons.shuffle;
+            tooltip: @tr("Shuffle");
+            clicked => { App.album-action(App.al-id, "shuffle"); }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 44px;
+            icon-size: 22px;
+            icon: App.al-fav ? Icons.heart-fill : Icons.heart;
+            tint: App.al-fav ? Theme.accent : Theme.text2;
+            tooltip: @tr("Favorite");
+            clicked => { App.album-action(App.al-id, "fav"); }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 44px;
+            icon-size: 22px;
+            icon: Icons.list-end;
+            tooltip: @tr("Add to queue");
+            clicked => { App.album-action(App.al-id, "queue"); }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 44px;
+            icon-size: 22px;
+            icon: Icons.ellipsis;
+            tooltip: @tr("More");
+            clicked => {
+                TrackMenu.album-id = App.al-id;
+                TrackMenu.x = self.absolute-position.x;
+                TrackMenu.y = self.absolute-position.y + self.height;
+                TrackMenu.album-serial += 1;
+            }
+        }
+    }
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        TrackTable { rows: App.al-tracks; list: "album"; show-album: false; }
+    }
+    if App.al-path != "": Text {
+        x: 32px;
+        width: parent.width - 64px;
+        text: App.al-path;
+        font-size: Theme.fs-xs;
+        color: Theme.text3;
+        overflow: elide;
+    }
+    if App.al-more.length > 0: VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 36px;
+        spacing: 8px;
+        SectionTitle {
+            text: @tr("More by {}", App.al-artist);
+            action: @tr("Artist page");
+            action-clicked => { App.artist-activate(App.al-artist); }
+        }
+        AlbumShelf { albums: App.al-more; playing-album: App.album-id; tile: 160px; }
+    }
+}
+
+// ------------------------------------------------------------------ artists
+
+export component ArtistsPage inherits Rectangle {
+    private property <length> gap: 20px;
+    private property <int> cols: max(1, floor((self.width - 64px + gap) / (150px + gap)));
+    private property <length> tile: (self.width - 64px - (cols - 1) * gap) / cols;
+    private property <length> row-h: tile + 48px + 20px;
+    private property <int> first-row: max(0, floor(-lv.content-y / row-h));
+    private property <string> window-key: first-row + ":" + lv.height / 1px + ":" + cols + ":" + App.artists.length;
+    changed window-key => {
+        App.visible("artists", first-row * cols, min(App.artists.length, (first-row + ceil(lv.height / row-h) + 2) * cols));
+    }
+    VerticalLayout {
+        Rectangle { height: 56px; }
+        HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            Text {
+                text: @tr("Artists");
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Text { text: App.artists.length; font-size: Theme.fs-lg; color: Theme.text3; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+        lv := ListView {
+            vertical-stretch: 1;
+            for r in ceil(App.artists.length / cols): HorizontalLayout {
+                padding-left: 32px;
+                padding-right: 32px;
+                padding-bottom: 20px;
+                spacing: gap;
+                alignment: start;
+                for c in cols: Rectangle {
+                    width: tile;
+                    height: tile + 48px;
+                    property <int> idx: r * cols + c;
+                    if idx < App.artists.length: ArtistTile {
+                        size: tile;
+                        cover: App.artists[idx].cover;
+                        name: App.artists[idx].name;
+                        subtitle: @tr("{n} album" | "{n} albums" % App.artists[idx].albums);
+                        open => { App.artist-activate(App.artists[idx].name); }
+                    }
+                }
+            }
+        }
+    }
+    TopBar { y: 0; }
+}
+
+// ------------------------------------------------------------------ artist
+
+export component ArtistPage inherits PageScroll {
+    title: App.ar-name;
+    fade-at: 220px;
+    Rectangle {
+        height: 280px;
+        clip: true;
+        Rectangle {
+            y: -56px;
+            height: parent.height + 56px;
+            Image {
+                width: 100%;
+                height: 100%;
+                source: App.ar-cover;
+                image-fit: cover;
+                opacity: 0.35;
+            }
+            Rectangle { background: @linear-gradient(180deg, Theme.bg.with-alpha(0.2) 0%, Theme.bg 100%); }
+        }
+        VerticalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            alignment: end;
+            spacing: 6px;
+            padding-bottom: 12px;
+            Text { text: @tr("Artist"); font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; }
+            Text {
+                text: App.ar-name;
+                font-family: Theme.display;
+                font-size: App.ar-name.character-count > 30 ? Theme.fs-3xl : 64px;
+                font-weight: 800;
+                letter-spacing: -1.6px;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: @tr("{n} album" | "{n} albums" % App.ar-albums) + " · " + @tr("{n} track" | "{n} tracks" % App.ar-tracks);
+                font-size: Theme.fs-md;
+                color: Theme.text2;
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 32px;
+        padding-top: 16px;
+        padding-bottom: 8px;
+        spacing: 12px;
+        alignment: start;
+        PlayButton { clicked => { App.album-action(App.ar-name, "artist-play"); } }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 44px;
+            icon-size: 22px;
+            icon: Icons.shuffle;
+            tooltip: @tr("Shuffle");
+            clicked => { App.album-action(App.ar-name, "artist-shuffle"); }
+        }
+    }
+    if App.ar-top.length > 0: VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 16px;
+        spacing: 8px;
+        HorizontalLayout { padding-left: 16px; SectionTitle { text: @tr("Popular"); } }
+        TrackTable { rows: App.ar-top; list: "artist-top"; show-cover: true; show-plays: true; header: false; }
+    }
+    if App.ar-own.length > 0: VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 28px;
+        spacing: 12px;
+        SectionTitle { text: @tr("Albums"); }
+        AlbumFlow { albums: App.ar-own; playing-album: App.album-id; }
+    }
+    if App.ar-appears.length > 0: VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 12px;
+        spacing: 12px;
+        SectionTitle { text: @tr("Appears on"); }
+        AlbumFlow { albums: App.ar-appears; playing-album: App.album-id; }
+    }
+}
+
+// ------------------------------------------------------------------ tracks
+
+export component TracksPage inherits Rectangle {
+    VerticalLayout {
+        Rectangle { height: 56px; }
+        HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-bottom: 16px;
+            spacing: 16px;
+            Text {
+                text: @tr("Tracks");
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Text { text: App.tracks.length; font-size: Theme.fs-lg; color: Theme.text3; vertical-alignment: center; horizontal-stretch: 1; }
+            Segmented {
+                y: (parent.height - self.height) / 2;
+                options: [@tr("Artist"), @tr("Title"), @tr("Album"), @tr("Length"), @tr("Added"), @tr("Plays")];
+                selected <=> App.track-sort;
+                changed => { App.tracks-sort-changed(); }
+            }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding-left: 16px;
+            padding-right: 16px;
+            TrackListView { rows: App.tracks; list: "tracks"; }
+        }
+    }
+    TopBar { y: 0; }
+}
+
+// ------------------------------------------------------------------ genres
+
+export component GenresPage inherits PageScroll {
+    title: @tr("Genres");
+    private property <length> gap: 16px;
+    private property <int> cols: max(1, floor((self.width - 64px + gap) / (200px + gap)));
+    private property <length> tile: (self.width - 64px - (cols - 1) * gap) / cols;
+    Text {
+        x: 32px;
+        text: @tr("Genres");
+        font-family: Theme.display;
+        font-size: Theme.fs-3xl;
+        font-weight: 800;
+        letter-spacing: -0.8px;
+        color: Theme.text;
+    }
+    Rectangle { height: 20px; }
+    if App.genres.length == 0: EmptyState {
+        icon: Icons.tag;
+        title: @tr("No genres");
+        body: @tr("Genres come from the GENRE tag of your files.");
+    }
+    Rectangle {
+        height: ceil(App.genres.length / cols) * (110px + gap);
+        for g[i] in App.genres: Rectangle {
+            x: 32px + mod(i, cols) * (tile + gap);
+            y: floor(i / cols) * (110px + gap);
+            width: tile;
+            height: 110px;
+            border-radius: Theme.r-lg;
+            clip: true;
+            background: g.tint;
+            Rectangle {
+                background: @linear-gradient(135deg, #00000000 0%, #0000004d 100%);
+            }
+            Text {
+                x: 16px;
+                y: 14px;
+                width: parent.width - 32px;
+                text: g.name;
+                font-size: Theme.fs-xl;
+                font-weight: 800;
+                color: #ffffff;
+                wrap: word-wrap;
+            }
+            Text {
+                x: 16px;
+                y: parent.height - 30px;
+                text: @tr("{n} album" | "{n} albums" % g.albums);
+                font-size: Theme.fs-sm;
+                font-weight: 600;
+                color: #ffffffcc;
+            }
+            gta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { App.navigate(Page.genre, g.name); }
+            }
+            transform-scale: gta.has-hover ? 1.02 : 1;
+            animate transform-scale { duration: Theme.quick; easing: ease-out; }
+        }
+    }
+}
+
+export component GenrePage inherits PageScroll {
+    title: App.ge-name;
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 20px;
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: App.ge-name;
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Button {
+                y: (parent.height - self.height) / 2;
+                text: @tr("Shuffle");
+                icon: Icons.shuffle;
+                clicked => { App.album-action(App.ge-name, "genre-shuffle"); }
+            }
+        }
+        AlbumFlow { albums: App.ge-albums; playing-album: App.album-id; }
+    }
+}
+
+// ------------------------------------------------------------------ favorites
+
+export component FavoritesPage inherits PageScroll {
+    title: @tr("Favorites");
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: @tr("Favorites");
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if App.fav-tracks.length > 0: Button {
+                y: (parent.height - self.height) / 2;
+                text: @tr("Play");
+                icon: Icons.play-fill;
+                primary: true;
+                clicked => { App.track-activate("fav", 0); }
+            }
+        }
+        if App.fav-albums.length == 0 && App.fav-tracks.length == 0: EmptyState {
+            icon: Icons.heart;
+            title: @tr("Nothing here yet");
+            body: @tr("Tap the heart on an album or a track to keep it here.");
+        }
+        if App.fav-albums.length > 0: VerticalLayout {
+            spacing: 12px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Albums"); }
+            AlbumShelf { albums: App.fav-albums; playing-album: App.album-id; }
+        }
+        if App.fav-tracks.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Tracks"); }
+            TrackTable { rows: App.fav-tracks; list: "fav"; show-cover: true; }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ playlist
+
+export component PlaylistPage inherits PageScroll {
+    title: App.pl-name;
+    fade-at: 220px;
+    callback rename();
+    callback delete();
+    HorizontalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 8px;
+        spacing: 28px;
+        height: 240px;
+        Cover {
+            width: 200px;
+            height: 200px;
+            source: App.pl-cover;
+            placeholder: Icons.list-music;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 10px;
+            drop-shadow-color: #00000066;
+        }
+        VerticalLayout {
+            alignment: end;
+            spacing: 8px;
+            padding-bottom: 40px;
+            Text { text: @tr("Playlist"); font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; }
+            Text {
+                text: App.pl-name;
+                font-family: Theme.display;
+                font-size: Theme.fs-hero;
+                font-weight: 800;
+                letter-spacing: -1.2px;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: @tr("{n} track" | "{n} tracks" % App.pl-count) + (App.pl-duration != "" ? " · " + App.pl-duration : "");
+                font-size: Theme.fs-md;
+                color: Theme.text2;
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 32px;
+        padding-bottom: 16px;
+        spacing: 12px;
+        alignment: start;
+        PlayButton { clicked => { App.playlist-play(App.pl-id, false); } }
+        IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 22px; icon: Icons.shuffle; tooltip: @tr("Shuffle"); clicked => { App.playlist-play(App.pl-id, true); } }
+        IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 20px; icon: Icons.pencil; tooltip: @tr("Rename"); clicked => { root.rename(); } }
+        IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 20px; icon: Icons.upload; tooltip: @tr("Export as M3U"); clicked => { App.playlist-export(App.pl-id); } }
+        IconButton { y: (parent.height - self.height) / 2; size: 44px; icon-size: 20px; icon: Icons.trash; tooltip: @tr("Delete playlist"); clicked => { root.delete(); } }
+    }
+    if App.pl-tracks.length == 0: EmptyState {
+        icon: Icons.list-plus;
+        title: @tr("This playlist is empty");
+        body: @tr("Right-click any track and choose “Add to playlist”.");
+    }
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        if App.pl-tracks.length > 0: TrackTable { rows: App.pl-tracks; list: "playlist"; show-cover: true; }
+    }
+}
+
+// ------------------------------------------------------------------ search
+
+export component SearchPage inherits PageScroll {
+    title: @tr("Search");
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 12px;
+        Text {
+            text: App.search-text == "" ? @tr("Search") : @tr("Results for “{}”", App.search-text);
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if App.search-text != "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0: EmptyState {
+            icon: Icons.search;
+            title: @tr("No results");
+            body: @tr("Nothing in your library matches. Check the spelling, or try fewer words.");
+        }
+        if App.s-artists.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Artists"); }
+            Flickable {
+                height: 208px;
+                content-width: App.s-artists.length * 170px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for a in App.s-artists: ArtistTile {
+                        size: 160px;
+                        cover: a.cover;
+                        name: a.name;
+                        subtitle: @tr("{n} album" | "{n} albums" % a.albums);
+                        open => { App.artist-activate(a.name); }
+                    }
+                }
+            }
+        }
+        if App.s-tracks.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Tracks"); }
+            TrackTable { rows: App.s-tracks; list: "search"; show-cover: true; header: false; limit: 12; }
+        }
+        if App.s-albums.length > 0: VerticalLayout {
+            spacing: 12px;
+            padding-top: 16px;
+            SectionTitle { text: @tr("Albums"); }
+            AlbumFlow { albums: App.s-albums; playing-album: App.album-id; }
+        }
+    }
+}

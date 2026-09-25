@@ -1,0 +1,486 @@
+import { ScrollView, Slider } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, StationRow } from "state.slint";
+import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Toggle, TextField, Badge } from "widgets.slint";
+import { PageScroll } from "pages.slint";
+
+// ------------------------------------------------------------------ radio
+
+component StationLine inherits Rectangle {
+    in property <StationRow> st;
+    in property <int> index;
+    in property <string> list;
+    height: 60px;
+    border-radius: Theme.r-md;
+    background: ta.has-hover ? Theme.hover : transparent;
+    accessible-role: list-item;
+    accessible-label: st.name;
+    accessible-action-default => { App.radio-play(list, index); }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        double-clicked => { App.radio-play(root.list, root.index); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 14px;
+        Cover {
+            y: (parent.height - self.height) / 2;
+            width: 44px;
+            height: 44px;
+            radius: Theme.r-sm;
+            source: st.cover;
+            placeholder: Icons.radio;
+            if ta.has-hover: Rectangle {
+                background: #00000099;
+                Icon { source: Icons.play-fill; size: 16px; tint: #ffffff; }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { App.radio-play(root.list, root.index); }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: st.name; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
+            Text { text: st.sub; font-size: Theme.fs-sm; color: Theme.text2; overflow: elide; }
+        }
+        Text {
+            width: 30%;
+            text: st.tags;
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: st.fav ? Icons.heart-fill : Icons.heart;
+            tint: st.fav ? Theme.accent : Theme.text2;
+            tooltip: @tr("Favorite");
+            clicked => { App.radio-fav(root.list, root.index); }
+        }
+    }
+}
+
+export component RadioPage inherits PageScroll {
+    title: @tr("Radio");
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 14px;
+        Text {
+            text: @tr("Radio");
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+        }
+        Text {
+            text: @tr("Thousands of internet stations from the community-run Radio Browser directory.");
+            font-size: Theme.fs-md;
+            color: Theme.text2;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            TextField {
+                max-width: 420px;
+                icon: Icons.search;
+                placeholder: @tr("Station, genre, country…");
+                clearable: true;
+                text <=> App.radio-query;
+                accepted(t) => { App.radio-search(t); }
+            }
+            Button {
+                text: @tr("Search");
+                clicked => { App.radio-search(App.radio-query); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        Flickable {
+            height: 34px;
+            content-width: tags.preferred-width;
+            tags := HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                for t in App.radio-tags: Rectangle {
+                    height: 30px;
+                    width: tt.preferred-width + 24px;
+                    border-radius: 15px;
+                    background: tta.has-hover ? Theme.selected : Theme.hover;
+                    tt := Text { text: t; font-size: Theme.fs-sm; font-weight: 600; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; }
+                    tta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.radio-tag(t); }
+                    }
+                }
+            }
+        }
+        if App.radio-favs.length > 0: VerticalLayout {
+            spacing: 6px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Your stations"); }
+            for s[i] in App.radio-favs: StationLine { st: s; index: i; list: "favs"; }
+        }
+        VerticalLayout {
+            spacing: 6px;
+            padding-top: 8px;
+            SectionTitle { text: App.radio-status; }
+            for s[i] in App.stations: StationLine { st: s; index: i; list: "results"; }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ settings
+
+component Group inherits VerticalLayout {
+    in property <string> title;
+    in property <string> subtitle;
+    spacing: 4px;
+    padding-top: 28px;
+    Text { text: title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; }
+    if subtitle != "": Text { text: subtitle; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+    Rectangle { height: 10px; }
+    Rectangle {
+        border-radius: Theme.r-lg;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.line;
+        VerticalLayout {
+            padding: 4px;
+            @children
+        }
+    }
+}
+
+component Row inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+    min-height: max(56px, lay.preferred-height);
+    lay := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 24px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: label; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; wrap: word-wrap; }
+            if hint != "": Text { text: hint; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            @children
+        }
+    }
+}
+
+component Divider inherits Rectangle {
+    height: 1px;
+    Rectangle { x: 16px; width: parent.width - 32px; background: Theme.line; }
+}
+
+export component SettingsPage inherits PageScroll {
+    title: @tr("Settings");
+    fade-at: 40px;
+    private property <[color]> accents: [#d4a35a, #e0785a, #d66a9c, #8b7cf6, #4f9cf0, #3fb8a8, #7cc46a];
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        max-width: 860px;
+        alignment: start;
+        Text {
+            text: @tr("Settings");
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+        }
+
+        Group {
+            title: @tr("Audio output");
+            subtitle: @tr("Hardware devices (hw:) are opened exclusively: no mixer, no resampling, native sample rate for every track.");
+            for d[i] in App.devices: VerticalLayout {
+                if i > 0: Divider { }
+                Rectangle {
+                    height: 56px;
+                    border-radius: Theme.r-md;
+                    background: dta.has-hover ? Theme.hover : transparent;
+                    dta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.select-device(d.name); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 14px;
+                        Rectangle {
+                            y: (parent.height - self.height) / 2;
+                            width: 18px;
+                            height: 18px;
+                            border-radius: 9px;
+                            border-width: 2px;
+                            border-color: d.selected ? Theme.accent : Theme.line-strong;
+                            if d.selected: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            Text { text: d.desc; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; overflow: elide; }
+                            Text { text: d.name; font-size: Theme.fs-sm; color: Theme.text2; }
+                        }
+                        if d.hardware: Badge { y: (parent.height - self.height) / 2; text: @tr("BIT-PERFECT"); tint: Theme.good; }
+                    }
+                }
+            }
+            Divider { }
+            Row {
+                label: @tr("Rescan devices");
+                hint: @tr("After plugging in a USB DAC.");
+                Button { y: (parent.height - self.height) / 2; text: @tr("Refresh"); icon: Icons.refresh-cw; clicked => { App.refresh-devices(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("ReplayGain");
+                hint: @tr("Evens out loudness between tracks. Any gain makes playback non bit-perfect.");
+                Segmented {
+                    y: (parent.height - self.height) / 2;
+                    options: [@tr("Off"), @tr("Track"), @tr("Album"), @tr("Auto")];
+                    selected <=> App.replaygain;
+                    changed => { App.settings-changed(); }
+                }
+            }
+            if App.replaygain > 0: Divider { }
+            if App.replaygain > 0: Row {
+                label: @tr("Preamp: {} dB", round(App.preamp * 10) / 10);
+                hint: @tr("Added to the ReplayGain value.");
+                Slider {
+                    y: (parent.height - self.height) / 2;
+                    width: 200px;
+                    minimum: -12;
+                    maximum: 12;
+                    value <=> App.preamp;
+                    released => { App.settings-changed(); }
+                }
+            }
+            Divider { }
+            Row {
+                label: @tr("Resume where I left off");
+                hint: @tr("Restore the queue and position at startup (paused).");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.restore-session; toggled => { App.settings-changed(); } }
+            }
+        }
+
+        Group {
+            title: @tr("Library");
+            subtitle: @tr("Folders ricercar indexes. Files are only read, never modified.");
+            for r[i] in App.roots: VerticalLayout {
+                if i > 0: Divider { }
+                Row {
+                    label: r;
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.x;
+                        tooltip: @tr("Remove folder");
+                        clicked => { App.remove-root(i); }
+                    }
+                }
+            }
+            if App.roots.length > 0: Divider { }
+            Row {
+                label: App.roots.length == 0 ? @tr("No music folder yet") : @tr("{n} track indexed" | "{n} tracks indexed" % App.lib-tracks);
+                hint: App.scanning ? @tr("Indexing {} / {}", App.scan-done, App.scan-total) : "";
+                Button { y: (parent.height - self.height) / 2; text: @tr("Rescan"); icon: Icons.refresh-cw; enabled: App.roots.length > 0 && !App.scanning; clicked => { App.rescan(); } }
+                Button { y: (parent.height - self.height) / 2; text: @tr("Add folder"); icon: Icons.folder-open; primary: true; clicked => { App.add-root(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Watch folders for changes");
+                hint: @tr("New and edited files appear automatically.");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.watch-library; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Import a playlist");
+                hint: @tr("M3U or M3U8 file; tracks outside your library are skipped.");
+                Button { y: (parent.height - self.height) / 2; text: @tr("Import"); icon: Icons.download; clicked => { App.playlist-import(); } }
+            }
+        }
+
+        Group {
+            title: @tr("Network");
+            subtitle: @tr("Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library. Changes apply after a restart.");
+            Row {
+                label: @tr("Device name");
+                TextField {
+                    y: (parent.height - self.height) / 2;
+                    width: 220px;
+                    text <=> App.renderer-name;
+                    accepted => { App.settings-changed(); }
+                }
+            }
+            Divider { }
+            Row {
+                label: @tr("Play from other apps (UPnP / OpenHome renderer)");
+                hint: App.network-status;
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.renderer-enabled; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Share my library (UPnP media server)");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.server-enabled; toggled => { App.settings-changed(); } }
+            }
+        }
+
+        Group {
+            title: @tr("Scrobbling");
+            subtitle: @tr("A track counts as played after half its length or four minutes.");
+            Row {
+                label: "ListenBrainz";
+                hint: App.lb-status;
+                TextField {
+                    y: (parent.height - self.height) / 2;
+                    width: 260px;
+                    password: true;
+                    placeholder: @tr("User token");
+                    text <=> App.lb-token;
+                    accepted => { App.lb-save(); }
+                }
+                Button { y: (parent.height - self.height) / 2; text: @tr("Save"); clicked => { App.lb-save(); } }
+            }
+            Divider { }
+            Row {
+                label: "Last.fm";
+                hint: App.lastfm-status;
+                if !App.lastfm-pending && App.lastfm-status == "": TextField {
+                    y: (parent.height - self.height) / 2;
+                    width: 150px;
+                    placeholder: @tr("API key");
+                    text <=> App.lastfm-key;
+                }
+                if !App.lastfm-pending && App.lastfm-status == "": TextField {
+                    y: (parent.height - self.height) / 2;
+                    width: 150px;
+                    password: true;
+                    placeholder: @tr("Shared secret");
+                    text <=> App.lastfm-secret;
+                }
+                if !App.lastfm-pending && App.lastfm-status == "": Button {
+                    y: (parent.height - self.height) / 2;
+                    text: @tr("Connect");
+                    icon: Icons.log-in;
+                    clicked => { App.lastfm-connect(); }
+                }
+                if App.lastfm-pending: Button {
+                    y: (parent.height - self.height) / 2;
+                    text: @tr("I approved it");
+                    primary: true;
+                    clicked => { App.lastfm-finish(); }
+                }
+                if App.lastfm-status != "" && !App.lastfm-pending: Button {
+                    y: (parent.height - self.height) / 2;
+                    text: @tr("Disconnect");
+                    clicked => { App.lastfm-disconnect(); }
+                }
+            }
+        }
+
+        Group {
+            title: @tr("Online extras");
+            Row {
+                label: @tr("Synced lyrics");
+                hint: @tr("Look up lyrics on lrclib.net when a track has none (.lrc files and embedded lyrics are always used).");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.lyrics-online; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Missing album art");
+                hint: @tr("Fetch covers from MusicBrainz / Cover Art Archive for albums without art.");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.covers-online; toggled => { App.settings-changed(); } }
+            }
+        }
+
+        Group {
+            title: @tr("Appearance");
+            Row {
+                label: @tr("Theme");
+                Segmented {
+                    y: (parent.height - self.height) / 2;
+                    options: [@tr("Dark"), @tr("Light")];
+                    selected: App.theme-dark ? 0 : 1;
+                    changed(i) => {
+                        App.theme-dark = i == 0;
+                        App.settings-changed();
+                    }
+                }
+            }
+            Divider { }
+            Row {
+                label: @tr("Accent colour");
+                for c[i] in accents: Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: c;
+                    border-width: i == App.accent-choice ? 3px : 0;
+                    border-color: Theme.text;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            App.accent-choice = i;
+                            App.settings-changed();
+                        }
+                    }
+                }
+            }
+            Divider { }
+            Row {
+                label: @tr("Colours from the album cover");
+                hint: @tr("Tint the interface with the playing album's colours.");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.adaptive-colors; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Track change notifications");
+                Toggle { y: (parent.height - self.height) / 2; checked <=> App.notifications; toggled => { App.settings-changed(); } }
+            }
+        }
+
+        Group {
+            title: @tr("Keyboard");
+            Row { label: @tr("Play / pause"); Text { text: "Space"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Divider { }
+            Row { label: @tr("Next / previous track"); Text { text: "Ctrl + → / ←"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Divider { }
+            Row { label: @tr("Seek 10 seconds"); Text { text: "→ / ←"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Divider { }
+            Row { label: @tr("Volume"); Text { text: "Ctrl + ↑ / ↓"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Divider { }
+            Row { label: @tr("Search"); Text { text: "Ctrl + F"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Divider { }
+            Row { label: @tr("Now playing / lyrics"); Text { text: "Ctrl + L"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Divider { }
+            Row { label: @tr("Queue"); Text { text: "Ctrl + Q"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+        }
+
+        Group {
+            title: @tr("About");
+            Row {
+                label: "ricercar " + App.version;
+                hint: @tr("A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service.");
+                Button { y: (parent.height - self.height) / 2; text: "GitHub"; clicked => { App.open-url("https://github.com/ricercar-player/ricercar"); } }
+            }
+        }
+    }
+}

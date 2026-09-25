@@ -1,0 +1,239 @@
+import { Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, Page } from "state.slint";
+import { TrackMenu } from "lists.slint";
+import { Sidebar, PlayerBar, ChainPanel } from "chrome.slint";
+import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, GenresPage, GenrePage, FavoritesPage, PlaylistPage, SearchPage } from "pages.slint";
+import { RadioPage, SettingsPage } from "more.slint";
+import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays.slint";
+
+export { App, Page, Theme, TrackMenu }
+export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, QueueRow, LyricLine, StationRow, DeviceRow, ChainHop, MenuEntry } from "state.slint";
+
+export component MainWindow inherits Window {
+    title: App.has-track ? App.title + " — " + App.artist : "ricercar";
+    icon: @image-url("../../../dist/ricercar.svg");
+    preferred-width: 1320px;
+    preferred-height: 860px;
+    min-width: 960px;
+    min-height: 620px;
+    background: Theme.bg;
+    default-font-family: Theme.font;
+    default-font-size: Theme.fs-base;
+    forward-focus: keys;
+
+    // dialogs: 0 none, 1 new playlist, 2 rename playlist, 3 delete playlist
+    private property <int> dialog;
+    private property <string> dialog-value;
+    // a new playlist created from a menu receives the menu's item
+    private property <int> pending-add; // 0 none, 1 track, 2 album
+    private property <bool> menu-open;
+    private property <bool> menu-album;
+    private property <bool> chain-open;
+    private property <length> chain-x;
+    private property <bool> toast-shown;
+
+    private property <int> w-menu-serial: TrackMenu.serial;
+    private property <int> w-album-serial: TrackMenu.album-serial;
+    private property <int> w-toast-serial: App.toast-serial;
+    private property <Page> w-page: App.page;
+    private property <bool> w-theme-dark: App.theme-dark;
+    changed w-menu-serial => {
+        menu-album = false;
+        menu-open = true;
+    }
+    changed w-album-serial => {
+        menu-album = true;
+        menu-open = true;
+    }
+    changed w-toast-serial => {
+        toast-shown = true;
+        toast-timer.running = false;
+        toast-timer.running = true;
+    }
+    changed w-page => {
+        App.now-playing-open = false;
+    }
+
+    toast-timer := Timer {
+        interval: 3200ms;
+        running: false;
+        triggered => {
+            toast-shown = false;
+            self.running = false;
+        }
+    }
+
+    keys := FocusScope {
+        key-pressed(e) => {
+            if dialog != 0 { return reject; }
+            if e.text == " " {
+                App.play-pause();
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "f" || e.text == "k") {
+                sidebar.focus-search-field();
+                return accept;
+            }
+            if e.modifiers.control && e.text == "l" {
+                App.now-playing-open = !App.now-playing-open;
+                return accept;
+            }
+            if e.modifiers.control && e.text == "q" {
+                App.queue-open = !App.queue-open;
+                return accept;
+            }
+            if e.modifiers.control && e.text == Key.RightArrow {
+                App.next();
+                return accept;
+            }
+            if e.modifiers.control && e.text == Key.LeftArrow {
+                App.prev();
+                return accept;
+            }
+            if e.modifiers.control && e.text == Key.UpArrow {
+                App.set-volume(min(1, App.volume + 0.05));
+                return accept;
+            }
+            if e.modifiers.control && e.text == Key.DownArrow {
+                App.set-volume(max(0, App.volume - 0.05));
+                return accept;
+            }
+            if e.text == Key.RightArrow && App.dur-ms > 0 {
+                App.seek(min(App.dur-ms - 500, App.pos-ms + 10000));
+                return accept;
+            }
+            if e.text == Key.LeftArrow && App.dur-ms > 0 {
+                App.seek(max(0, App.pos-ms - 10000));
+                return accept;
+            }
+            if e.text == Key.Escape {
+                if menu-open { menu-open = false; return accept; }
+                if chain-open { chain-open = false; return accept; }
+                if App.now-playing-open { App.now-playing-open = false; return accept; }
+                if App.queue-open { App.queue-open = false; return accept; }
+            }
+            if e.modifiers.alt && e.text == Key.LeftArrow {
+                App.back();
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            HorizontalLayout {
+                vertical-stretch: 1;
+                sidebar := Sidebar {
+                    new-playlist => {
+                        pending-add = 0;
+                        dialog-value = "";
+                        dialog = 1;
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    if App.page == Page.home: HomePage { }
+                    if App.page == Page.albums: AlbumsPage { }
+                    if App.page == Page.album: AlbumPage { }
+                    if App.page == Page.artists: ArtistsPage { }
+                    if App.page == Page.artist: ArtistPage { }
+                    if App.page == Page.tracks: TracksPage { }
+                    if App.page == Page.genres: GenresPage { }
+                    if App.page == Page.genre: GenrePage { }
+                    if App.page == Page.favorites: FavoritesPage { }
+                    if App.page == Page.playlist: PlaylistPage {
+                        rename => {
+                            dialog-value = App.pl-name;
+                            dialog = 2;
+                        }
+                        delete => { dialog = 3; }
+                    }
+                    if App.page == Page.search: SearchPage { }
+                    if App.page == Page.radio: RadioPage { }
+                    if App.page == Page.settings: SettingsPage { }
+                }
+                if App.queue-open && !App.now-playing-open: QueuePanel { }
+            }
+            PlayerBar {
+                show-chain(x, y) => {
+                    chain-x = x;
+                    chain-open = !chain-open;
+                }
+            }
+        }
+
+        if App.now-playing-open: NowPlayingView {
+            height: parent.height - 88px;
+            close => { App.now-playing-open = false; }
+        }
+
+        if chain-open: Rectangle {
+            height: parent.height - 88px;
+            TouchArea { clicked => { chain-open = false; } }
+            ChainPanel {
+                x: min(chain-x, root.width - self.width - 12px);
+                y: parent.height - self.height - 8px;
+            }
+        }
+
+        if menu-open: ContextMenu {
+            is-album: menu-album;
+            win-w: root.width;
+            win-h: root.height;
+            dismiss => { menu-open = false; }
+            new-playlist-for(album) => {
+                pending-add = album ? 2 : 1;
+                dialog-value = "";
+                dialog = 1;
+            }
+        }
+
+        Toast {
+            x: (parent.width - self.width) / 2;
+            y: toast-shown ? parent.height - 88px - self.height - 16px : parent.height;
+            opacity: toast-shown ? 1 : 0;
+            text: App.toast;
+            error: App.toast-error;
+            animate y, opacity { duration: Theme.calm; easing: ease-out; }
+        }
+
+        if dialog != 0: dlg := Dialog {
+            title: dialog == 1 ? @tr("New playlist") : dialog == 2 ? @tr("Rename playlist") : @tr("Delete “{}”?", App.pl-name);
+            body: dialog == 3 ? @tr("The playlist is removed; your music files are not touched.") : "";
+            with-input: dialog != 3;
+            danger: dialog == 3;
+            confirm-text: dialog == 1 ? @tr("Create") : dialog == 2 ? @tr("Rename") : @tr("Delete");
+            value <=> dialog-value;
+            init => { self.focus-input(); }
+            confirm(v) => {
+                if dialog == 1 {
+                    App.playlist-create(v);
+                    if pending-add == 1 { App.track-action(TrackMenu.list, TrackMenu.index, "pl:new"); }
+                    if pending-add == 2 { App.album-action(TrackMenu.album-id, "pl:new"); }
+                } else if dialog == 2 {
+                    App.playlist-rename(App.pl-id, v);
+                } else {
+                    App.playlist-delete(App.pl-id);
+                }
+                pending-add = 0;
+                dialog = 0;
+                keys.focus();
+            }
+            cancel => {
+                pending-add = 0;
+                dialog = 0;
+                keys.focus();
+            }
+        }
+    }
+
+    init => {
+        Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed w-theme-dark => {
+        Theme.dark = App.theme-dark;
+        Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+}

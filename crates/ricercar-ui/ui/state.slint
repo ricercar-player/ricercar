@@ -1,0 +1,318 @@
+// Data exchanged with Rust, and the single global that carries it.
+
+export enum Page { home, albums, album, artists, artist, tracks, genres, genre, favorites, playlist, radio, search, settings }
+
+export struct AlbumCard {
+    id: string,
+    title: string,
+    artist: string,
+    year: string,
+    cover: image,
+    ckey: string,
+    hires: bool,
+    fav: bool,
+}
+
+export struct TrackRow {
+    key: string,
+    n: string,
+    title: string,
+    artist: string,
+    album: string,
+    album-id: string,
+    dur: string,
+    fav: bool,
+    playing: bool,
+    hires: bool,
+    fmt: string,
+    // non-empty on the first track of a disc of a multi-disc album
+    disc: string,
+    cover: image,
+    ckey: string,
+    plays: int,
+}
+
+export struct ArtistCard {
+    name: string,
+    albums: int,
+    tracks: int,
+    cover: image,
+    ckey: string,
+}
+
+export struct GenreCard {
+    name: string,
+    albums: int,
+    tint: color,
+}
+
+export struct PlaylistItem {
+    id: int,
+    name: string,
+    tracks: int,
+    cover: image,
+    ckey: string,
+}
+
+export struct QueueRow {
+    id: int,
+    title: string,
+    artist: string,
+    dur: string,
+    cover: image,
+    ckey: string,
+    current: bool,
+    past: bool,
+}
+
+export struct LyricLine {
+    text: string,
+    ms: int,
+}
+
+export struct StationRow {
+    uuid: string,
+    name: string,
+    sub: string,
+    tags: string,
+    cover: image,
+    ckey: string,
+    fav: bool,
+}
+
+export struct DeviceRow {
+    name: string,
+    desc: string,
+    hardware: bool,
+    selected: bool,
+}
+
+export struct ChainHop {
+    label: string,
+    value: string,
+    // 0 = untouched, 1 = altered (not bit-perfect), 2 = unknown
+    state: int,
+}
+
+export struct MenuEntry {
+    id: string,
+    label: string,
+    icon: image,
+    separator: bool,
+    danger: bool,
+}
+
+export global App {
+    // ---------------------------------------------------------------- navigation
+    in-out property <Page> page: Page.home;
+    in property <bool> can-back;
+    in property <bool> can-forward;
+    in-out property <bool> now-playing-open;
+    in-out property <bool> queue-open;
+    in-out property <int> np-tab; // 0 lyrics, 1 queue, 2 signal path
+    callback navigate(Page, string);
+    callback back();
+    callback forward();
+
+    // ---------------------------------------------------------------- player
+    in property <bool> has-track;
+    in property <bool> playing;
+    in property <string> title;
+    in property <string> artist;
+    in property <string> album;
+    in property <string> album-id;
+    in property <image> cover;
+    in property <image> cover-large;
+    in property <image> backdrop;
+    in property <bool> live;
+    in property <int> pos-ms;
+    in property <int> dur-ms;
+    in property <float> volume: 1;
+    in property <bool> muted;
+    in property <bool> shuffle;
+    in property <int> repeat; // 0 off, 1 all, 2 one
+    in property <bool> fav;
+    in property <bool> can-next;
+    in property <string> quality; // "24/96", "16/44.1", "320k"
+    in property <string> codec;
+    in property <bool> hires;
+    in property <bool> bitperfect;
+    in property <bool> chain-known;
+    in property <[ChainHop]> chain;
+    in property <string> device-label;
+    in property <string> origin; // "", "UPnP", "Radio"
+    in property <string> context-label;
+    callback play-pause();
+    callback next();
+    callback prev();
+    callback seek(int);
+    callback set-volume(float);
+    callback toggle-mute();
+    callback toggle-shuffle();
+    callback cycle-repeat();
+    callback toggle-fav();
+    callback go-to-album();
+    callback go-to-artist();
+
+    // ---------------------------------------------------------------- queue
+    in property <[QueueRow]> queue;
+    in property <int> queue-current;
+    in property <string> queue-meta;
+    callback queue-play(int);
+    callback queue-remove(int);
+    callback queue-move(int, int);
+    callback queue-clear();
+
+    // ---------------------------------------------------------------- lyrics
+    in property <[LyricLine]> lyrics;
+    in property <int> lyric-index: -1;
+    in property <bool> lyrics-synced;
+    in property <string> lyrics-status;
+    in property <string> lyrics-source;
+
+    // ---------------------------------------------------------------- lists
+    // Generic actions on a track list: list = "album", "artist-top", "tracks",
+    // "fav", "search", "playlist", "home-played", "genre"
+    callback track-activate(string, int);
+    callback track-action(string, int, string);
+    callback album-activate(string);
+    callback album-action(string, string);
+    callback artist-activate(string);
+    in property <[MenuEntry]> track-menu;
+    in property <[PlaylistItem]> playlists;
+
+    // ---------------------------------------------------------------- home
+    in property <string> greeting;
+    in property <[AlbumCard]> home-played;
+    in property <[AlbumCard]> home-added;
+    in property <[AlbumCard]> home-top;
+    in property <[TrackRow]> home-tracks;
+    in property <int> lib-tracks;
+    in property <int> lib-albums;
+    in property <int> lib-artists;
+    in property <string> lib-duration;
+    in property <int> lib-hires;
+    in property <bool> scanning;
+    in property <int> scan-done;
+    in property <int> scan-total;
+    callback shuffle-all();
+
+    // ---------------------------------------------------------------- albums / artists / tracks / genres
+    in property <[AlbumCard]> albums;
+    in-out property <int> album-sort;
+    in-out property <bool> albums-hires-only;
+    callback albums-sort-changed();
+    in property <[ArtistCard]> artists;
+    in property <[TrackRow]> tracks;
+    // Virtualized lists report the rows on screen so covers load lazily.
+    callback visible(string, int, int);
+    in-out property <int> track-sort;
+    callback tracks-sort-changed();
+    in property <[GenreCard]> genres;
+
+    // ---------------------------------------------------------------- album page
+    in property <string> al-id;
+    in property <string> al-title;
+    in property <string> al-artist;
+    in property <string> al-year;
+    in property <string> al-genre;
+    in property <int> al-count;
+    in property <string> al-duration;
+    in property <string> al-quality;
+    in property <bool> al-hires;
+    in property <bool> al-fav;
+    in property <image> al-cover;
+    in property <string> al-path;
+    in property <[TrackRow]> al-tracks;
+    in property <[AlbumCard]> al-more;
+
+    // ---------------------------------------------------------------- artist page
+    in property <string> ar-name;
+    in property <int> ar-albums;
+    in property <int> ar-tracks;
+    in property <image> ar-cover;
+    in property <[TrackRow]> ar-top;
+    in property <[AlbumCard]> ar-own;
+    in property <[AlbumCard]> ar-appears;
+
+    // ---------------------------------------------------------------- genre / favorites / playlist
+    in property <string> ge-name;
+    in property <[AlbumCard]> ge-albums;
+    in property <[AlbumCard]> fav-albums;
+    in property <[TrackRow]> fav-tracks;
+    in property <int> pl-id;
+    in property <string> pl-name;
+    in property <int> pl-count;
+    in property <string> pl-duration;
+    in property <image> pl-cover;
+    in property <[TrackRow]> pl-tracks;
+    callback playlist-create(string);
+    callback playlist-rename(int, string);
+    callback playlist-delete(int);
+    callback playlist-play(int, bool);
+    callback playlist-export(int);
+    callback playlist-import();
+
+    // ---------------------------------------------------------------- search
+    in-out property <string> search-text;
+    callback search(string);
+    in property <[ArtistCard]> s-artists;
+    in property <[AlbumCard]> s-albums;
+    in property <[TrackRow]> s-tracks;
+
+    // ---------------------------------------------------------------- radio
+    in property <[StationRow]> stations;
+    in property <[StationRow]> radio-favs;
+    in property <[string]> radio-tags;
+    in property <string> radio-status;
+    in-out property <string> radio-query;
+    callback radio-search(string);
+    callback radio-tag(string);
+    callback radio-play(string, int); // list ("results" | "favs"), index
+    callback radio-fav(string, int);
+
+    // ---------------------------------------------------------------- settings
+    in property <[DeviceRow]> devices;
+    callback select-device(string);
+    callback refresh-devices();
+    in-out property <int> replaygain; // 0 off, 1 track, 2 album, 3 auto
+    in-out property <float> preamp;
+    callback settings-changed();
+    in property <[string]> roots;
+    callback add-root();
+    callback remove-root(int);
+    callback rescan();
+    in-out property <bool> watch-library;
+    in-out property <bool> restore-session;
+    in-out property <string> renderer-name;
+    in-out property <bool> renderer-enabled;
+    in-out property <bool> server-enabled;
+    in property <string> network-status;
+    in-out property <string> lb-token;
+    in property <string> lb-status;
+    callback lb-save();
+    in-out property <string> lastfm-key;
+    in-out property <string> lastfm-secret;
+    in property <string> lastfm-status;
+    in property <bool> lastfm-pending;
+    callback lastfm-connect();
+    callback lastfm-finish();
+    callback lastfm-disconnect();
+    in-out property <bool> lyrics-online;
+    in-out property <bool> covers-online;
+    in-out property <bool> notifications;
+    in-out property <bool> theme-dark: true;
+    in-out property <bool> adaptive-colors: true;
+    in-out property <int> accent-choice;
+    in property <string> version;
+
+    // ---------------------------------------------------------------- toasts
+    in property <string> toast;
+    in property <bool> toast-error;
+    in property <int> toast-serial;
+
+    // ---------------------------------------------------------------- misc
+    callback open-url(string);
+    callback show-in-folder(string);
+    callback quit();
+}
