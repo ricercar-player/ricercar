@@ -18,6 +18,10 @@ pub enum AudioError {
         "device '{0}' does not support the track format (bit-perfect policy refuses resampling)"
     )]
     UnsupportedFormat(String),
+    #[error("device '{device}' cannot play {detail} bit-perfectly")]
+    FormatRefused { device: String, detail: String },
+    #[error("audio device '{device}' disappeared (unplugged or powered off?)")]
+    DeviceGone { device: String },
     #[error("engine is shut down")]
     ShutDown,
 }
