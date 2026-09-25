@@ -1,6 +1,6 @@
 [package]
 name = "ricercar-ui"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license.workspace = true
 description = "Bit-perfect music player and UPnP/OpenHome network receiver for Linux"
@@ -13,10 +13,10 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 ksni = { version = "0.3.6", default-features = false, features = ["blocking", "async-io"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal", "pollster"] }
-ricercar-audio = { version = "0.2.0", path = "../ricercar-audio" }
+ricercar-audio = { version = "0.3.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
-ricercar-daemon = { version = "0.2.0", path = "../ricercar-daemon" }
-ricercar-online = { version = "0.2.0", path = "../ricercar-online" }
+ricercar-daemon = { version = "0.3.0", path = "../ricercar-daemon" }
+ricercar-online = { version = "0.3.0", path = "../ricercar-online" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 slint = "1.18.1"

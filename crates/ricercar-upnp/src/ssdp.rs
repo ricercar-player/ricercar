@@ -12,7 +12,7 @@ const CACHE_SECS: u32 = 1800;
 /// M-SEARCH replies waiting for their delay; more are answered at once
 /// (bounded thread count under a search flood).
 const MAX_PENDING_REPLIES: usize = 16;
-const SERVER: &str = "Linux/6 UPnP/1.1 ricercar/0.2";
+const SERVER: &str = "Linux/6 UPnP/1.1 ricercar/0.3";
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {

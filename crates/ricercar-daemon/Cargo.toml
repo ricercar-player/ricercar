@@ -1,12 +1,12 @@
 [package]
 name = "ricercar-daemon"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license.workspace = true
 
 [dependencies]
 ctrlc = "3.5.2"
-ricercar-audio = { version = "0.2.0", path = "../ricercar-audio" }
+ricercar-audio = { version = "0.3.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 ricercar-online.workspace = true
 ricercar-mpris.workspace = true
