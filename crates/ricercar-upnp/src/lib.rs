@@ -29,6 +29,7 @@ pub fn xml_escape_pub(s: &str) -> String {
     desc::xml_escape(s)
 }
 
+const CD_NS: &str = "urn:schemas-upnp-org:service:ContentDirectory:1";
 const AVT_NS: &str = "urn:schemas-upnp-org:service:AVTransport:1";
 const RCS_NS: &str = "urn:schemas-upnp-org:service:RenderingControl:1";
 const CMS_NS: &str = "urn:schemas-upnp-org:service:ConnectionManager:1";
@@ -58,7 +59,9 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
     let listener = TcpListener::bind("0.0.0.0:0")?;
     let port = listener.local_addr()?.port();
     let udn = load_or_create_udn();
-    let location = format!("http://{}:{}/device.xml", ssdp::local_ip(), port);
+    let server_udn = load_or_create_udn_named("udn-server");
+    let ip = ssdp::local_ip();
+    let location = format!("http://{ip}:{port}/device.xml");
 
     let stop = Arc::new(AtomicBool::new(false));
     let renderer = Arc::new(Renderer {
@@ -69,6 +72,8 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
         cms_subs: Subscribers::default(),
         name: name.to_string(),
         udn: udn.clone(),
+        server_udn: server_udn.clone(),
+        cd_subs: Subscribers::default(),
     });
 
     // HTTP service
@@ -110,6 +115,7 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
                     r.avt_subs.expire();
                     r.rcs_subs.expire();
                     r.cms_subs.expire();
+                    r.cd_subs.expire();
                     let snap = r.snapshot();
                     if snap != last {
                         let (state_t, uri, vol, mute) = snap.clone();
@@ -131,7 +137,18 @@ pub fn start_renderer(controller: Arc<Controller>, name: &str) -> std::io::Resul
             })?;
     }
 
-    let ssdp = ssdp::Ssdp::start(udn, location);
+    let ssdp = ssdp::Ssdp::start(vec![
+        ssdp::Device {
+            udn,
+            location: location.clone(),
+            kind: ssdp::Kind::Renderer,
+        },
+        ssdp::Device {
+            udn: server_udn,
+            location: format!("http://{ip}:{port}/server.xml"),
+            kind: ssdp::Kind::Server,
+        },
+    ]);
     if ssdp.is_none() {
         tracing::warn!("SSDP port 1900 unavailable — renderer not discoverable");
     }
@@ -151,6 +168,8 @@ struct Renderer {
     cms_subs: Subscribers,
     name: String,
     udn: String,
+    server_udn: String,
+    cd_subs: Subscribers,
 }
 
 fn fmt_time(ms: u64) -> String {
@@ -532,6 +551,20 @@ fn serve_conn(r: &Renderer, mut stream: std::net::TcpStream) {
             "text/xml",
             desc::CMS_SCPDL.as_bytes(),
         ),
+        ("GET", "/server.xml") => {
+            let xml = desc::server_xml(&r.name, &r.server_udn);
+            http::write_response(&mut stream, 200, "OK", "text/xml", xml.as_bytes());
+        }
+        ("GET", "/svc/cd.xml") => http::write_response(
+            &mut stream,
+            200,
+            "OK",
+            "text/xml",
+            desc::CD_SCPDL.as_bytes(),
+        ),
+        ("GET", p) if p.starts_with("/media/") => serve_media(r, &req, &mut stream),
+        ("GET", p) if p.starts_with("/art") => serve_art(r, &req, &mut stream),
+        ("POST", "/ctl/cd") => handle_control(r, CD_NS, &req, &mut stream),
         ("POST", "/ctl/avt") => handle_control(r, AVT_NS, &req, &mut stream),
         ("POST", "/ctl/rcs") => handle_control(r, RCS_NS, &req, &mut stream),
         ("POST", "/ctl/cms") => handle_control(r, CMS_NS, &req, &mut stream),
@@ -545,6 +578,7 @@ fn subs_of<'a>(r: &'a Renderer, path: &str) -> &'a Subscribers {
     match path.trim_start_matches("/evt/") {
         "rcs" => &r.rcs_subs,
         "cms" => &r.cms_subs,
+        "cd" => &r.cd_subs,
         _ => &r.avt_subs,
     }
 }
@@ -562,6 +596,10 @@ fn handle_control(r: &Renderer, ns: &str, req: &http::Request, stream: &mut std:
                 AVT_NS => r.avt(&action, args),
                 RCS_NS => r.rcs(&action, args),
                 CMS_NS => r.cms(&action),
+                CD_NS => {
+                    let host = req.header("host").unwrap_or("127.0.0.1").to_string();
+                    r.cd(&action, args, &host)
+                }
                 _ => (Some(soap::fault(401, "invalid service")), 500),
             };
             match body {
@@ -663,8 +701,12 @@ fn handle_unsubscribe(
 }
 
 fn load_or_create_udn() -> String {
+    load_or_create_udn_named("udn")
+}
+
+fn load_or_create_udn_named(name: &str) -> String {
     let dir = config_dir();
-    let file = dir.join("udn");
+    let file = dir.join(name);
     if let Ok(s) = std::fs::read_to_string(&file) {
         let s = s.trim().to_string();
         if !s.is_empty() {
@@ -702,4 +744,311 @@ pub fn config_dir() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(|h| std::path::PathBuf::from(h).join(".config/ricercar"))
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/ricercar"))
+}
+
+// ------------------------------------------------------------- media server
+
+fn fnv(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100_000_000_1b3);
+    }
+    h
+}
+
+fn b36(v: u64) -> String {
+    const D: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if v == 0 {
+        return "0".into();
+    }
+    let mut v = v;
+    let mut out = Vec::new();
+    while v > 0 {
+        out.push(D[(v % 36) as usize]);
+        v /= 36;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap()
+}
+
+fn album_id(album: &str, artist: Option<&str>) -> String {
+    format!(
+        "A{}",
+        b36(fnv(&format!("{album}|{}", artist.unwrap_or(""))) % (1 << 60))
+    )
+}
+
+fn track_id(path: &str) -> String {
+    format!("T{}", b36(fnv(path) % (1 << 60)))
+}
+
+fn pct_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn pct_decode(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn mime_of(path: &str) -> (&'static str, &'static str) {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "flac" => ("audio/flac", "FLAC"),
+        "mp3" => ("audio/mpeg", "MP3"),
+        "m4a" | "mp4" => ("audio/mp4", "MP4"),
+        "wav" => ("audio/L16", "LPCM"),
+        "ogg" => ("audio/ogg", "OGG"),
+        _ => ("application/octet-stream", "*"),
+    }
+}
+
+fn dlna_duration(ms: u64) -> String {
+    let s = ms / 1000;
+    format!("{}:{:02}:{:02}.000", s / 3600, (s / 60) % 60, s % 60)
+}
+
+fn didl_open() -> String {
+    "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns:res=\"urn:schemas-upnp-org:metadata-1-0/res/\" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">".to_string()
+}
+
+impl Renderer {
+    fn cd(&self, action: &str, args: Vec<(String, String)>, host: &str) -> (Option<String>, u16) {
+        let arg = |k: &str| {
+            args.iter()
+                .find(|(a, _)| a == k)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+        match action {
+            "GetSearchCapabilities" => (
+                Some(soap::response_body(action, CD_NS, &[("SearchCaps", "")])),
+                200,
+            ),
+            "GetSortCapabilities" => (
+                Some(soap::response_body(action, CD_NS, &[("SortCaps", "")])),
+                200,
+            ),
+            "GetSystemUpdateID" => (
+                Some(soap::response_body(action, CD_NS, &[("Id", "0")])),
+                200,
+            ),
+            "Browse" => {
+                let object_id = arg("ObjectID");
+                let start: usize = arg("StartingIndex").parse().unwrap_or(0);
+                let count: usize = arg("RequestCount").parse().unwrap_or(0);
+                let base = format!("http://{host}");
+                let (result, returned, total) = self.browse(&object_id, start, count, &base);
+                (
+                    Some(soap::response_body(
+                        action,
+                        CD_NS,
+                        &[
+                            ("Result", &result),
+                            ("NumberReturned", &returned.to_string()),
+                            ("TotalMatches", &total.to_string()),
+                            ("UpdateID", "0"),
+                        ],
+                    )),
+                    200,
+                )
+            }
+            _ => (Some(soap::fault(401, "invalid action")), 500),
+        }
+    }
+
+    fn browse(
+        &self,
+        object_id: &str,
+        start: usize,
+        count: usize,
+        base: &str,
+    ) -> (String, usize, usize) {
+        use ricercar_core::meta;
+        let mut out = didl_open();
+        let mut returned = 0usize;
+        let mut total = 0usize;
+        let mut push = |s: &mut String, xml: String| {
+            total += 1;
+            if total > start && (count == 0 || returned < count) {
+                s.push_str(&xml);
+                returned += 1;
+            }
+        };
+        match object_id {
+            "0" => {
+                for a in self.controller.lib.albums() {
+                    let id = album_id(&a.album, a.album_artist.as_deref());
+                    push(
+                        &mut out,
+                        format!(
+                            "<container id=\"{id}\" parentID=\"0\" childCount=\"{}\" restricted=\"false\" searchable=\"false\"><dc:title>{}</dc:title><upnp:class>object.container.album.musicAlbum</upnp:class></container>",
+                            a.track_count,
+                            desc::xml_escape(&a.album),
+                        ),
+                    );
+                }
+            }
+            id if id.starts_with('A') => {
+                let album = self
+                    .controller
+                    .lib
+                    .albums()
+                    .into_iter()
+                    .find(|a| album_id(&a.album, a.album_artist.as_deref()) == id);
+                if let Some(a) = album {
+                    for t in self
+                        .controller
+                        .lib
+                        .album_tracks(&a.album, a.album_artist.as_deref())
+                    {
+                        let tid = track_id(&t.path);
+                        let pid = id.to_string();
+                        let (mime, pn) = mime_of(&t.path);
+                        let size = std::fs::metadata(&t.path).map(|m| m.len()).unwrap_or(0);
+                        let res_url = format!("{base}/media/{}", pct_encode(&t.uri));
+                        let cover = if meta::uri_to_path(&t.uri)
+                            .map(|p| ricercar_core::meta::cover_bytes(&p).is_some())
+                            .unwrap_or(false)
+                        {
+                            format!(
+                                "<upnp:albumArtURI dlna:profileID=\"JPEG_TN\">{base}/art?u={}</upnp:albumArtURI>",
+                                pct_encode(&t.uri)
+                            )
+                        } else {
+                            String::new()
+                        };
+                        push(
+                            &mut out,
+                            format!(
+                                "<item id=\"{tid}\" parentID=\"{pid}\" restricted=\"true\"><dc:title>{}</dc:title><dc:creator>{}</dc:creator><upnp:artist>{}</upnp:artist><upnp:album>{}</upnp:album><upnp:originalTrackNumber>{}</upnp:originalTrackNumber>{cover}<upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo=\"http-get:*:{}:DLNA.ORG_PN={};DLNA.ORG_OP=01\" size=\"{size}\" duration=\"{}\">{}</res></item>",
+                                desc::xml_escape(&t.title),
+                                desc::xml_escape(t.artist.as_deref().unwrap_or("")),
+                                desc::xml_escape(t.artist.as_deref().unwrap_or("")),
+                                desc::xml_escape(&a.album),
+                                t.track.unwrap_or(0),
+                                mime,
+                                pn,
+                                dlna_duration(t.duration_ms),
+                                desc::xml_escape(&res_url),
+                            ),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+        out.push_str("</DIDL-Lite>");
+        (out, returned, total)
+    }
+}
+
+fn serve_media(r: &Renderer, req: &http::Request, stream: &mut std::net::TcpStream) {
+    let Some(rel) = req.path.strip_prefix("/media/") else {
+        http::write_response(stream, 404, "Not Found", "text/plain", b"");
+        return;
+    };
+    let Some(path) = pct_decode(rel) else {
+        http::write_response(stream, 400, "Bad Request", "text/plain", b"");
+        return;
+    };
+    // only paths that are in the indexed library are served
+    let Some(uri) = ricercar_core::meta::uri_to_path(&path) else {
+        http::write_response(stream, 404, "Not Found", "text/plain", b"");
+        return;
+    };
+    let path_str = uri.to_string_lossy().into_owned();
+    if !r.controller.lib.has_path(&path_str) {
+        http::write_response(stream, 404, "Not Found", "text/plain", b"");
+        return;
+    }
+    let Ok(data) = std::fs::read(&path_str) else {
+        http::write_response(stream, 404, "Not Found", "text/plain", b"");
+        return;
+    };
+    let (mime, _) = mime_of(&path_str);
+    let range = req.header("range").map(|s| s.to_string());
+    let (code, reason, body_from, body_to) = match parse_range(range.as_deref(), data.len()) {
+        Some((from, to)) => (206, "Partial Content", from, to),
+        None => (200, "OK", 0, data.len()),
+    };
+    let slice = &data[body_from..body_to];
+    let mut head = format!(
+        "HTTP/1.1 {code} {reason}\r\nCONTENT-TYPE: {mime}\r\nCONTENT-LENGTH: {}\r\nSERVER: Linux/5.0 UPnP/1.1 ricercar/0.1\r\nCONNECTION: close\r\n",
+        slice.len()
+    );
+    if code == 206 {
+        head.push_str(&format!(
+            "CONTENT-RANGE: bytes {}-{}/{}\r\n",
+            body_from,
+            body_to - 1,
+            data.len()
+        ));
+    }
+    head.push_str("\r\n");
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(slice);
+    let _ = stream.flush();
+}
+
+fn parse_range(h: Option<&str>, len: usize) -> Option<(usize, usize)> {
+    let h = h?.trim();
+    let spec = h.strip_prefix("bytes=")?;
+    let (a, b) = spec.split_once('-')?;
+    let (from, to) = if a.is_empty() {
+        let n: usize = b.parse().ok()?;
+        (len.saturating_sub(n), len)
+    } else {
+        let from: usize = a.parse().ok()?;
+        let to: usize = if b.is_empty() {
+            len
+        } else {
+            (b.parse::<usize>().ok()? + 1).min(len)
+        };
+        (from, to)
+    };
+    if from < to && to <= len {
+        Some((from, to))
+    } else {
+        None
+    }
+}
+
+fn serve_art(r: &Renderer, req: &http::Request, stream: &mut std::net::TcpStream) {
+    let query = req.path.split_once('?').map(|(_, q)| q).unwrap_or("");
+    let uri = query
+        .strip_prefix("u=")
+        .and_then(pct_decode)
+        .unwrap_or_default();
+    if uri.is_empty() {
+        http::write_response(stream, 404, "Not Found", "text/plain", b"");
+        return;
+    }
+    match r.controller.cover_for(&uri) {
+        Some((bytes, mime)) => {
+            http::write_response(stream, 200, "OK", &mime, &bytes);
+        }
+        None => http::write_response(stream, 404, "Not Found", "text/plain", b""),
+    }
 }

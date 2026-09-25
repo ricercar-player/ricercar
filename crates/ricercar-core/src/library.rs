@@ -167,6 +167,16 @@ impl Library {
             .unwrap_or(0)
     }
 
+    pub fn has_path(&self, path: &str) -> bool {
+        let conn = self.conn();
+        conn.prepare("SELECT 1 FROM tracks WHERE path=?1")
+            .and_then(|mut st| {
+                let mut rows = st.query_map([path], |_| Ok(()))?;
+                Ok(rows.next().is_some())
+            })
+            .unwrap_or(false)
+    }
+
     pub fn albums(&self) -> Vec<AlbumKey> {
         let conn = self.conn();
         let mut stmt = conn
