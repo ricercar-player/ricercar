@@ -1,0 +1,39 @@
+{
+  "created": "2026-09-25T07:30:06.510Z",
+  "count": 39,
+  "offset": 0,
+  "releases": [
+    {
+      "id": "4b3d18cc-8937-36f4-8de0-481088be58e6",
+      "score": 100,
+      "status": "Official",
+      "title": "OK Computer",
+      "artist-credit": [
+        {"name": "Radiohead", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead", "sort-name": "Radiohead"}}
+      ],
+      "release-group": {"id": "b1392450-e666-3926-a536-22c65f834433", "title": "OK Computer", "primary-type": "Album"},
+      "date": "1997-06-17",
+      "country": "CA",
+      "track-count": 12
+    },
+    {
+      "id": "9c1e5e9e-9f40-4cd8-94a4-785fa5d0b613",
+      "score": 100,
+      "status": "Official",
+      "title": "OK Computer",
+      "artist-credit": [
+        {"name": "Radiohead", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead"}}
+      ],
+      "release-group": {"id": "b1392450-e666-3926-a536-22c65f834433", "title": "OK Computer"},
+      "date": "1997",
+      "country": "PL"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000099",
+      "score": 71,
+      "title": "OK Computer OKNOTOK 1997 2017",
+      "artist-credit": [{"name": "Radiohead"}],
+      "release-group": {"id": "00000000-0000-4000-8000-000000000098"}
+    }
+  ]
+}
