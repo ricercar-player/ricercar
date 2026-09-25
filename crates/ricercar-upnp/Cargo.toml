@@ -1,13 +1,13 @@
 [package]
 name = "ricercar-upnp"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license.workspace = true
 
 [dependencies]
 if-addrs = "0.15.0"
 quick-xml = "0.42.0"
-ricercar-audio = { version = "0.1.0", path = "../ricercar-audio" }
+ricercar-audio = { version = "0.2.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 socket2 = "0.6.5"
 thiserror.workspace = true

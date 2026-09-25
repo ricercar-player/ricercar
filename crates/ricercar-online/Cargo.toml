@@ -1,6 +1,6 @@
 [package]
 name = "ricercar-online"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license.workspace = true
 description = "Online integrations for ricercar: scrobbling, lyrics, internet radio, cover art (open APIs only)"

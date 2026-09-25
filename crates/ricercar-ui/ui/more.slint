@@ -94,11 +94,12 @@ export component RadioPage inherits PageScroll {
                 placeholder: @tr("Station, genre, country…");
                 clearable: true;
                 text <=> App.radio-query;
+                edited(t) => { App.radio-edited(t); }
                 accepted(t) => { App.radio-search(t); }
-            }
-            Button {
-                text: @tr("Search");
-                clicked => { App.radio-search(App.radio-query); }
+                escape => {
+                    App.radio-query = "";
+                    App.radio-search("");
+                }
             }
             Rectangle { horizontal-stretch: 1; }
         }
@@ -158,23 +159,25 @@ component Group inherits VerticalLayout {
     }
 }
 
-component Row inherits Rectangle {
+component Row inherits HorizontalLayout {
     in property <string> label;
     in property <string> hint;
-    min-height: max(56px, lay.preferred-height);
-    lay := HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        spacing: 24px;
-        VerticalLayout {
-            alignment: center;
-            spacing: 2px;
-            horizontal-stretch: 1;
-            Text { text: label; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; wrap: word-wrap; }
-            if hint != "": Text { text: hint; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
-        }
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    spacing: 24px;
+    min-height: 56px;
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        horizontal-stretch: 1;
+        Text { text: label; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; wrap: word-wrap; }
+        if hint != "": Text { text: hint; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+    }
+    // Controls are centred on the row, whatever their own heights.
+    VerticalLayout {
+        alignment: center;
         HorizontalLayout {
             alignment: end;
             spacing: 8px;
@@ -248,14 +251,13 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Rescan devices");
                 hint: @tr("After plugging in a USB DAC.");
-                Button { y: (parent.height - self.height) / 2; text: @tr("Refresh"); icon: Icons.refresh-cw; clicked => { App.refresh-devices(); } }
+                Button { text: @tr("Refresh"); icon: Icons.refresh-cw; clicked => { App.refresh-devices(); } }
             }
             Divider { }
             Row {
                 label: @tr("ReplayGain");
                 hint: @tr("Evens out loudness between tracks. Any gain makes playback non bit-perfect.");
                 Segmented {
-                    y: (parent.height - self.height) / 2;
                     options: [@tr("Off"), @tr("Track"), @tr("Album"), @tr("Auto")];
                     selected <=> App.replaygain;
                     changed => { App.settings-changed(); }
@@ -266,7 +268,6 @@ export component SettingsPage inherits PageScroll {
                 label: @tr("Preamp: {} dB", round(App.preamp * 10) / 10);
                 hint: @tr("Added to the ReplayGain value.");
                 Slider {
-                    y: (parent.height - self.height) / 2;
                     width: 200px;
                     minimum: -12;
                     maximum: 12;
@@ -278,7 +279,7 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Resume where I left off");
                 hint: @tr("Restore the queue and position at startup (paused).");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.restore-session; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.restore-session; toggled => { App.settings-changed(); } }
             }
         }
 
@@ -290,7 +291,6 @@ export component SettingsPage inherits PageScroll {
                 Row {
                     label: r;
                     IconButton {
-                        y: (parent.height - self.height) / 2;
                         icon: Icons.x;
                         tooltip: @tr("Remove folder");
                         clicked => { App.remove-root(i); }
@@ -301,20 +301,20 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: App.roots.length == 0 ? @tr("No music folder yet") : @tr("{n} track indexed" | "{n} tracks indexed" % App.lib-tracks);
                 hint: App.scanning ? @tr("Indexing {} / {}", App.scan-done, App.scan-total) : "";
-                Button { y: (parent.height - self.height) / 2; text: @tr("Rescan"); icon: Icons.refresh-cw; enabled: App.roots.length > 0 && !App.scanning; clicked => { App.rescan(); } }
-                Button { y: (parent.height - self.height) / 2; text: @tr("Add folder"); icon: Icons.folder-open; primary: true; clicked => { App.add-root(); } }
+                Button { text: @tr("Rescan"); icon: Icons.refresh-cw; enabled: App.roots.length > 0 && !App.scanning; clicked => { App.rescan(); } }
+                Button { text: @tr("Add folder"); icon: Icons.folder-open; primary: true; clicked => { App.add-root(); } }
             }
             Divider { }
             Row {
                 label: @tr("Watch folders for changes");
                 hint: @tr("New and edited files appear automatically.");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.watch-library; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.watch-library; toggled => { App.settings-changed(); } }
             }
             Divider { }
             Row {
                 label: @tr("Import a playlist");
                 hint: @tr("M3U or M3U8 file; tracks outside your library are skipped.");
-                Button { y: (parent.height - self.height) / 2; text: @tr("Import"); icon: Icons.download; clicked => { App.playlist-import(); } }
+                Button { text: @tr("Import"); icon: Icons.download; clicked => { App.playlist-import(); } }
             }
         }
 
@@ -324,9 +324,9 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Device name");
                 TextField {
-                    y: (parent.height - self.height) / 2;
                     width: 220px;
                     text <=> App.renderer-name;
+                    edited => { App.text-setting-edited(); }
                     accepted => { App.settings-changed(); }
                 }
             }
@@ -334,12 +334,12 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Play from other apps (UPnP / OpenHome renderer)");
                 hint: App.network-status;
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.renderer-enabled; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.renderer-enabled; toggled => { App.settings-changed(); } }
             }
             Divider { }
             Row {
                 label: @tr("Share my library (UPnP media server)");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.server-enabled; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.server-enabled; toggled => { App.settings-changed(); } }
             }
         }
 
@@ -350,46 +350,41 @@ export component SettingsPage inherits PageScroll {
                 label: "ListenBrainz";
                 hint: App.lb-status;
                 TextField {
-                    y: (parent.height - self.height) / 2;
                     width: 260px;
                     password: true;
                     placeholder: @tr("User token");
                     text <=> App.lb-token;
+                    edited => { App.lb-edited(); }
                     accepted => { App.lb-save(); }
                 }
-                Button { y: (parent.height - self.height) / 2; text: @tr("Save"); clicked => { App.lb-save(); } }
+                Button { text: @tr("Save"); clicked => { App.lb-save(); } }
             }
             Divider { }
             Row {
                 label: "Last.fm";
                 hint: App.lastfm-status;
                 if !App.lastfm-pending && App.lastfm-status == "": TextField {
-                    y: (parent.height - self.height) / 2;
                     width: 150px;
                     placeholder: @tr("API key");
                     text <=> App.lastfm-key;
                 }
                 if !App.lastfm-pending && App.lastfm-status == "": TextField {
-                    y: (parent.height - self.height) / 2;
                     width: 150px;
                     password: true;
                     placeholder: @tr("Shared secret");
                     text <=> App.lastfm-secret;
                 }
                 if !App.lastfm-pending && App.lastfm-status == "": Button {
-                    y: (parent.height - self.height) / 2;
                     text: @tr("Connect");
                     icon: Icons.log-in;
                     clicked => { App.lastfm-connect(); }
                 }
                 if App.lastfm-pending: Button {
-                    y: (parent.height - self.height) / 2;
                     text: @tr("I approved it");
                     primary: true;
                     clicked => { App.lastfm-finish(); }
                 }
                 if App.lastfm-status != "" && !App.lastfm-pending: Button {
-                    y: (parent.height - self.height) / 2;
                     text: @tr("Disconnect");
                     clicked => { App.lastfm-disconnect(); }
                 }
@@ -401,13 +396,13 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Synced lyrics");
                 hint: @tr("Look up lyrics on lrclib.net when a track has none (.lrc files and embedded lyrics are always used).");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.lyrics-online; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.lyrics-online; toggled => { App.settings-changed(); } }
             }
             Divider { }
             Row {
                 label: @tr("Missing album art");
                 hint: @tr("Fetch covers from MusicBrainz / Cover Art Archive for albums without art.");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.covers-online; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.covers-online; toggled => { App.settings-changed(); } }
             }
         }
 
@@ -416,7 +411,6 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Theme");
                 Segmented {
-                    y: (parent.height - self.height) / 2;
                     options: [@tr("Dark"), @tr("Light")];
                     selected: App.theme-dark ? 0 : 1;
                     changed(i) => {
@@ -429,7 +423,6 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Accent colour");
                 for c[i] in accents: Rectangle {
-                    y: (parent.height - self.height) / 2;
                     width: 26px;
                     height: 26px;
                     border-radius: 13px;
@@ -449,17 +442,17 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Colours from the album cover");
                 hint: @tr("Tint the interface with the playing album's colours.");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.adaptive-colors; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.adaptive-colors; toggled => { App.settings-changed(); } }
             }
             Divider { }
             Row {
                 label: @tr("Keep playing in the tray when the window is closed");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.close-to-tray; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.close-to-tray; toggled => { App.settings-changed(); } }
             }
             Divider { }
             Row {
                 label: @tr("Track change notifications");
-                Toggle { y: (parent.height - self.height) / 2; checked <=> App.notifications; toggled => { App.settings-changed(); } }
+                Toggle { checked <=> App.notifications; toggled => { App.settings-changed(); } }
             }
         }
 
@@ -485,7 +478,7 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: "ricercar " + App.version;
                 hint: @tr("A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service.");
-                Button { y: (parent.height - self.height) / 2; text: "GitHub"; clicked => { App.open-url("https://github.com/ricercar-player/ricercar"); } }
+                Button { text: "GitHub"; clicked => { App.open-url("https://github.com/ricercar-player/ricercar"); } }
             }
         }
     }

@@ -269,6 +269,8 @@ export global App {
     in property <string> radio-status;
     in-out property <string> radio-query;
     callback radio-search(string);
+    // typing in the field: debounced live search
+    callback radio-edited(string);
     callback radio-tag(string);
     callback radio-play(string, int); // list ("results" | "favs"), index
     callback radio-fav(string, int);
@@ -280,6 +282,8 @@ export global App {
     in-out property <int> replaygain; // 0 off, 1 track, 2 album, 3 auto
     in-out property <float> preamp;
     callback settings-changed();
+    // typing in a settings text field: saved after a pause
+    callback text-setting-edited();
     in property <[string]> roots;
     callback add-root();
     callback remove-root(int);
@@ -293,6 +297,7 @@ export global App {
     in-out property <string> lb-token;
     in property <string> lb-status;
     callback lb-save();
+    callback lb-edited();
     in-out property <string> lastfm-key;
     in-out property <string> lastfm-secret;
     in property <string> lastfm-status;

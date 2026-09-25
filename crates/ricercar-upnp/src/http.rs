@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-pub const SERVER: &str = "Linux/6 UPnP/1.1 ricercar/0.1";
+pub const SERVER: &str = "Linux/6 UPnP/1.1 ricercar/0.2";
 const MAX_HEAD: usize = 64 * 1024;
 const MAX_BODY: usize = 1024 * 1024;
 /// Time allowed for a client to send its request.

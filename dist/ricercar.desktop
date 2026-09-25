@@ -10,6 +10,6 @@ Icon=ricercar
 Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=music;player;flac;hi-res;bit-perfect;upnp;dlna;openhome;
-MimeType=audio/flac;audio/x-flac;audio/wav;audio/x-wav;audio/aiff;audio/x-aiff;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/x-vorbis+ogg;audio/x-mpegurl;
+MimeType=audio/flac;audio/x-flac;audio/wav;audio/x-wav;audio/aiff;audio/x-aiff;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/x-vorbis+ogg;
 StartupNotify=true
 StartupWMClass=ricercar

@@ -181,10 +181,6 @@ msgid "Station, genre, country…"
 msgstr "Station, genre, pays…"
 
 msgctxt "RadioPage"
-msgid "Search"
-msgstr "Rechercher"
-
-msgctxt "RadioPage"
 msgid "Your stations"
 msgstr "Vos stations"
 

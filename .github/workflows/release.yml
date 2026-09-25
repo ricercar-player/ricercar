@@ -1,0 +1,132 @@
+name: release
+
+# Tag push (vX.Y.Z) builds every package and publishes a GitHub release.
+# Run it by hand (workflow_dispatch) for a dry run: packages are kept as
+# workflow artifacts and no release is created.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Debian/Ubuntu .deb, Fedora/openSUSE .rpm, AppImage and a plain tarball.
+  # Built on Ubuntu 22.04 so the binaries run on distributions with glibc ≥ 2.35.
+  linux:
+    name: linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libxkbcommon-dev \
+            pkg-config clang libclang-dev file desktop-file-utils
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.arch }}
+      - name: version
+        run: echo "VERSION=$(sed -n 's/^version = \"\(.*\)\"/\1/p' crates/ricercar-ui/Cargo.toml | head -1)" >> "$GITHUB_ENV"
+      - name: build
+        run: cargo build --release --locked -p ricercar-ui -p ricercar-cli -p ricercar-daemon
+      - name: packaging tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - name: deb
+        run: |
+          mkdir -p target/dist
+          cargo deb -p ricercar-ui --no-build --no-strip -o target/dist/
+      - name: rpm
+        run: cargo generate-rpm -p crates/ricercar-ui -o target/dist/
+      - name: appimage
+        run: dist/appimage/build.sh "$VERSION"
+      - name: tarball
+        run: |
+          name="ricercar-$VERSION-linux-${{ matrix.arch }}"
+          mkdir -p "target/$name/bin" "target/$name/share/applications" \
+            "target/$name/share/icons/hicolor/scalable/apps" "target/$name/lib/systemd/user"
+          cp target/release/ricercar target/release/ricercar-cli target/release/ricercar-daemon "target/$name/bin/"
+          cp dist/ricercar.desktop "target/$name/share/applications/"
+          cp dist/ricercar.svg "target/$name/share/icons/hicolor/scalable/apps/"
+          cp dist/ricercar.service "target/$name/lib/systemd/user/"
+          cp README.md LICENSE "target/$name/"
+          tar -C target -czf "target/dist/$name.tar.gz" "$name"
+      - name: smoke test
+        run: |
+          ./target/release/ricercar --help || true
+          ./target/release/ricercar-cli --help
+          ls -la target/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: target/dist/*
+          if-no-files-found: error
+
+  # Native Arch Linux package (also for Manjaro, EndeavourOS, CachyOS, Omarchy…).
+  arch:
+    name: arch linux x86_64
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: system deps
+        run: |
+          pacman -Syu --noconfirm --needed rust git alsa-lib fontconfig libxkbcommon
+          useradd -m builder
+      - uses: actions/checkout@v4
+      - name: makepkg
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/ricercar-ui/Cargo.toml | head -1)
+          sed -i "s/^pkgver=0/pkgver=$VERSION/" dist/arch/PKGBUILD.ci
+          chown -R builder "$GITHUB_WORKSPACE"
+          cd dist/arch
+          sudo -u builder makepkg -p PKGBUILD.ci --nodeps --noconfirm
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp ./*.pkg.tar.zst "$GITHUB_WORKSPACE/out/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-x86_64
+          path: out/*.pkg.tar.zst
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: [linux, arch]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          notes="docs/releases/$tag.md"
+          args=(--title "ricercar ${tag#v}")
+          if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
+          case "$tag" in *-*) args+=(--prerelease);; esac
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" "${args[@]}" dist/*
+          fi

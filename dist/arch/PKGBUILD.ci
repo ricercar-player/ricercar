@@ -1,0 +1,31 @@
+# Built by .github/workflows/release.yml from the checked-out tree.
+pkgname=ricercar
+pkgver=0
+pkgrel=1
+pkgdesc="Bit-perfect music player and UPnP/OpenHome network receiver for Linux"
+arch=('x86_64')
+url="https://github.com/ricercar-player/ricercar"
+license=('MIT')
+depends=('alsa-lib' 'fontconfig' 'libxkbcommon' 'gcc-libs' 'glibc')
+optdepends=('xdg-desktop-portal: folder picker for the library settings'
+            'pipewire-alsa: play through the system mixer when not bit-perfect')
+makedepends=('cargo')
+options=('!lto' '!debug')
+
+_root() { realpath "$startdir/../.."; }
+
+build() {
+  cd "$(_root)"
+  cargo build --release --locked -p ricercar-ui -p ricercar-cli -p ricercar-daemon
+}
+
+package() {
+  cd "$(_root)"
+  install -Dm755 target/release/ricercar "$pkgdir/usr/bin/ricercar"
+  install -Dm755 target/release/ricercar-cli "$pkgdir/usr/bin/ricercar-cli"
+  install -Dm755 target/release/ricercar-daemon "$pkgdir/usr/bin/ricercar-daemon"
+  install -Dm644 dist/ricercar.desktop "$pkgdir/usr/share/applications/ricercar.desktop"
+  install -Dm644 dist/ricercar.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/ricercar.svg"
+  install -Dm644 dist/ricercar.service "$pkgdir/usr/lib/systemd/user/ricercar.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/ricercar/LICENSE"
+}

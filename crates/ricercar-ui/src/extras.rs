@@ -23,6 +23,10 @@ pub struct Extras {
     radio: Option<RadioBrowser>,
     radio_loaded: bool,
     lastfm_token: Option<String>,
+    /// Latest radio query: older answers arriving late are dropped.
+    radio_serial: u64,
+    /// Pending debounced edits (radio query, settings text, LB token).
+    debounce: std::collections::HashMap<&'static str, u64>,
     stations: Option<Rc<VecModel<StationRow>>>,
     fav_model: Option<Rc<VecModel<StationRow>>>,
 }
@@ -163,8 +167,44 @@ pub fn refill_station_covers(ui: &Ui) {
     }
 }
 
+/// Run `f` once typing has paused for `ms` (per `key`).
+fn debounce(ui: &Rc<Ui>, key: &'static str, ms: u64, f: impl FnOnce(&Rc<Ui>) + 'static) {
+    let serial = {
+        let mut ex = ui.extras.borrow_mut();
+        let s = ex.debounce.entry(key).or_insert(0);
+        *s += 1;
+        *s
+    };
+    slint::Timer::single_shot(std::time::Duration::from_millis(ms), move || {
+        with_ui(|ui| {
+            if ui.extras.borrow().debounce.get(key) == Some(&serial) {
+                f(ui);
+            }
+        })
+    });
+}
+
+fn radio_text_search(ui: &Rc<Ui>, q: &str) {
+    let q = q.trim().to_string();
+    if q.is_empty() {
+        radio_query(ui, StationQuery::default(), t("Top stations").into());
+    } else {
+        let query = StationQuery {
+            name: Some(q.clone()),
+            limit: 80,
+            ..Default::default()
+        };
+        radio_query(ui, query, format!("{} · {q}", t("Stations")));
+    }
+}
+
 fn radio_query(ui: &Rc<Ui>, q: StationQuery, label: String) {
     ui.app().set_radio_status(t("Searching…").into());
+    let serial = {
+        let mut ex = ui.extras.borrow_mut();
+        ex.radio_serial += 1;
+        ex.radio_serial
+    };
     let radio = ui.extras.borrow().radio.clone();
     std::thread::spawn(move || {
         let radio = radio.unwrap_or_else(RadioBrowser::discover);
@@ -175,6 +215,9 @@ fn radio_query(ui: &Rc<Ui>, q: StationQuery, label: String) {
         };
         post(move |ui| {
             ui.extras.borrow_mut().radio = Some(radio);
+            if ui.extras.borrow().radio_serial != serial {
+                return;
+            }
             let app = ui.app();
             match res {
                 Ok(list) => {
@@ -597,17 +640,33 @@ pub fn wire(ui: &Rc<Ui>) {
 
     app.on_radio_search(|q| {
         with_ui(|ui| {
-            let q = q.trim().to_string();
-            if q.is_empty() {
-                radio_query(ui, StationQuery::default(), t("Top stations").into());
-            } else {
-                let query = StationQuery {
-                    name: Some(q.clone()),
-                    limit: 80,
-                    ..Default::default()
-                };
-                radio_query(ui, query, format!("{} · {q}", t("Stations")));
+            ui.extras.borrow_mut().debounce.remove("radio");
+            radio_text_search(ui, &q);
+        })
+    });
+    app.on_radio_edited(|q| {
+        with_ui(|ui| {
+            let q = q.to_string();
+            // Radio Browser is a shared community service: wait for a pause
+            // and at least two letters before querying.
+            if q.trim().chars().count() == 1 {
+                return;
             }
+            debounce(ui, "radio", 400, move |ui| radio_text_search(ui, &q));
+        })
+    });
+    app.on_text_setting_edited(|| {
+        with_ui(|ui| debounce(ui, "settings", 700, settings_changed))
+    });
+    app.on_lb_edited(|| {
+        with_ui(|ui| {
+            debounce(ui, "lb", 900, |ui| {
+                let token = ui.app().get_lb_token().trim().to_string();
+                // ListenBrainz tokens are UUIDs: validate once one is complete.
+                if token.is_empty() || token.len() >= 32 {
+                    ui.app().invoke_lb_save();
+                }
+            })
         })
     });
     app.on_radio_tag(|tag| {
