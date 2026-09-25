@@ -1,14 +1,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver as StdReceiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender as CbSender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender as CbSender, TryRecvError};
 
 use crate::device::{DeviceInfo, DeviceKind};
-use crate::fmt::{Container, PcmFormat};
-use crate::sink::device_info;
-use crate::sink::{AudioSink, make_sink};
+use crate::error::AudioError;
+use crate::fmt::PcmFormat;
+pub use crate::gain::{GainStage, TrackOpts};
+use crate::sink::{AudioSink, device_info, make_sink};
 use crate::stream::TrackSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,13 +21,43 @@ pub enum TransportStatus {
 
 #[derive(Debug)]
 pub enum EngineCommand {
-    Load { uri: String },
-    EnqueueNext { uri: String },
+    Load {
+        uri: String,
+        opts: TrackOpts,
+    },
+    EnqueueNext {
+        uri: String,
+        opts: TrackOpts,
+    },
     Pause,
     Resume,
     Stop,
-    Seek { ms: u64 },
-    SetVolume { percent: u32 },
+    Seek {
+        ms: u64,
+    },
+    SetVolume {
+        percent: u32,
+    },
+    /// Global preamp in dB, added to each track's own gain.
+    SetGain {
+        db: f32,
+    },
+    SetMute {
+        muted: bool,
+    },
+}
+
+/// Why a track stopped playing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndReason {
+    /// Played to the end.
+    Finished,
+    /// `Stop` command.
+    Stopped,
+    /// Another track was loaded over it.
+    Replaced,
+    /// Decode or device error.
+    Error,
 }
 
 #[derive(Debug, Clone)]
@@ -40,10 +71,15 @@ pub enum EngineEvent {
     },
     TrackEnded {
         uri: String,
+        reason: EndReason,
     },
     Position {
         pos_ms: u64,
         dur_ms: Option<u64>,
+    },
+    /// Title announced in-band by an internet radio (ICY metadata).
+    StreamTitle {
+        title: String,
     },
     Error {
         message: String,
@@ -51,6 +87,11 @@ pub enum EngineEvent {
 }
 
 pub struct Subscriber(pub StdReceiver<EngineEvent>);
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    // A panicking reader must not take the engine down with it.
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Minimal fan-out hub (UI, UPnP and MPRIS watch the same engine).
 #[derive(Default)]
@@ -61,21 +102,11 @@ pub struct EventHub {
 impl EventHub {
     pub fn subscribe(&self) -> Subscriber {
         let (tx, rx) = mpsc::channel();
-        self.subs.lock().unwrap().push(tx);
+        lock(&self.subs).push(tx);
         Subscriber(rx)
     }
     pub fn publish(&self, ev: EngineEvent) {
-        let mut dead = Vec::new();
-        if let Ok(mut subs) = self.subs.lock() {
-            for (i, s) in subs.iter().enumerate() {
-                if s.send(ev.clone()).is_err() {
-                    dead.push(i);
-                }
-            }
-            for i in dead.into_iter().rev() {
-                subs.swap_remove(i);
-            }
-        }
+        lock(&self.subs).retain(|s| s.send(ev.clone()).is_ok());
     }
 }
 
@@ -84,10 +115,12 @@ pub struct ChainInfo {
     pub device: String,
     pub device_kind: DeviceKind,
     pub format: Option<PcmFormat>,
+    /// Container actually negotiated with the device (e.g. `S24_3LE`).
     pub container: Option<&'static str>,
     pub volume: u32,
-    /// Lossless all the way: native rate/bit container, no volume processing,
-    /// and a device kind that excludes mixing/resampling.
+    /// Lossless all the way: native rate, lossless container, unity gain
+    /// (volume 100, no ReplayGain/preamp, not muted), and a device kind that
+    /// excludes mixing/resampling.
     pub bit_perfect: bool,
 }
 
@@ -100,6 +133,10 @@ pub struct PlayerShared {
     pub dur_ms: Option<u64>,
     pub seekable: bool,
     pub chain: ChainInfo,
+    /// Current gain stage (volume, preamp, track gain/peak, mute).
+    pub gain: GainStage,
+    /// Last in-band stream title of the current track (internet radio).
+    pub stream_title: Option<String>,
 }
 
 pub struct PlayerHandle {
@@ -114,10 +151,22 @@ impl PlayerHandle {
         let _ = self.tx.send(cmd);
     }
     pub fn load(&self, uri: impl Into<String>) {
-        self.send(EngineCommand::Load { uri: uri.into() });
+        self.load_with(uri, TrackOpts::default());
+    }
+    pub fn load_with(&self, uri: impl Into<String>, opts: TrackOpts) {
+        self.send(EngineCommand::Load {
+            uri: uri.into(),
+            opts,
+        });
     }
     pub fn enqueue_next(&self, uri: impl Into<String>) {
-        self.send(EngineCommand::EnqueueNext { uri: uri.into() });
+        self.enqueue_next_with(uri, TrackOpts::default());
+    }
+    pub fn enqueue_next_with(&self, uri: impl Into<String>, opts: TrackOpts) {
+        self.send(EngineCommand::EnqueueNext {
+            uri: uri.into(),
+            opts,
+        });
     }
     pub fn pause(&self) {
         self.send(EngineCommand::Pause);
@@ -136,6 +185,13 @@ impl PlayerHandle {
             percent: percent.min(100),
         });
     }
+    /// Global preamp in dB (0.0 = off).
+    pub fn set_gain(&self, db: f32) {
+        self.send(EngineCommand::SetGain { db });
+    }
+    pub fn set_mute(&self, muted: bool) {
+        self.send(EngineCommand::SetMute { muted });
+    }
     pub fn subscribe(&self) -> Subscriber {
         self.hub.subscribe()
     }
@@ -144,36 +200,18 @@ impl PlayerHandle {
     }
 }
 
-enum NextSource {
-    Pending(String),
-    Open(TrackSource),
-}
-
-fn chain_of(device: &DeviceInfo, fmt: Option<PcmFormat>, vol: u32) -> ChainInfo {
-    ChainInfo {
-        device: device.name.clone(),
-        device_kind: device.kind,
-        format: fmt,
-        container: fmt.map(|f| Container::for_bits(f.bits).label()),
-        volume: vol,
-        bit_perfect: vol == 100 && device.kind.is_bit_perfect(),
-    }
-}
-
-fn apply_volume(samples: &mut [i32], percent: u32) {
-    let vol = percent as i64;
-    for s in samples.iter_mut() {
-        let v = (*s as i64 * vol + 50) / 100;
-        *s = v.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
-    }
-}
-
 /// Spawn the audio engine on its own thread.
 pub fn spawn_player(device_name: &str) -> PlayerHandle {
-    let device = device_info(device_name);
+    spawn_player_with_sink(make_sink(&device_info(device_name)))
+}
+
+/// Spawn the engine on a caller-provided sink (embedding, tests).
+pub fn spawn_player_with_sink(sink: Box<dyn AudioSink>) -> PlayerHandle {
+    let device = sink.device().clone();
     let (tx, rx) = crossbeam_channel::unbounded::<EngineCommand>();
     let hub = Arc::new(EventHub::default());
     let alive = Arc::new(AtomicBool::new(true));
+    let gain = GainStage::default();
     let state = Arc::new(Mutex::new(PlayerShared {
         status: TransportStatus::Stopped,
         track_uri: None,
@@ -181,17 +219,29 @@ pub fn spawn_player(device_name: &str) -> PlayerHandle {
         pos_ms: 0,
         dur_ms: None,
         seekable: false,
-        chain: chain_of(&device, None, 100),
+        chain: chain_of(&device, None, None, &gain),
+        gain,
+        stream_title: None,
     }));
 
-    let hub_t = hub.clone();
-    let state_t = state.clone();
-    let alive_t = alive.clone();
+    let engine = Engine {
+        device,
+        sink,
+        hub: hub.clone(),
+        state: state.clone(),
+        status: TransportStatus::Stopped,
+        current: None,
+        next: None,
+        gain,
+        pos_frames: 0,
+        last_pos_emit: Instant::now(),
+    };
+    let alive_t = AliveGuard(alive.clone());
     std::thread::Builder::new()
         .name("ricercar-engine".into())
         .spawn(move || {
-            engine_loop(device, rx, hub_t, state_t);
-            alive_t.store(false, Ordering::Relaxed);
+            let _alive = alive_t;
+            engine.run(rx);
         })
         .expect("spawn engine");
 
@@ -203,15 +253,410 @@ pub fn spawn_player(device_name: &str) -> PlayerHandle {
     }
 }
 
-fn open_source(uri: &str, hub: &EventHub) -> Option<TrackSource> {
-    match TrackSource::open(uri) {
-        Ok(t) => Some(t),
-        Err(e) => {
-            hub.publish(EngineEvent::Error {
-                message: format!("{uri}: {e}"),
+/// Clears the alive flag however the engine thread exits (even by panic).
+struct AliveGuard(Arc<AtomicBool>);
+
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+}
+
+fn chain_of(
+    device: &DeviceInfo,
+    fmt: Option<PcmFormat>,
+    container: Option<&'static str>,
+    gain: &GainStage,
+) -> ChainInfo {
+    ChainInfo {
+        device: device.name.clone(),
+        device_kind: device.kind,
+        format: fmt,
+        container,
+        volume: gain.volume,
+        bit_perfect: gain.is_unity() && device.kind.is_bit_perfect(),
+    }
+}
+
+enum NextSource {
+    Pending(String),
+    Open(TrackSource),
+}
+
+const POSITION_EVERY: Duration = Duration::from_millis(250);
+
+struct Engine {
+    device: DeviceInfo,
+    sink: Box<dyn AudioSink>,
+    hub: Arc<EventHub>,
+    state: Arc<Mutex<PlayerShared>>,
+    /// Authoritative transport status (mirrored into `state`).
+    status: TransportStatus,
+    current: Option<TrackSource>,
+    next: Option<(NextSource, TrackOpts)>,
+    /// `gain.track` holds the options of the current track.
+    gain: GainStage,
+    /// Frames of the current track handed to the sink.
+    pos_frames: u64,
+    last_pos_emit: Instant,
+}
+
+impl Engine {
+    fn run(mut self, rx: Receiver<EngineCommand>) {
+        loop {
+            if self.status == TransportStatus::Playing {
+                // Apply everything queued before producing more audio, so a
+                // `load` + `seek`/`pause` burst takes effect atomically.
+                loop {
+                    match rx.try_recv() {
+                        Ok(cmd) => self.handle(cmd),
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => return self.shutdown(),
+                    }
+                }
+                if self.status == TransportStatus::Playing {
+                    self.pump();
+                    if self.last_pos_emit.elapsed() >= POSITION_EVERY {
+                        self.emit_position();
+                    }
+                }
+            } else {
+                // Paused / stopped: sleep on the command channel.
+                match rx.recv_timeout(Duration::from_secs(1)) {
+                    Ok(cmd) => self.handle(cmd),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => return self.shutdown(),
+                }
+            }
+        }
+    }
+
+    fn shutdown(&mut self) {
+        let _ = self.sink.discard();
+        self.sink.close();
+    }
+
+    fn handle(&mut self, cmd: EngineCommand) {
+        match cmd {
+            EngineCommand::Load { uri, opts } => self.load(uri, opts),
+            EngineCommand::EnqueueNext { uri, opts } => {
+                if uri.is_empty() {
+                    // Control points clear the next slot this way.
+                    self.next = None;
+                    lock(&self.state).next_uri = None;
+                } else if self.current.is_none() {
+                    self.load(uri, opts);
+                } else {
+                    lock(&self.state).next_uri = Some(uri.clone());
+                    self.next = Some((NextSource::Pending(uri), opts));
+                }
+            }
+            EngineCommand::Pause => {
+                if self.status == TransportStatus::Playing {
+                    self.emit_position();
+                    if let Err(e) = self.sink.pause() {
+                        return self.sink_failed(e);
+                    }
+                    self.set_status(TransportStatus::Paused);
+                }
+            }
+            EngineCommand::Resume => {
+                if self.status == TransportStatus::Paused {
+                    if let Err(e) = self.sink.resume() {
+                        return self.sink_failed(e);
+                    }
+                    self.set_status(TransportStatus::Playing);
+                    self.emit_position();
+                }
+            }
+            EngineCommand::Stop => {
+                self.next = None;
+                self.end_current(EndReason::Stopped);
+                self.go_stopped(false);
+            }
+            EngineCommand::Seek { ms } => self.seek(ms),
+            EngineCommand::SetVolume { percent } => {
+                self.gain.volume = percent.min(100);
+                self.refresh_chain();
+            }
+            EngineCommand::SetGain { db } => {
+                self.gain.preamp_db = if db.is_finite() { db } else { 0.0 };
+                self.refresh_chain();
+            }
+            EngineCommand::SetMute { muted } => {
+                self.gain.muted = muted;
+                self.refresh_chain();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ state
+
+    fn set_status(&mut self, status: TransportStatus) {
+        self.status = status;
+        lock(&self.state).status = status;
+        self.hub.publish(EngineEvent::Status { status });
+    }
+
+    fn refresh_chain(&self) {
+        let mut st = lock(&self.state);
+        let fmt = self.sink.opened_format().or(st.chain.format);
+        let container = self
+            .sink
+            .opened_container()
+            .map(|c| c.label())
+            .or(st.chain.container);
+        st.chain = chain_of(&self.device, fmt, container, &self.gain);
+        st.gain = self.gain;
+    }
+
+    fn pos_ms(&self) -> u64 {
+        let rate = self
+            .sink
+            .opened_format()
+            .or_else(|| self.current.as_ref().and_then(|c| c.format))
+            .map_or(44100, |f| f.sample_rate as u64);
+        let audible = self.pos_frames.saturating_sub(self.sink.delay_frames());
+        audible * 1000 / rate
+    }
+
+    fn emit_position(&mut self) {
+        self.last_pos_emit = Instant::now();
+        let pos_ms = self.pos_ms();
+        let dur_ms = {
+            let mut st = lock(&self.state);
+            st.pos_ms = pos_ms;
+            st.dur_ms
+        };
+        self.hub.publish(EngineEvent::Position { pos_ms, dur_ms });
+    }
+
+    fn error(&self, message: String) {
+        tracing::warn!("{message}");
+        self.hub.publish(EngineEvent::Error { message });
+    }
+
+    fn end_current(&mut self, reason: EndReason) {
+        if let Some(src) = self.current.take() {
+            self.hub.publish(EngineEvent::TrackEnded {
+                uri: src.uri,
+                reason,
             });
+        }
+    }
+
+    /// Release the device and report Stopped. `drain` lets queued audio play
+    /// out (natural end of the queue) instead of cutting it.
+    fn go_stopped(&mut self, drain: bool) {
+        if drain {
+            let _ = self.sink.drain();
+        } else {
+            let _ = self.sink.discard();
+        }
+        self.sink.close();
+        self.current = None;
+        self.pos_frames = 0;
+        {
+            let mut st = lock(&self.state);
+            st.track_uri = None;
+            st.next_uri = None;
+            st.pos_ms = 0;
+            st.dur_ms = None;
+            st.seekable = false;
+            st.stream_title = None;
+        }
+        self.set_status(TransportStatus::Stopped);
+    }
+
+    /// The device failed under us (e.g. USB DAC unplugged): stop cleanly.
+    fn sink_failed(&mut self, e: AudioError) {
+        self.error(match &e {
+            AudioError::DeviceGone { .. } => format!("{e}; playback stopped"),
+            _ => format!("audio output error: {e}"),
+        });
+        self.next = None;
+        self.end_current(EndReason::Error);
+        self.sink.close();
+        self.go_stopped(false);
+    }
+
+    // ------------------------------------------------------------ tracks
+
+    fn open_track(&self, uri: &str) -> Option<TrackSource> {
+        let mut src = match TrackSource::open(uri) {
+            Ok(t) => t,
+            Err(e) => {
+                self.error(format!("{uri}: {e}"));
+                return None;
+            }
+        };
+        if prime(&mut src) {
+            Some(src)
+        } else {
+            self.error(format!("cannot decode {uri}"));
             None
         }
+    }
+
+    /// Make sure the sink runs at `fmt`; a fresh open drops what is queued,
+    /// otherwise queued audio of the previous format plays out first.
+    fn ensure_sink(&mut self, fmt: PcmFormat, fresh: bool) -> bool {
+        if !fresh && self.sink.opened_format() == Some(fmt) {
+            return true;
+        }
+        if fresh {
+            let _ = self.sink.discard();
+        } else {
+            let _ = self.sink.drain();
+        }
+        self.sink.close();
+        match self.sink.open(fmt) {
+            Ok(()) => true,
+            Err(e) => {
+                self.error(format!("{}: {e}", self.device.name));
+                false
+            }
+        }
+    }
+
+    fn begin(&mut self, src: TrackSource, opts: TrackOpts) {
+        let fmt = src.format;
+        self.gain.track = opts;
+        self.pos_frames = 0;
+        {
+            let mut st = lock(&self.state);
+            st.track_uri = Some(src.uri.clone());
+            st.pos_ms = 0;
+            st.dur_ms = src.duration_ms;
+            st.seekable = src.seekable;
+            st.stream_title = None;
+        }
+        self.refresh_chain();
+        self.hub.publish(EngineEvent::TrackStarted {
+            uri: src.uri.clone(),
+            format: fmt,
+        });
+        self.current = Some(src);
+    }
+
+    fn load(&mut self, uri: String, opts: TrackOpts) {
+        self.next = None;
+        lock(&self.state).next_uri = None;
+        self.end_current(EndReason::Replaced);
+        let Some(src) = self.open_track(&uri) else {
+            return self.go_stopped(false);
+        };
+        let Some(fmt) = src.format else {
+            return self.go_stopped(false);
+        };
+        if !self.ensure_sink(fmt, true) {
+            return self.go_stopped(false);
+        }
+        self.begin(src, opts);
+        self.set_status(TransportStatus::Playing);
+    }
+
+    fn seek(&mut self, ms: u64) {
+        let Some(src) = self.current.as_mut().filter(|s| s.seekable) else {
+            return;
+        };
+        match src.seek_ms(ms) {
+            Ok(actual) => {
+                let rate = src.format.map_or(44100.0, |f| f.sample_rate as f64);
+                self.pos_frames = (actual.as_secs_f64() * rate).round() as u64;
+                if let Err(e) = self.sink.discard() {
+                    return self.sink_failed(e);
+                }
+                self.emit_position();
+            }
+            Err(e) => tracing::warn!("seek to {ms} ms failed: {e}"),
+        }
+    }
+
+    // ------------------------------------------------------------ pumping
+
+    fn pump(&mut self) {
+        let Some(src) = self.current.as_mut() else {
+            return self.go_stopped(true);
+        };
+
+        if let Some(title) = src.take_stream_title() {
+            lock(&self.state).stream_title = Some(title.clone());
+            self.hub.publish(EngineEvent::StreamTitle { title });
+        }
+
+        // Open the next source shortly before the current one ends, so the
+        // transition is gapless.
+        let near_end = match (src.duration_ms, src.format) {
+            (Some(dur), Some(f)) => self.pos_frames * 1000 / f.sample_rate as u64 + 8_000 >= dur,
+            _ => false,
+        };
+        if near_end && matches!(self.next, Some((NextSource::Pending(_), _))) {
+            if let Some((NextSource::Pending(uri), opts)) = self.next.take() {
+                self.next = self.open_track(&uri).map(|t| (NextSource::Open(t), opts));
+            }
+            return;
+        }
+
+        if let Err(e) = src.pump() {
+            let msg = format!("{}: {e}", src.uri);
+            self.error(msg);
+            self.end_current(EndReason::Error);
+            return self.go_stopped(false);
+        }
+
+        if !src.pending.is_empty() {
+            let Some(fmt) = src.format else { return };
+            // A chained stream may change format mid-track.
+            if self.sink.opened_format() != Some(fmt) {
+                if !self.ensure_sink(fmt, false) {
+                    self.end_current(EndReason::Error);
+                    return self.go_stopped(false);
+                }
+                self.refresh_chain();
+            }
+            let Some(src) = self.current.as_mut() else {
+                return;
+            };
+            let samples = src.pending.make_contiguous();
+            self.gain.apply(samples, fmt.bits);
+            let frames = (samples.len() / fmt.channels.max(1) as usize) as u64;
+            if let Err(e) = self.sink.write_i32(samples) {
+                return self.sink_failed(e);
+            }
+            src.pending.clear();
+            self.pos_frames += frames;
+        }
+
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|s| s.end_of_stream && s.pending.is_empty())
+        {
+            self.transition();
+        }
+    }
+
+    /// Current track finished: continue gaplessly with the next one, if any.
+    fn transition(&mut self) {
+        self.end_current(EndReason::Finished);
+        lock(&self.state).next_uri = None;
+        let next = match self.next.take() {
+            Some((NextSource::Open(t), opts)) => Some((t, opts)),
+            Some((NextSource::Pending(uri), opts)) => self.open_track(&uri).map(|t| (t, opts)),
+            None => None,
+        };
+        let Some((src, opts)) = next else {
+            return self.go_stopped(true);
+        };
+        let Some(fmt) = src.format else {
+            return self.go_stopped(true);
+        };
+        // Native-rate switch: flush queued audio, then reopen.
+        if !self.ensure_sink(fmt, false) {
+            return self.go_stopped(false);
+        }
+        self.begin(src, opts);
     }
 }
 
@@ -221,326 +666,4 @@ fn prime(src: &mut TrackSource) -> bool {
         return false;
     }
     src.format.is_some()
-}
-
-fn set_status(state: &Mutex<PlayerShared>, hub: &EventHub, status: TransportStatus) {
-    state.lock().unwrap().status = status;
-    hub.publish(EngineEvent::Status { status });
-}
-
-fn stop_engine(sink: &mut Box<dyn AudioSink>, state: &Mutex<PlayerShared>, hub: &EventHub) {
-    let _ = sink.drain();
-    sink.close();
-    {
-        let mut st = state.lock().unwrap();
-        st.track_uri = None;
-        st.pos_ms = 0;
-        st.dur_ms = None;
-    }
-    set_status(state, hub, TransportStatus::Stopped);
-}
-
-fn engine_loop(
-    device: DeviceInfo,
-    rx: Receiver<EngineCommand>,
-    hub: Arc<EventHub>,
-    state: Arc<Mutex<PlayerShared>>,
-) {
-    let mut sink = make_sink(&device);
-    let mut current: Option<TrackSource> = None;
-    let mut next: Option<NextSource> = None;
-    let mut volume: u32 = 100;
-    let mut pos_frames: u64 = 0u64;
-
-    let mut last_pos_emit = std::time::Instant::now();
-    loop {
-        // ---- command phase ----
-        let cmd = match rx.try_recv() {
-            Ok(c) => Some(c),
-            Err(crossbeam_channel::TryRecvError::Disconnected) => break,
-            Err(_) => {
-                // Idle only when nothing is playing; during playback the pump
-                // must run at full speed (a paced pump would starve the sink).
-                if state.lock().unwrap().status == TransportStatus::Stopped {
-                    match rx.recv_timeout(Duration::from_millis(250)) {
-                        Ok(c) => Some(c),
-                        Err(RecvTimeoutError::Disconnected) => break,
-                        Err(RecvTimeoutError::Timeout) => None,
-                    }
-                } else {
-                    if last_pos_emit.elapsed() >= Duration::from_millis(250) {
-                        last_pos_emit = std::time::Instant::now();
-                        let mut st = state.lock().unwrap();
-                        let pos = st
-                            .chain
-                            .format
-                            .map(|f| pos_frames * 1000 / f.sample_rate as u64)
-                            .unwrap_or(st.pos_ms);
-                        st.pos_ms = pos;
-                        hub.publish(EngineEvent::Position {
-                            pos_ms: pos,
-                            dur_ms: st.dur_ms,
-                        });
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
-                    None
-                }
-            }
-        };
-
-        if let Some(cmd) = cmd {
-            match cmd {
-                EngineCommand::SetVolume { percent } => {
-                    volume = percent;
-                    let mut st = state.lock().unwrap();
-                    st.chain = chain_of(&device, st.chain.format, volume);
-                }
-                EngineCommand::Load { uri } => {
-                    next = None;
-                    sink.close();
-                    if let Some(mut src) = open_source(&uri, &hub) {
-                        if !prime(&mut src) {
-                            hub.publish(EngineEvent::Error {
-                                message: format!("cannot decode {uri}"),
-                            });
-                            continue;
-                        }
-                        let fmt = src.format.unwrap();
-                        if let Err(e) = sink.open(fmt) {
-                            hub.publish(EngineEvent::Error {
-                                message: format!("{uri}: {e}"),
-                            });
-                            continue;
-                        }
-                        {
-                            let mut st = state.lock().unwrap();
-                            st.track_uri = Some(uri.clone());
-                            st.next_uri = None;
-                            st.pos_ms = 0;
-                            st.dur_ms = src.duration_ms;
-                            st.seekable = src.seekable;
-                            st.chain = chain_of(&device, Some(fmt), volume);
-                        }
-                        pos_frames = 0;
-                        set_status(&state, &hub, TransportStatus::Playing);
-                        hub.publish(EngineEvent::TrackStarted {
-                            uri,
-                            format: Some(fmt),
-                        });
-                        current = Some(src);
-                    }
-                }
-                EngineCommand::EnqueueNext { uri } => {
-                    if uri.is_empty() {
-                        // Ignored (e.g. control points clearing the next slot).
-                        next = None;
-                        state.lock().unwrap().next_uri = None;
-                    } else if current.is_none() {
-                        // Nothing playing: start it immediately.
-                        sink.close();
-                        if let Some(mut src) = open_source(&uri, &hub)
-                            && prime(&mut src)
-                        {
-                            let fmt = src.format.unwrap();
-                            if sink.open(fmt).is_ok() {
-                                {
-                                    let mut st = state.lock().unwrap();
-                                    st.track_uri = Some(uri.clone());
-                                    st.next_uri = None;
-                                    st.pos_ms = 0;
-                                    st.dur_ms = src.duration_ms;
-                                    st.seekable = src.seekable;
-                                    st.chain = chain_of(&device, Some(fmt), volume);
-                                }
-                                pos_frames = 0;
-                                set_status(&state, &hub, TransportStatus::Playing);
-                                hub.publish(EngineEvent::TrackStarted {
-                                    uri,
-                                    format: Some(fmt),
-                                });
-                                current = Some(src);
-                            }
-                        }
-                    } else {
-                        next = Some(NextSource::Pending(uri.clone()));
-                        state.lock().unwrap().next_uri = Some(uri);
-                    }
-                }
-                EngineCommand::Pause => {
-                    let st = state.lock().unwrap().status;
-                    if st == TransportStatus::Playing {
-                        set_status(&state, &hub, TransportStatus::Paused);
-                    }
-                }
-                EngineCommand::Resume => {
-                    let st = state.lock().unwrap().status;
-                    if st == TransportStatus::Paused {
-                        set_status(&state, &hub, TransportStatus::Playing);
-                    }
-                }
-                EngineCommand::Stop => {
-                    current = None;
-                    next = None;
-                    state.lock().unwrap().next_uri = None;
-                    stop_engine(&mut sink, &state, &hub);
-                }
-                EngineCommand::Seek { ms } => {
-                    let mut ok = false;
-                    let mut rate = 44100u64;
-                    if let Some(src) = &mut current {
-                        rate = src.format.map(|f| f.sample_rate as u64).unwrap_or(44100);
-                        if src.seekable && src.seek_ms(ms).is_ok() {
-                            ok = true;
-                        }
-                    }
-                    if ok {
-                        pos_frames = ms * rate / 1000;
-                        let st = state.lock().unwrap();
-                        hub.publish(EngineEvent::Position {
-                            pos_ms: ms,
-                            dur_ms: st.dur_ms,
-                        });
-                    }
-                }
-            }
-        }
-
-        // ---- pump phase ----
-        if state.lock().unwrap().status != TransportStatus::Playing {
-            continue;
-        }
-
-        let mut errored = false;
-        let mut ready_for_end = false;
-
-        if let Some(src) = current.as_mut() {
-            // Prime the next source shortly before the current one ends.
-            let near_end = match src.duration_ms {
-                Some(dur) => {
-                    let rate = src.format.map(|f| f.sample_rate as u64).unwrap_or(44100);
-                    pos_frames * 1000 / rate + 8_000 >= dur
-                }
-                None => false,
-            };
-            if near_end
-                && matches!(next, Some(NextSource::Pending(_)))
-                && let Some(NextSource::Pending(uri)) = next.take()
-                && let Some(mut t) = open_source(&uri, &hub)
-            {
-                prime(&mut t);
-                next = Some(NextSource::Open(t));
-            }
-
-            match src.pump() {
-                Ok(true) => {}
-                Ok(false) => {
-                    ready_for_end = src.pending.is_empty();
-                }
-                Err(e) => {
-                    errored = true;
-                    hub.publish(EngineEvent::Error {
-                        message: format!("{}: {e}", src.uri),
-                    });
-                }
-            }
-
-            if !errored {
-                let chunk: Vec<i32> = src.pending.drain(..).collect();
-                if !chunk.is_empty() {
-                    let channels = src.format.map(|f| f.channels as u64).unwrap_or(2);
-                    let frames = chunk.len() as u64 / channels;
-                    let write = if volume < 100 {
-                        let mut c = chunk;
-                        apply_volume(&mut c, volume);
-                        sink.write_i32(&c)
-                    } else {
-                        sink.write_i32(&chunk)
-                    };
-                    match write {
-                        Ok(()) => pos_frames += frames,
-                        Err(e) => {
-                            errored = true;
-                            hub.publish(EngineEvent::Error {
-                                message: format!("write: {e}"),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        if errored {
-            current = None;
-            sink.close();
-            state.lock().unwrap().track_uri = None;
-            set_status(&state, &hub, TransportStatus::Stopped);
-            continue;
-        }
-
-        if !ready_for_end {
-            continue;
-        }
-
-        // ---- track transition ----
-        let ended = state.lock().unwrap().track_uri.clone().unwrap_or_default();
-        hub.publish(EngineEvent::TrackEnded { uri: ended });
-        state.lock().unwrap().next_uri = None;
-
-        let next_source = match next.take() {
-            Some(NextSource::Open(t)) => Some(t),
-            Some(NextSource::Pending(uri)) => open_source(&uri, &hub),
-            None => None,
-        };
-
-        match next_source {
-            Some(mut src2) => {
-                if prime(&mut src2) {
-                    let new_fmt = src2.format.unwrap();
-                    if sink.opened_format() != Some(new_fmt) {
-                        // Native-rate switch: flush queued audio, then reopen.
-                        let _ = sink.drain();
-                        sink.close();
-                        match sink.open(new_fmt) {
-                            Ok(()) => {
-                                let mut st = state.lock().unwrap();
-                                st.chain = chain_of(&device, Some(new_fmt), volume);
-                            }
-                            Err(e) => {
-                                hub.publish(EngineEvent::Error {
-                                    message: format!("format switch: {e}"),
-                                });
-                                stop_engine(&mut sink, &state, &hub);
-                                current = None;
-                                continue;
-                            }
-                        }
-                    }
-                    {
-                        let mut st = state.lock().unwrap();
-                        st.track_uri = Some(src2.uri.clone());
-                        st.pos_ms = 0;
-                        st.dur_ms = src2.duration_ms;
-                        st.seekable = src2.seekable;
-                    }
-                    pos_frames = 0;
-                    hub.publish(EngineEvent::TrackStarted {
-                        uri: src2.uri.clone(),
-                        format: Some(new_fmt),
-                    });
-                    current = Some(src2);
-                } else {
-                    hub.publish(EngineEvent::Error {
-                        message: format!("cannot decode {}", src2.uri),
-                    });
-                    stop_engine(&mut sink, &state, &hub);
-                    current = None;
-                }
-            }
-            None => {
-                stop_engine(&mut sink, &state, &hub);
-                current = None;
-            }
-        }
-    }
-    sink.close();
 }
