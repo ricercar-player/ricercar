@@ -201,15 +201,20 @@ fn ssdp_soft_check() {
         Ok(s) => s,
         Err(_) => return,
     };
-    sock.set_read_timeout(Some(Duration::from_millis(800)))
+    sock.set_read_timeout(Some(Duration::from_millis(1500)))
         .unwrap();
-    let msearch = "M-SEARCH * HTTP/1.1\r\nHOST: 239.2.55.52:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
+    let msearch = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
     let _ = sock.send_to(msearch.as_bytes(), ("127.0.0.1", 1900));
     let mut buf = [0u8; 2048];
     let mut got = false;
     while let Ok((n, _)) = sock.recv_from(&mut buf) {
         let msg = String::from_utf8_lossy(&buf[..n]).into_owned();
         if msg.contains("200 OK") && msg.contains("MediaRenderer") {
+            // Loopback requester → loopback LOCATION; UDA 1.1 headers.
+            assert!(msg.contains("LOCATION: http://127.0.0.1:"), "{msg}");
+            assert!(msg.contains("BOOTID.UPNP.ORG: "), "{msg}");
+            assert!(msg.contains("CONFIGID.UPNP.ORG: "), "{msg}");
+            assert!(msg.contains("::urn:schemas-upnp-org:device:MediaRenderer:1"));
             got = true;
             break;
         }
@@ -284,4 +289,115 @@ fn http_source_flow() {
     assert!(stopped, "http stream via upnp never finished");
     let bytes = std::fs::read(&r.out).unwrap_or_default();
     assert_eq!(bytes.len(), 352_800, "full 2s tone streamed and written");
+}
+
+fn out_arg(resp: &str, k: &str) -> String {
+    resp.split(&format!("<{k}>"))
+        .nth(1)
+        .and_then(|s| s.split(&format!("</{k}>")).next())
+        .unwrap_or("")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+}
+
+#[test]
+fn play_mode_capabilities_and_media_info() {
+    let r = rig("modes");
+    let p = r.handle.port;
+    let ns = "urn:schemas-upnp-org:service:AVTransport:1";
+    let iid = [("InstanceID", "0")];
+    let caps = soap(p, "/ctl/avt", ns, "GetDeviceCapabilities", &iid);
+    assert_eq!(out_arg(&caps, "PlayMedia"), "NETWORK");
+
+    for mode in ["REPEAT_ONE", "REPEAT_ALL", "SHUFFLE", "NORMAL"] {
+        let resp = soap(
+            p,
+            "/ctl/avt",
+            ns,
+            "SetPlayMode",
+            &[("InstanceID", "0"), ("NewPlayMode", mode)],
+        );
+        assert!(resp.contains("200 OK"), "{mode}: {resp}");
+        let s = soap(p, "/ctl/avt", ns, "GetTransportSettings", &iid);
+        assert_eq!(out_arg(&s, "PlayMode"), mode);
+    }
+    let bad = soap(
+        p,
+        "/ctl/avt",
+        ns,
+        "SetPlayMode",
+        &[("InstanceID", "0"), ("NewPlayMode", "INTRO")],
+    );
+    assert!(bad.contains("<errorCode>712</errorCode>"), "{bad}");
+    // The mapping lands in the Controller.
+    soap(
+        p,
+        "/ctl/avt",
+        ns,
+        "SetPlayMode",
+        &[("InstanceID", "0"), ("NewPlayMode", "REPEAT_ONE")],
+    );
+    assert_eq!(r._ctl.lock().repeat, ricercar_core::Repeat::One);
+    assert!(!r._ctl.lock().shuffle);
+    soap(
+        p,
+        "/ctl/avt",
+        ns,
+        "SetPlayMode",
+        &[("InstanceID", "0"), ("NewPlayMode", "SHUFFLE")],
+    );
+    assert!(r._ctl.lock().shuffle);
+    assert_eq!(r._ctl.lock().repeat, ricercar_core::Repeat::Off);
+
+    let empty = soap(p, "/ctl/avt", ns, "GetMediaInfo", &iid);
+    assert_eq!(out_arg(&empty, "NrTracks"), "0");
+    assert_eq!(out_arg(&empty, "PlayMedium"), "NONE");
+
+    // DIDL from the control point: parsed into the queue item and handed
+    // back verbatim. The URIs cannot play (nothing listens on port 9), so
+    // the queue stays put.
+    let didl = r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="1" parentID="0" restricted="1"><dc:title>Rock &amp; Roll</dc:title><upnp:artist>Band</upnp:artist><upnp:genre>Rock</upnp:genre><upnp:originalTrackNumber>4</upnp:originalTrackNumber><upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo="http-get:*:audio/flac:*" duration="0:00:02.000" sampleFrequency="44100" bitsPerSample="16">x</res></item></DIDL-Lite>"#;
+    soap(
+        p,
+        "/ctl/avt",
+        ns,
+        "SetAVTransportURI",
+        &[
+            ("InstanceID", "0"),
+            ("CurrentURI", "http://127.0.0.1:9/one.flac"),
+            ("CurrentURIMetaData", didl),
+        ],
+    );
+    // Let the (instant) connection failure settle before queueing more:
+    // a failing item is skipped when a successor exists.
+    std::thread::sleep(Duration::from_millis(300));
+    let media = soap(p, "/ctl/avt", ns, "GetMediaInfo", &iid);
+    assert_eq!(out_arg(&media, "NrTracks"), "1");
+    assert_eq!(out_arg(&media, "CurrentURI"), "http://127.0.0.1:9/one.flac");
+    assert_eq!(out_arg(&media, "CurrentURIMetaData"), didl);
+    soap(
+        p,
+        "/ctl/avt",
+        ns,
+        "SetNextAVTransportURI",
+        &[
+            ("InstanceID", "0"),
+            ("NextURI", "http://127.0.0.1:9/two.flac"),
+            ("NextURIMetaData", ""),
+        ],
+    );
+    let info = r._ctl.lock().queue[0].info.clone();
+    assert_eq!(info.title, "Rock & Roll");
+    assert_eq!(info.artist.as_deref(), Some("Band"));
+    assert_eq!(info.genre.as_deref(), Some("Rock"));
+    assert_eq!(info.track_no, Some(4));
+    assert_eq!(info.duration_ms, 2_000);
+    assert_eq!(info.sample_rate, Some(44_100));
+    assert_eq!(info.bits, Some(16));
+    let media = soap(p, "/ctl/avt", ns, "GetMediaInfo", &iid);
+    assert_eq!(out_arg(&media, "NrTracks"), "2");
+    assert_eq!(out_arg(&media, "NextURI"), "http://127.0.0.1:9/two.flac");
+    assert!(out_arg(&media, "NextURIMetaData").contains("two.flac"));
 }
