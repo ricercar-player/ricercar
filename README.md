@@ -116,7 +116,15 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 </tr>
 <tr>
 <td align="center"><sub><b>Home</b>: what is playing and how it reaches the DAC</sub></td>
-<td align="center"><sub><b>Albums</b>: responsive grid with hi-res badges</sub></td>
+<td align="center"><sub><b>Albums</b>: grid with hi-res badges, on-air chip</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/album.jpg" alt="Album page"></td>
+<td><img src="docs/screenshots/artist.jpg" alt="Artist page"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Album</b>: Play / Shuffle, format in the header</sub></td>
+<td align="center"><sub><b>Artist</b>: sleeves on a shelf, discography, most played</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/lyrics.jpg" alt="Synced lyrics"></td>
@@ -131,7 +139,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 <td><img src="docs/screenshots/playlist.jpg" alt="Playlist"></td>
 </tr>
 <tr>
-<td align="center"><sub><b>Tracks + queue</b>: drag to reorder</sub></td>
+<td align="center"><sub><b>Tracks + queue</b>: Format column, drag to reorder</sub></td>
 <td align="center"><sub><b>Playlists</b>: M3U import / export</sub></td>
 </tr>
 <tr>
