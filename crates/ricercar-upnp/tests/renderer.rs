@@ -93,6 +93,18 @@ fn transport_flow() {
         ],
     );
     assert!(resp.contains("200 OK"), "seturi: {resp}");
+    // The file sink is un-paced, so queue the successor before Play.
+    soap(
+        r.handle.port,
+        "/ctl/avt",
+        ns,
+        "SetNextAVTransportURI",
+        &[
+            ("InstanceID", "0"),
+            ("NextURI", &fixture("tone_24_96.flac")),
+            ("NextURIMetaData", ""),
+        ],
+    );
     let resp = soap(
         r.handle.port,
         "/ctl/avt",
@@ -133,17 +145,6 @@ fn transport_flow() {
         "posinfo: {resp}"
     );
 
-    soap(
-        r.handle.port,
-        "/ctl/avt",
-        ns,
-        "SetNextAVTransportURI",
-        &[
-            ("InstanceID", "0"),
-            ("NextURI", &fixture("tone_24_96.flac")),
-            ("NextURIMetaData", ""),
-        ],
-    );
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut stopped = false;
     while Instant::now() < deadline && !stopped {

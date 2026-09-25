@@ -61,7 +61,7 @@ fn soap_browse(port: u16, object_id: &str) -> String {
 fn rig(tag: &str) -> (ricercar_upnp::RendererHandle, PathBuf) {
     let lib = Arc::new(Library::in_memory().unwrap());
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let n = lib.scan_root(&fixtures);
+    let n = lib.scan_roots(std::slice::from_ref(&fixtures)).total;
     assert!(n > 0, "scan found nothing");
     let out = std::env::temp_dir().join(format!("ricercar-dms-{tag}.raw"));
     let _ = std::fs::remove_file(&out);

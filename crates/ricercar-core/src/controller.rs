@@ -7,9 +7,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
+use ricercar_audio::TrackOpts;
 use ricercar_audio::player::{ChainInfo, EngineEvent, PlayerHandle, TransportStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::config::ReplayGain;
 use crate::library::{Library, Track};
 use crate::meta;
 
@@ -267,6 +269,7 @@ struct Pending {
     /// Seek to apply once the given item starts (session restore).
     seek_on_start: Option<(u64, u64)>,
     failures: u32,
+    replaygain: ReplayGain,
 }
 
 pub struct Controller {
@@ -281,6 +284,7 @@ pub struct Controller {
     session_path: Arc<Mutex<Option<PathBuf>>>,
     /// Restored session waiting for the first "play".
     resume_at: Mutex<Option<u64>>,
+    rg_preamp: Mutex<f32>,
 }
 
 fn chain_stub(device: &str) -> ChainInfo {
@@ -339,6 +343,7 @@ impl Controller {
             alive: Arc::new(AtomicBool::new(true)),
             session_path: Arc::new(Mutex::new(None)),
             resume_at: Mutex::new(None),
+            rg_preamp: Mutex::new(0.0),
         };
         ctl.spawn_bridge();
         ctl
@@ -439,6 +444,10 @@ impl Controller {
                             }
                             Some(EngineEvent::Status { status }) => bridge.on_status(status),
                             Some(EngineEvent::Error { message }) => bridge.on_error(message),
+                            Some(EngineEvent::StreamTitle { title }) => {
+                                bridge.lock_state().stream_title = Some(title.clone());
+                                events.publish(CtlEvent::StreamTitle(title));
+                            }
                             Some(EngineEvent::TrackEnded { .. }) | None => {}
                         }
                         let save_due = last_save.elapsed() >= Duration::from_secs(10);
@@ -490,7 +499,9 @@ impl Controller {
         };
         self.player().stop();
         let handle = ricercar_audio::player::spawn_player(name);
-        handle.set_volume(if muted { 0 } else { vol });
+        handle.set_volume(vol);
+        handle.set_mute(muted);
+        handle.set_gain(*self.rg_preamp.lock().unwrap());
         *self.player() = handle;
         *self.device_name.write().unwrap() = name.into();
         {
@@ -828,25 +839,27 @@ impl Controller {
 
     pub fn set_volume(&self, percent: u32) {
         let percent = percent.min(100);
-        let muted = {
-            let mut st = self.lock();
-            st.volume = percent;
-            st.muted
-        };
-        if !muted {
-            self.player().set_volume(percent);
-        }
+        self.lock().volume = percent;
+        self.player().set_volume(percent);
         self.events.publish(CtlEvent::VolumeChanged);
     }
 
     pub fn set_muted(&self, muted: bool) {
-        let vol = {
-            let mut st = self.lock();
-            st.muted = muted;
-            st.volume
-        };
-        self.player().set_volume(if muted { 0 } else { vol });
+        self.lock().muted = muted;
+        self.player().set_mute(muted);
         self.events.publish(CtlEvent::VolumeChanged);
+    }
+
+    /// ReplayGain mode and preamp; applies from the next loaded track.
+    pub fn set_replaygain(&self, mode: ReplayGain, preamp_db: f32) {
+        self.pending.lock().unwrap().replaygain = mode;
+        let pre = if mode == ReplayGain::Off {
+            0.0
+        } else {
+            preamp_db
+        };
+        self.player().set_gain(pre);
+        self.rg_preamp.lock().unwrap().clone_from(&pre);
     }
 
     // ------------------------------------------------------------ remote (UPnP)
@@ -989,6 +1002,26 @@ struct Bridge<'a> {
 }
 
 impl Bridge<'_> {
+    /// ReplayGain for an item; album gain only when the album plays in order.
+    fn opts_for(&self, info: &TrackInfo, mode: ReplayGain) -> TrackOpts {
+        let album_ctx = matches!(self.lock_state().context, PlayContext::Album(_));
+        let album = match mode {
+            ReplayGain::Off => return TrackOpts::default(),
+            ReplayGain::Track => false,
+            ReplayGain::Album => true,
+            ReplayGain::Auto => album_ctx,
+        };
+        let (gain, peak) = if album && info.rg_album_gain.is_some() {
+            (info.rg_album_gain, info.rg_album_peak)
+        } else {
+            (info.rg_track_gain, info.rg_track_peak)
+        };
+        TrackOpts {
+            gain_db: gain,
+            peak,
+        }
+    }
+
     fn lock_state(&self) -> MutexGuard<'_, CtlState> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -1006,12 +1039,13 @@ impl Bridge<'_> {
             st.current_item().cloned()
         };
         let Some(item) = item else { return };
-        {
+        let opts = {
             let mut p = self.pending.lock().unwrap();
             p.armed = None;
             p.loading = Some(item.id);
-        }
-        self.player().load(&item.info.uri);
+            self.opts_for(&item.info, p.replaygain)
+        };
+        self.player().load_with(&item.info.uri, opts);
         self.events.publish(CtlEvent::TrackChanged);
     }
 
@@ -1032,18 +1066,21 @@ impl Bridge<'_> {
                         Repeat::All => st.queue.get(i + 1).or(st.queue.first()),
                         Repeat::Off => st.queue.get(i + 1),
                     };
-                    next.map(|q| (q.id, q.info.uri.clone()))
+                    next.map(|q| (q.id, q.info.uri.clone(), q.info.clone()))
                 })
             }
         };
         let mut p = self.pending.lock().unwrap();
-        if p.armed != want {
-            let uri = want.as_ref().map(|w| w.1.clone()).unwrap_or_default();
+        if p.armed.as_ref().map(|a| (a.0, &a.1)) != want.as_ref().map(|w| (w.0, &w.1)) {
             // Never hand an empty successor to an idle engine: it would be a no-op anyway.
             if want.is_some() || p.armed.is_some() {
-                self.player().enqueue_next(uri);
+                let (uri, opts) = match &want {
+                    Some((_, uri, info)) => (uri.clone(), self.opts_for(info, p.replaygain)),
+                    None => (String::new(), TrackOpts::default()),
+                };
+                self.player().enqueue_next_with(uri, opts);
             }
-            p.armed = want;
+            p.armed = want.map(|(id, uri, _)| (id, uri));
         }
     }
 
