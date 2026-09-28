@@ -173,6 +173,8 @@ pub struct ScanProgress {
     pub running: AtomicBool,
     pub done: AtomicUsize,
     pub total: AtomicUsize,
+    /// Completed scans since startup.
+    pub finished: AtomicUsize,
 }
 
 pub struct Library {
@@ -477,6 +479,7 @@ impl Library {
         self.progress.total.store(0, Ordering::Relaxed);
         let report = self.scan_inner(roots);
         self.progress.running.store(false, Ordering::SeqCst);
+        self.progress.finished.fetch_add(1, Ordering::SeqCst);
         if report.added + report.updated + report.removed > 0 {
             self.touch();
         }
@@ -570,6 +573,25 @@ impl Library {
             report.removed = gone.len();
         }
         report
+    }
+
+    /// Index already tagged files (path, tags, size, mtime) in one
+    /// transaction; returns how many were new. Used to build synthetic
+    /// libraries for tests and benchmarks.
+    pub fn upsert_many(&self, items: &[(PathBuf, TagInfo, i64, i64)]) -> usize {
+        let mut added = 0;
+        let mut conn = self.w();
+        if let Ok(tx) = conn.transaction() {
+            for (path, tags, size, mtime) in items {
+                if upsert_tags(&tx, path, tags, *size, *mtime).unwrap_or(false) {
+                    added += 1;
+                }
+            }
+            let _ = tx.commit();
+        }
+        drop(conn);
+        self.touch();
+        added
     }
 
     /// Insert or refresh one file (watcher path). Returns true when new.

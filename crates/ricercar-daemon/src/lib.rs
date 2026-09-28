@@ -313,6 +313,14 @@ fn rescan_in_background(
                 "library scanned in {:.1?}",
                 t.elapsed()
             );
+            ricercar_core::profile::record(
+                &format!(
+                    "library scan ({} files, {} indexed)",
+                    r.total,
+                    r.added + r.updated
+                ),
+                t.elapsed(),
+            );
             let new = (watch && !roots.is_empty()).then(|| WatcherHandle::start(lib, roots));
             *watcher.write().unwrap() = new;
         })

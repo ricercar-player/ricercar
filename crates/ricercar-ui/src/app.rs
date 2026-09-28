@@ -211,6 +211,7 @@ impl Ui {
         if !std::mem::take(&mut self.st.borrow_mut().covers_dirty) {
             return;
         }
+        let started = std::time::Instant::now();
         let loader = self.loader.borrow();
         for m in self.models.album_models() {
             for i in 0..m.row_count() {
@@ -261,6 +262,7 @@ impl Ui {
         crate::extras::refill_station_covers(self);
         crate::views::refill_page_covers(self);
         crate::player::refill_now_cover(self);
+        crate::profile::add("refill covers", started.elapsed());
     }
 
     // ------------------------------------------------------------ navigation
@@ -276,7 +278,11 @@ impl Ui {
             }
         }
         self.loader.borrow_mut().cancel_pending();
-        crate::views::load(self, page, arg);
+        {
+            let _p = crate::profile::span(format!("page {page:?}: load"));
+            crate::views::load(self, page, arg);
+        }
+        crate::profile::expect_frame(format!("page {page:?}"));
         let app = self.app();
         app.set_page(page);
         let st = self.st.borrow();
@@ -453,6 +459,14 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
             slint::CloseRequestResponse::HideWindow
         }
     });
+    if crate::profile::enabled() && !snapshot_mode {
+        // Not available with every renderer; the headless tour hooks its own.
+        let _ = window.window().set_rendering_notifier(|state, _| {
+            if matches!(state, slint::RenderingState::AfterRendering) {
+                crate::profile::frame_rendered();
+            }
+        });
+    }
     window.show()?;
     slint::run_event_loop_until_quit()?;
     let _ = window.hide();

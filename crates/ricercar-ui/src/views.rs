@@ -320,7 +320,7 @@ pub fn refresh_stats(ui: &Rc<Ui>) {
     app.set_lib_duration(long_duration(s.duration_ms).into());
 }
 
-fn run_search(ui: &Rc<Ui>, q: &str) {
+pub fn run_search(ui: &Rc<Ui>, q: &str) {
     let r = ui.ctx.lib.search(q);
     let m = &ui.models;
     let artists: Vec<_> = r.artists.iter().map(|a| artist_card(ui, a, true)).collect();

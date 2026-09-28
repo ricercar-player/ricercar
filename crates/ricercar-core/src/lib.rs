@@ -5,6 +5,9 @@ pub mod controller;
 pub mod covers;
 pub mod library;
 pub mod meta;
+pub mod profile;
+#[doc(hidden)]
+pub mod synth;
 pub mod watcher;
 
 pub use config::Config;

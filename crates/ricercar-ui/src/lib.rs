@@ -6,6 +6,7 @@ mod app;
 mod extras;
 mod images;
 mod player;
+mod profile;
 mod snapshot;
 mod text;
 mod tray;

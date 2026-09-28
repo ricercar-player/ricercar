@@ -149,6 +149,12 @@ pub fn wire(ui: &Rc<Ui>) {
 }
 
 fn tick(ui: &Rc<Ui>) {
+    let started = Instant::now();
+    tick_inner(ui);
+    crate::profile::add("player tick", started.elapsed());
+}
+
+fn tick_inner(ui: &Rc<Ui>) {
     let st = ui.ctx.ctl.lock().clone();
     let app = ui.app();
 
@@ -414,6 +420,7 @@ fn context_label(ui: &Ui, ctx: &PlayContext) -> String {
 }
 
 fn mark_playing(ui: &Ui, path: Option<&str>) {
+    let started = Instant::now();
     for m in ui.models.track_models() {
         for i in 0..m.row_count() {
             let mut r = m.row_data(i).unwrap();
@@ -424,6 +431,7 @@ fn mark_playing(ui: &Ui, path: Option<&str>) {
             }
         }
     }
+    crate::profile::add("mark playing", started.elapsed());
 }
 
 pub fn sync_fav(ui: &Ui) {
@@ -608,6 +616,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
 }
 
 fn rebuild_queue(ui: &Rc<Ui>, st: &CtlState) {
+    let started = Instant::now();
     ui.st.borrow_mut().queue_rev = st.queue_rev;
     let cur = st.current;
     let rows: Vec<QueueRow> = st
@@ -657,6 +666,7 @@ fn rebuild_queue(ui: &Rc<Ui>, st: &CtlState) {
     );
     app.set_queue_current(cur.map(|c| c as i32).unwrap_or(-1));
     ui.queue_model.set_vec(rows);
+    crate::profile::add("rebuild queue", started.elapsed());
 }
 
 // ------------------------------------------------------------------ lyrics

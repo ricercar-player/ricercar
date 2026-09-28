@@ -1,4 +1,5 @@
 fn main() {
+    ricercar_core::profile::mark_start();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--print-devices") {
         ricercar_daemon::print_devices();
