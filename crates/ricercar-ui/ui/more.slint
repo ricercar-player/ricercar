@@ -485,6 +485,11 @@ export component SettingsPage inherits PageScroll {
                 hint: @tr("Read the list of community plugins from GitHub when you open the Plugins page.");
                 Toggle { checked <=> App.plugins-online; toggled => { App.settings-changed(); } }
             }
+            Row {
+                label: @tr("Updates");
+                hint: @tr("Once a day at startup, ask GitHub whether a new ricercar is out, and check installed plugins against the catalogue. Nothing is installed without you.");
+                Toggle { checked <=> App.updates-online; toggled => { App.settings-changed(); } }
+            }
         }
 
         Group {

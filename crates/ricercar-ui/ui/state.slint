@@ -412,6 +412,14 @@ export global App {
     callback plugin-remove(string);
     // community catalogue (Plugins page)
     in-out property <bool> plugins-online;
+    // installed plugins with an update in the catalogue
+    in property <int> plugin-updates;
+    // a newer ricercar release ("" none), its page
+    in property <string> update-version;
+    in property <string> update-url;
+    callback update-open();
+    callback update-dismiss();
+    in-out property <bool> updates-online;
     in property <[CatalogRow]> catalog-rows;
     in property <string> catalog-status;
     in-out property <string> catalog-filter;

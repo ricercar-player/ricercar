@@ -77,6 +77,12 @@ msgid "Plugins"
 msgstr "Plugins"
 
 msgctxt "Sidebar"
+msgid "{n} update available"
+msgid_plural "{n} updates available"
+msgstr[0] "{n} mise à jour disponible"
+msgstr[1] "{n} mises à jour disponibles"
+
+msgctxt "Sidebar"
 msgid "Playlists"
 msgstr "Playlists"
 
@@ -87,6 +93,18 @@ msgstr "Nouvelle playlist"
 msgctxt "Sidebar"
 msgid "No playlists yet"
 msgstr "Aucune playlist"
+
+msgctxt "Sidebar"
+msgid "ricercar {} is available"
+msgstr "ricercar {} est disponible"
+
+msgctxt "Sidebar"
+msgid "What's new"
+msgstr "Nouveautés"
+
+msgctxt "Sidebar"
+msgid "Close"
+msgstr "Fermer"
 
 msgctxt "Sidebar"
 msgid "Indexing {} / {}"
@@ -491,6 +509,14 @@ msgstr "Catalogue de plugins"
 msgctxt "SettingsPage"
 msgid "Read the list of community plugins from GitHub when you open the Plugins page."
 msgstr "Lire la liste des plugins communautaires sur GitHub à l'ouverture de la page Plugins."
+
+msgctxt "SettingsPage"
+msgid "Updates"
+msgstr "Mises à jour"
+
+msgctxt "SettingsPage"
+msgid "Once a day at startup, ask GitHub whether a new ricercar is out, and check installed plugins against the catalogue. Nothing is installed without you."
+msgstr "Une fois par jour au démarrage, demander à GitHub si une nouvelle version de ricercar est sortie, et comparer les plugins installés au catalogue. Rien n’est installé sans vous."
 
 msgctxt "SettingsPage"
 msgid "Appearance"

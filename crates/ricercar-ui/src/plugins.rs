@@ -274,6 +274,8 @@ fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
         })
         .collect();
     drop(pv);
+    ui.app()
+        .set_plugin_updates(rows.iter().filter(|r| r.update).count() as i32);
     ui.app().set_plugin_rows(ModelRc::new(VecModel::from(rows)));
 }
 
@@ -393,7 +395,7 @@ fn qr_image(text: &str) -> slint::Image {
     slint::Image::from_rgba8(buf)
 }
 
-fn open_url(url: &str) {
+pub fn open_url(url: &str) {
     // The headless tours never open a browser.
     if std::env::var_os("RICERCAR_SNAPSHOT").is_some() {
         return;
@@ -1366,6 +1368,32 @@ fn index_source(ui: &Ui) -> (String, bool) {
         Ok(v) if !v.is_empty() => (v, true),
         _ => (catalog::INDEX_URL.to_string(), false),
     }
+}
+
+/// At startup, when plugins were installed from the catalogue: read it
+/// once so the Plugins entry can show how many have an update.
+pub fn check_updates(ui: &Rc<Ui>) {
+    let cfg = ui.ctx.config.read().unwrap();
+    if !cfg.online.plugin_catalog || !cfg.plugins.iter().any(|p| p.version.is_some()) {
+        return;
+    }
+    drop(cfg);
+    let (url, local) = index_source(ui);
+    std::thread::spawn(move || {
+        let r = catalog::fetch_index(&url, local);
+        post(move |ui| match r {
+            Ok(list) => {
+                let mut pv = ui.plugins.borrow_mut();
+                if pv.catalog.is_empty() {
+                    pv.catalog = list;
+                }
+                pv.rev = None;
+                drop(pv);
+                poll(ui);
+            }
+            Err(e) => tracing::info!("plugin update check: {e}"),
+        });
+    });
 }
 
 /// The Plugins page: installed plugins, then the community catalogue

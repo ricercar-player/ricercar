@@ -9,6 +9,7 @@ pub mod plugin;
 pub mod profile;
 #[doc(hidden)]
 pub mod synth;
+pub mod update;
 pub mod watcher;
 
 pub use config::Config;

@@ -15,6 +15,7 @@ mod snapshot;
 mod text;
 mod tray;
 mod ui_state;
+mod updates;
 mod views;
 
 pub use app::run;

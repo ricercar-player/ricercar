@@ -527,6 +527,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     crate::player::wire(&ui);
     crate::extras::wire(&ui);
     crate::plugins::wire(&ui);
+    crate::updates::wire(&ui);
     let snapshot_mode = snapshot.is_some();
     // The screenshot and perf tours start from a known state; the state
     // tour checks that it survives a restart.
@@ -537,6 +538,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         restore_state(&ui)
     };
     ui.navigate(page, &arg, true);
+    crate::updates::check(&ui);
     if let Some(dir) = snapshot {
         crate::snapshot::start(&ui, dir);
     }

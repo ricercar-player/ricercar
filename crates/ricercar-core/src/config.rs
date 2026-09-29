@@ -144,6 +144,9 @@ pub struct OnlineConfig {
     pub radio: bool,
     /// Read the community plugin catalogue (GitHub) on the Plugins page.
     pub plugin_catalog: bool,
+    /// Look for a new ricercar release (GitHub) at most once a day, and for
+    /// updates of plugins installed from the catalogue.
+    pub updates: bool,
 }
 
 impl Default for OnlineConfig {
@@ -153,6 +156,7 @@ impl Default for OnlineConfig {
             cover_art: true,
             radio: true,
             plugin_catalog: true,
+            updates: true,
         }
     }
 }

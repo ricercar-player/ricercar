@@ -395,6 +395,7 @@ ricercar works fully offline. Its optional online features contact only:
 | ListenBrainz / Last.fm | scrobbling | only with your own credentials |
 | GitHub (raw.githubusercontent.com) | community plugin catalogue | opening the Plugins page · Settings → Online extras |
 | a plugin author's download host | the plugin binary | only when you click Install or Update |
+| GitHub (api.github.com, raw.githubusercontent.com) | new ricercar release, plugin updates (at most once a day at startup) | Settings → Online extras → Updates |
 
 No telemetry, no account, and never a streaming-service API in ricercar
 itself. Plugins you declare are separate programs: what they contact is up

@@ -9,6 +9,8 @@ component NavItem inherits Rectangle {
     in property <string> text;
     in property <bool> active;
     in property <string> trailing;
+    // count shown as an accent pill (0: none)
+    in property <int> badge;
     callback clicked();
     height: 36px;
     border-radius: Theme.r-md;
@@ -41,6 +43,21 @@ component NavItem inherits Rectangle {
             font-size: Theme.fs-xs;
             color: Theme.text3;
             vertical-alignment: center;
+        }
+        if badge > 0: Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 18px;
+            width: max(18px, bt.preferred-width + 10px);
+            border-radius: 9px;
+            background: Theme.accent;
+            bt := Text {
+                text: root.badge;
+                font-size: Theme.fs-xs;
+                font-weight: 700;
+                color: Theme.on-accent;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
         }
     }
     ta := TouchArea {
@@ -142,6 +159,8 @@ export component Sidebar inherits Rectangle {
         NavItem {
             icon: Icons.puzzle;
             text: @tr("Plugins");
+            badge: App.plugin-updates;
+            accessible-description: App.plugin-updates > 0 ? @tr("{n} update available" | "{n} updates available" % App.plugin-updates) : "";
             active: App.page == Page.plugins;
             clicked => { App.navigate(Page.plugins, ""); }
         }
@@ -208,6 +227,42 @@ export component Sidebar inherits Rectangle {
                     font-size: Theme.fs-sm;
                     color: Theme.text3;
                 }
+            }
+        }
+        // A newer ricercar: its release page, or close the notice.
+        if App.update-version != "": Rectangle {
+            border-radius: Theme.r-md;
+            background: ut.has-hover ? Theme.hover : Theme.raised;
+            HorizontalLayout {
+                padding: 10px;
+                padding-right: 4px;
+                spacing: 8px;
+                Icon { y: (parent.height - self.height) / 2; source: Icons.download; size: 14px; tint: Theme.accent; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    Text {
+                        text: @tr("ricercar {} is available", App.update-version);
+                        font-size: Theme.fs-sm;
+                        font-weight: 600;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    Text { text: @tr("What's new"); font-size: Theme.fs-xs; color: Theme.accent; }
+                }
+            }
+            ut := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { App.update-open(); }
+            }
+            IconButton {
+                x: parent.width - self.width - 4px;
+                y: 4px;
+                size: 22px;
+                icon-size: 12px;
+                icon: Icons.x;
+                tooltip: @tr("Close");
+                clicked => { App.update-dismiss(); }
             }
         }
         if App.scanning: HorizontalLayout {

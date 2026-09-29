@@ -111,6 +111,14 @@
 "Next up": "À suivre",
 "Clear": "Vider",
 "Close": "Fermer",
+"Updates": "Mises à jour",
+"Once a day at startup, ask GitHub whether a new ricercar is out, and check installed plugins against the catalogue. Nothing is installed without you.": "Une fois par jour au démarrage, demander à GitHub si une nouvelle version de ricercar est sortie, et comparer les plugins installés au catalogue. Rien n’est installé sans vous.",
+"ricercar {} is available": "ricercar {} est disponible",
+"What's new": "Nouveautés",
+"{n} update available": [
+"{n} mise à jour disponible",
+"{n} mises à jour disponibles"
+],
 "Every sample reaches the DAC exactly as it is in the file.": "Chaque échantillon arrive au DAC exactement tel qu'il est dans le fichier.",
 "Volume below 100 %, ReplayGain, mute or a shared (non hw:) device alters the samples.": "Un volume sous 100 %, le ReplayGain, la sourdine ou un périphérique partagé (non hw:) altèrent les échantillons.",
 "bit-perfect": "bit-perfect",
