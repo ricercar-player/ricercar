@@ -4046,6 +4046,7 @@ version = "0.4.1"
 dependencies = [
  "alsa",
  "crossbeam-channel",
+ "serde_json",
  "symphonia",
  "thiserror 2.0.20",
  "tracing",
@@ -4552,6 +4553,7 @@ dependencies = [
  "const-field-offset",
  "i-slint-backend-linuxkms",
  "i-slint-backend-selector",
+ "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",

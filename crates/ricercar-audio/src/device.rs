@@ -191,7 +191,57 @@ pub fn list_devices() -> Vec<DeviceInfo> {
     let cards = std::fs::read_to_string("/proc/asound/cards").unwrap_or_default();
     let pcms = std::fs::read_to_string("/proc/asound/pcm").unwrap_or_default();
     let hints = alsa_pcm_hints();
-    build_device_list(&cards, &pcms, hints.as_deref())
+    let mut out = build_device_list(&cards, &pcms, hints.as_deref());
+    if out.iter().any(|d| d.name == "pipewire") {
+        out.extend(pipewire_sinks());
+    }
+    out
+}
+
+/// PipeWire outputs that are not ALSA cards (Bluetooth headsets and
+/// speakers, network sinks…), reached through ALSA's `pipewire` plugin.
+fn pipewire_sinks() -> Vec<DeviceInfo> {
+    std::process::Command::new("pactl")
+        .args(["-f", "json", "list", "sinks"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| parse_pipewire_sinks(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+/// `pactl -f json list sinks` → `pipewire:NODE="<name>"` devices. Sinks of
+/// ALSA cards are left out: their `hw:` device plays them bit-perfect.
+pub fn parse_pipewire_sinks(json: &str) -> Vec<DeviceInfo> {
+    let Ok(serde_json::Value::Array(sinks)) = serde_json::from_str(json) else {
+        return Vec::new();
+    };
+    sinks
+        .iter()
+        .filter_map(|s| {
+            let name = s.get("name")?.as_str()?;
+            // Quotes would break the ALSA argument.
+            if name.starts_with("alsa_output.") || name.contains('"') || name.is_empty() {
+                return None;
+            }
+            let desc = s
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or(name);
+            let via = if name.starts_with("bluez_output.") {
+                "Bluetooth"
+            } else {
+                "PipeWire"
+            };
+            Some(DeviceInfo {
+                name: format!("pipewire:NODE=\"{name}\""),
+                description: format!("{desc} ({via}, not bit-perfect)"),
+                kind: DeviceKind::Virtual,
+                card_name: None,
+            })
+        })
+        .collect()
 }
 
 /// What a device accepts, for a "device capabilities" panel.
@@ -329,6 +379,28 @@ mod tests {
         let l = build_device_list("", "", None);
         let names: Vec<&str> = l.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["null", "default"]);
+    }
+
+    #[test]
+    fn pipewire_sinks_skip_alsa_cards() {
+        let json = r#"[
+            {"name":"alsa_output.pci-0000_e3_00.6.HiFi__Speaker__sink","description":"Speaker"},
+            {"name":"bluez_output.00_11_22_33_44_55.1","description":"WH-1000XM4"},
+            {"name":"tunnel.office","description":"Office"},
+            {"name":"bad\"name","description":"x"}
+        ]"#;
+        let l = parse_pipewire_sinks(json);
+        let names: Vec<&str> = l.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "pipewire:NODE=\"bluez_output.00_11_22_33_44_55.1\"",
+                "pipewire:NODE=\"tunnel.office\""
+            ]
+        );
+        assert_eq!(l[0].description, "WH-1000XM4 (Bluetooth, not bit-perfect)");
+        assert_eq!(l[0].kind, DeviceKind::Virtual);
+        assert!(parse_pipewire_sinks("not json").is_empty());
     }
 
     #[test]
