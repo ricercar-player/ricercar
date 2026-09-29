@@ -28,6 +28,8 @@ pub struct Extras {
     /// Pending debounced edits (radio query, settings text, LB token).
     debounce: std::collections::HashMap<&'static str, u64>,
     stations: Option<Rc<VecModel<StationRow>>>,
+    /// Network status revision shown in the settings.
+    network_rev: Option<u64>,
     fav_model: Option<Rc<VecModel<StationRow>>>,
 }
 
@@ -332,18 +334,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_renderer_name(cfg.network.name.clone().into());
     app.set_renderer_enabled(cfg.network.renderer);
     app.set_server_enabled(cfg.network.media_server);
-    app.set_network_status(
-        match (cfg.network.renderer, ui.ctx.renderer_port) {
-            (true, Some(port)) => format!(
-                "{} “{}” · {} {port}",
-                t("Visible on the network as"),
-                cfg.network.name,
-                t("port")
-            ),
-            _ => t("Renderer is off").into(),
-        }
-        .into(),
-    );
+    refresh_network_status(ui);
     app.set_lb_token(cfg.scrobble.listenbrainz_token.clone().into());
     if cfg.scrobble.listenbrainz_token.is_empty() {
         app.set_lb_status(t("Not connected").into());
@@ -373,6 +364,32 @@ pub fn load_settings(ui: &Rc<Ui>) {
             .unwrap_or(0) as i32,
     );
     refresh_library_rows(ui);
+}
+
+/// The status line under the network toggles; follows restarts live.
+pub fn refresh_network_status(ui: &Ui) {
+    use ricercar_daemon::NetworkStatus;
+    let rev = ui.ctx.network_revision();
+    ui.extras.borrow_mut().network_rev = Some(rev);
+    let name = ui.ctx.config.read().unwrap().network.name.clone();
+    let text = match ui.ctx.network_status() {
+        NetworkStatus::Running { port } => format!(
+            "{} “{name}” · {} {port}",
+            t("Visible on the network as"),
+            t("port")
+        ),
+        NetworkStatus::Starting => t("Starting…").into(),
+        NetworkStatus::Off => t("Network sharing is off").into(),
+        NetworkStatus::Failed(e) => format!("{}: {e}", t("Network unavailable")),
+    };
+    ui.app().set_network_status(text.into());
+}
+
+/// Called from the player tick: cheap unless the status changed.
+pub fn poll_network_status(ui: &Ui) {
+    if ui.extras.borrow().network_rev != Some(ui.ctx.network_revision()) {
+        refresh_network_status(ui);
+    }
 }
 
 pub fn refresh_library_rows(ui: &Ui) {

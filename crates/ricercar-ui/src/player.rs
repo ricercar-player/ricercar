@@ -233,6 +233,8 @@ fn tick_inner(ui: &Rc<Ui>) {
         app.set_lyric_index(idx);
     }
 
+    crate::extras::poll_network_status(ui);
+
     // ---- library changes & scan progress
     let lib = &ui.ctx.lib;
     let scanning = lib.progress.running.load(Ordering::Relaxed);

@@ -68,7 +68,7 @@
 "M3U or M3U8 file; tracks outside your library are skipped.": "Fichier M3U ou M3U8 ; les titres hors de votre bibliothèque sont ignorés.",
 "Import": "Importer",
 "Network": "Réseau",
-"Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library. Changes apply after a restart.": "Permet aux applis de votre téléphone (BubbleUPnP, Symfonium, mConnect…) de lire sur cet ordinateur et de parcourir votre bibliothèque. Les changements s'appliquent au redémarrage.",
+"Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library.": "Permet aux applis de votre téléphone (BubbleUPnP, Symfonium, mConnect…) de lire sur cet ordinateur et de parcourir votre bibliothèque.",
 "Device name": "Nom de l'appareil",
 "Play from other apps (UPnP / OpenHome renderer)": "Lecture depuis d'autres applis (renderer UPnP / OpenHome)",
 "Share my library (UPnP media server)": "Partager ma bibliothèque (serveur UPnP)",

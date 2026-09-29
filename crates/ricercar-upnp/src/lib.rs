@@ -174,6 +174,7 @@ pub(crate) struct Renderer {
     pub name: String,
     udn: String,
     server_udn: String,
+    renderer: bool,
     media_server: bool,
     /// `ip:port` used in URLs we emit outside of a request (events).
     pub default_host: String,
@@ -338,14 +339,34 @@ pub(crate) fn oh_id(id: u64) -> u32 {
     u32::try_from(id).unwrap_or(0)
 }
 
+/// What to run on the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpnpOptions {
+    /// Friendly name shown by control points.
+    pub name: String,
+    /// UPnP AV + OpenHome MediaRenderer.
+    pub renderer: bool,
+    /// MediaServer: ContentDirectory browsing and file serving.
+    pub media_server: bool,
+    /// Preferred HTTP port (0: any). A restart asks for the previous port so
+    /// control points that cached our URLs keep working.
+    pub port: u16,
+}
+
+/// The running UPnP services. Dropping it stops them too.
 pub struct RendererHandle {
     pub port: u16,
     stop: Arc<AtomicBool>,
-    _ssdp: Option<ssdp::Ssdp>,
+    renderer: Arc<Renderer>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+    ssdp: Option<ssdp::Ssdp>,
 }
 
 impl RendererHandle {
-    pub fn stop(&self) {
+    /// Stop serving: wait for the service threads (and, briefly, for
+    /// requests in flight), then announce `ssdp:byebye`. The UDNs are kept
+    /// on disk, so a new start is the same device to control points.
+    pub fn stop(&mut self) {
         if !self.stop.swap(true, Ordering::SeqCst) {
             // Unblock the accept loop.
             let _ = TcpStream::connect_timeout(
@@ -353,13 +374,23 @@ impl RendererHandle {
                 Duration::from_millis(200),
             );
         }
+        for t in self.threads.drain(..) {
+            let _ = t.join();
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while self.renderer.active_conns.load(Ordering::SeqCst) > 0
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Dropping the announcer sends ssdp:byebye.
+        self.ssdp.take();
     }
 }
 
 impl Drop for RendererHandle {
     fn drop(&mut self) {
         self.stop();
-        // `_ssdp` drops next and sends ssdp:byebye.
     }
 }
 
@@ -374,8 +405,26 @@ pub fn start_with(
     name: &str,
     media_server: bool,
 ) -> std::io::Result<RendererHandle> {
-    let listener = TcpListener::bind("0.0.0.0:0")?;
+    start(
+        controller,
+        &UpnpOptions {
+            name: name.to_string(),
+            renderer: true,
+            media_server,
+            port: 0,
+        },
+    )
+}
+
+/// Start the renderer and/or the media server on one HTTP port. SSDP only
+/// announces the devices that run.
+pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result<RendererHandle> {
+    let listener = match opts.port {
+        0 => TcpListener::bind("0.0.0.0:0")?,
+        p => TcpListener::bind(("0.0.0.0", p)).or_else(|_| TcpListener::bind("0.0.0.0:0"))?,
+    };
     let port = listener.local_addr()?.port();
+    let (name, media_server) = (opts.name.as_str(), opts.media_server);
     let udn = load_or_create_udn();
     let mut server_udn = load_or_create_udn_named("udn-server");
     if server_udn == udn {
@@ -392,6 +441,7 @@ pub fn start_with(
         name: name.to_string(),
         udn: udn.clone(),
         server_udn: server_udn.clone(),
+        renderer: opts.renderer,
         media_server,
         default_host: format!("{ip}:{port}"),
         subs: Svc::ALL.iter().map(|_| Subscribers::default()).collect(),
@@ -404,13 +454,16 @@ pub fn start_with(
     });
     renderer.update_counters(&renderer.snap());
 
+    let mut threads = Vec::new();
     // HTTP service
     {
         let stop_h = stop.clone();
         let r = renderer.clone();
-        std::thread::Builder::new()
-            .name("ricercar-upnp-http".into())
-            .spawn(move || accept_loop(r, listener, stop_h))?;
+        threads.push(
+            std::thread::Builder::new()
+                .name("ricercar-upnp-http".into())
+                .spawn(move || accept_loop(r, listener, stop_h))?,
+        );
     }
 
     // Controller events → event thread.
@@ -418,31 +471,35 @@ pub fn start_with(
         let stop_f = stop.clone();
         let ctl_rx = controller.subscribe();
         let tx = tx.clone();
-        std::thread::Builder::new()
-            .name("ricercar-upnp-fwd".into())
-            .spawn(move || {
-                while !stop_f.load(Ordering::Relaxed) {
-                    match ctl_rx.recv_timeout(Duration::from_millis(500)) {
-                        Ok(ev) => {
-                            let queue = ev == ricercar_core::CtlEvent::QueueChanged;
-                            if tx.send(Wake::Ctl(notify::affected(&ev), queue)).is_err() {
-                                break;
+        threads.push(
+            std::thread::Builder::new()
+                .name("ricercar-upnp-fwd".into())
+                .spawn(move || {
+                    while !stop_f.load(Ordering::Relaxed) {
+                        match ctl_rx.recv_timeout(Duration::from_millis(500)) {
+                            Ok(ev) => {
+                                let queue = ev == ricercar_core::CtlEvent::QueueChanged;
+                                if tx.send(Wake::Ctl(notify::affected(&ev), queue)).is_err() {
+                                    break;
+                                }
                             }
+                            Err(mpsc::RecvTimeoutError::Timeout) => {}
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         }
-                        Err(mpsc::RecvTimeoutError::Timeout) => {}
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
-                }
-            })?;
+                })?,
+        );
     }
     drop(tx);
 
     {
         let stop_e = stop.clone();
         let r = renderer.clone();
-        std::thread::Builder::new()
-            .name("ricercar-upnp-evt".into())
-            .spawn(move || notify::event_loop(r, rx, stop_e))?;
+        threads.push(
+            std::thread::Builder::new()
+                .name("ricercar-upnp-evt".into())
+                .spawn(move || notify::event_loop(r, rx, stop_e))?,
+        );
     }
 
     let ssdp = ssdp::Ssdp::start(
@@ -460,7 +517,10 @@ pub fn start_with(
             },
         ]
         .into_iter()
-        .filter(|d| media_server || d.kind != ssdp::Kind::Server)
+        .filter(|d| match d.kind {
+            ssdp::Kind::Renderer => opts.renderer,
+            ssdp::Kind::Server => media_server,
+        })
         .collect(),
     );
     if ssdp.is_none() {
@@ -470,7 +530,9 @@ pub fn start_with(
     Ok(RendererHandle {
         port,
         stop,
-        _ssdp: ssdp,
+        renderer,
+        threads,
+        ssdp,
     })
 }
 
@@ -526,7 +588,13 @@ fn serve_conn(r: &Renderer, mut stream: TcpStream) {
         || ["cd", "scms"]
             .iter()
             .any(|s| route.ends_with(&format!("/{s}")) || route.ends_with(&format!("/{s}.xml")));
-    if server_route && !r.media_server {
+    // `/art` serves both devices; everything else belongs to one of them.
+    let active = if server_route {
+        r.media_server
+    } else {
+        route == "/art" || r.renderer
+    };
+    if !active {
         return http::not_found(&mut stream);
     }
     match (method, route.as_str()) {

@@ -323,8 +323,8 @@ msgid "Network"
 msgstr "Réseau"
 
 msgctxt "SettingsPage"
-msgid "Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library. Changes apply after a restart."
-msgstr "Permet aux applis de votre téléphone (BubbleUPnP, Symfonium, mConnect…) de lire sur cet ordinateur et de parcourir votre bibliothèque. Les changements s'appliquent au redémarrage."
+msgid "Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library."
+msgstr "Permet aux applis de votre téléphone (BubbleUPnP, Symfonium, mConnect…) de lire sur cet ordinateur et de parcourir votre bibliothèque."
 
 msgctxt "SettingsPage"
 msgid "Device name"
@@ -475,20 +475,20 @@ msgid "Remove"
 msgstr "Retirer"
 
 msgctxt "QueueList"
-msgid "The queue is empty"
-msgstr "La file d'attente est vide"
-
-msgctxt "QueueList"
-msgid "Play an album or add tracks with “Add to queue”."
-msgstr "Lancez un album ou ajoutez des titres avec « Ajouter à la file »."
-
-msgctxt "QueueList"
 msgid "Now playing"
 msgstr "En cours de lecture"
 
 msgctxt "QueueList"
 msgid "Next up"
 msgstr "À suivre"
+
+msgctxt "QueueList"
+msgid "The queue is empty"
+msgstr "La file d'attente est vide"
+
+msgctxt "QueueList"
+msgid "Play an album or add tracks with “Add to queue”."
+msgstr "Lancez un album ou ajoutez des titres avec « Ajouter à la file »."
 
 msgctxt "QueuePanel"
 msgid "Queue"

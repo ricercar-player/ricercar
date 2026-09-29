@@ -2,8 +2,8 @@
 //! library, engine, UPnP, MPRIS.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 use ricercar_audio::device::list_devices;
 use ricercar_core::config::{self, Config};
@@ -155,10 +155,85 @@ pub struct AppContext {
     pub config: Arc<RwLock<Config>>,
     pub config_path: PathBuf,
     pub quit: Arc<AtomicBool>,
-    pub renderer_port: Option<u16>,
-    _renderer: Option<ricercar_upnp::RendererHandle>,
+    network: Arc<Network>,
     watcher: Arc<RwLock<Option<WatcherHandle>>>,
     _mpris: Option<zbus::blocking::Connection>,
+}
+
+/// What the network services are doing, for the settings page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkStatus {
+    /// Renderer and server both turned off (or `--no-upnp`).
+    Off,
+    /// Being (re)started after a settings change.
+    Starting,
+    Running {
+        port: u16,
+    },
+    Failed(String),
+}
+
+/// The UPnP services, restartable while the app runs.
+struct Network {
+    handle: RwLock<Option<ricercar_upnp::RendererHandle>>,
+    status: RwLock<NetworkStatus>,
+    /// Bumped on every status change.
+    rev: AtomicU64,
+    /// One restart at a time; holds the settings last applied.
+    applied: Mutex<Option<config::NetworkConfig>>,
+    disabled: bool,
+}
+
+impl Network {
+    fn set_status(&self, s: NetworkStatus) {
+        *self.status.write().unwrap() = s;
+        self.rev.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Bring the services in line with `cfg` (blocking: joins threads).
+    fn apply(&self, ctl: &Arc<Controller>, cfg: &config::NetworkConfig) {
+        let mut applied = self.applied.lock().unwrap();
+        if applied.as_ref() == Some(cfg) {
+            return;
+        }
+        *applied = Some(cfg.clone());
+        let old = self.handle.write().unwrap().take();
+        let port = old.as_ref().map(|h| h.port).unwrap_or(0);
+        if let Some(mut h) = old {
+            self.set_status(NetworkStatus::Starting);
+            h.stop();
+        }
+        if self.disabled || !(cfg.renderer || cfg.media_server) {
+            self.set_status(NetworkStatus::Off);
+            return;
+        }
+        let opts = ricercar_upnp::UpnpOptions {
+            name: cfg.name.clone(),
+            renderer: cfg.renderer,
+            media_server: cfg.media_server,
+            port,
+        };
+        match ricercar_upnp::start(ctl.clone(), &opts) {
+            Ok(h) => {
+                tracing::info!(
+                    renderer = opts.renderer,
+                    media_server = opts.media_server,
+                    "UPnP \"{}\" on port {}",
+                    opts.name,
+                    h.port
+                );
+                let port = h.port;
+                *self.handle.write().unwrap() = Some(h);
+                self.set_status(NetworkStatus::Running { port });
+            }
+            Err(e) => {
+                tracing::warn!("UPnP unavailable: {e}");
+                // Let the next settings change try again.
+                *applied = None;
+                self.set_status(NetworkStatus::Failed(e.to_string()));
+            }
+        }
+    }
 }
 
 pub fn init_logging() {
@@ -220,24 +295,14 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
 
     let quit = Arc::new(AtomicBool::new(false));
 
-    let renderer = if cfg.network.renderer && !args.no_upnp {
-        match ricercar_upnp::start_with(ctl.clone(), &cfg.network.name, cfg.network.media_server) {
-            Ok(handle) => {
-                tracing::info!(
-                    "UPnP renderer \"{}\" on port {}",
-                    cfg.network.name,
-                    handle.port
-                );
-                Some(handle)
-            }
-            Err(e) => {
-                tracing::warn!("UPnP unavailable: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let network = Arc::new(Network {
+        handle: RwLock::new(None),
+        status: RwLock::new(NetworkStatus::Off),
+        rev: AtomicU64::new(0),
+        applied: Mutex::new(None),
+        disabled: args.no_upnp,
+    });
+    network.apply(&ctl, &cfg.network);
 
     let mpris = if !args.no_mpris {
         let opts = ricercar_mpris::MprisOptions {
@@ -276,14 +341,13 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     }
 
     Ok(AppContext {
-        renderer_port: renderer.as_ref().map(|r| r.port),
+        network,
         ctl,
         lib,
         covers,
         config,
         config_path,
         quit,
-        _renderer: renderer,
         watcher,
         _mpris: mpris,
     })
@@ -330,11 +394,11 @@ fn rescan_in_background(
 impl AppContext {
     /// Persist the config and apply library changes (roots/watch).
     pub fn update_config(&self, f: impl FnOnce(&mut Config)) {
-        let (old_roots, cfg) = {
+        let (old_roots, old_network, cfg) = {
             let mut c = self.config.write().unwrap();
-            let old = c.library.clone();
+            let (roots, network) = (c.library.clone(), c.network.clone());
             f(&mut c);
-            (old, c.clone())
+            (roots, network, c.clone())
         };
         if let Err(e) = cfg.save(&self.config_path) {
             tracing::warn!("save config: {e}");
@@ -345,6 +409,41 @@ impl AppContext {
         if old_roots != cfg.library {
             self.lib.retain_roots(&cfg.library.roots);
             rescan_in_background(&self.lib, &cfg, &self.watcher);
+        }
+        if old_network != cfg.network {
+            self.restart_network();
+        }
+    }
+
+    /// Restart the UPnP services with the current settings, off the calling
+    /// thread (stopping waits for the service threads). Same UDNs and, when
+    /// free, the same port: control points find the device again.
+    pub fn restart_network(&self) {
+        let (network, ctl, config) = (self.network.clone(), self.ctl.clone(), self.config.clone());
+        std::thread::Builder::new()
+            .name("ricercar-upnp-restart".into())
+            .spawn(move || {
+                // Restarts are serialized and skip settings already applied,
+                // so a burst of edits ends on the latest one.
+                let cfg = config.read().unwrap().network.clone();
+                network.apply(&ctl, &cfg);
+            })
+            .expect("spawn upnp restart");
+    }
+
+    pub fn network_status(&self) -> NetworkStatus {
+        self.network.status.read().unwrap().clone()
+    }
+
+    /// Changes with every network status change (cheap to poll).
+    pub fn network_revision(&self) -> u64 {
+        self.network.rev.load(Ordering::SeqCst)
+    }
+
+    pub fn renderer_port(&self) -> Option<u16> {
+        match self.network_status() {
+            NetworkStatus::Running { port } => Some(port),
+            _ => None,
         }
     }
 
@@ -364,7 +463,55 @@ impl AppContext {
 
     pub fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
+        if let Some(mut h) = self.network.handle.write().unwrap().take() {
+            h.stop();
+        }
         self.ctl.shutdown();
         tracing::info!("bye");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_restarts_on_the_same_port() {
+        let lib = Arc::new(Library::in_memory().unwrap());
+        let ctl = Arc::new(Controller::new(lib, "null"));
+        let net = Network {
+            handle: RwLock::new(None),
+            status: RwLock::new(NetworkStatus::Off),
+            rev: AtomicU64::new(0),
+            applied: Mutex::new(None),
+            disabled: false,
+        };
+        let mut cfg = config::NetworkConfig {
+            name: "One".into(),
+            renderer: true,
+            media_server: false,
+        };
+        net.apply(&ctl, &cfg);
+        let NetworkStatus::Running { port } = net.status.read().unwrap().clone() else {
+            panic!("not running");
+        };
+        let rev = net.rev.load(Ordering::SeqCst);
+        net.apply(&ctl, &cfg);
+        assert_eq!(
+            net.rev.load(Ordering::SeqCst),
+            rev,
+            "same settings: no restart"
+        );
+
+        cfg.name = "Two".into();
+        cfg.media_server = true;
+        net.apply(&ctl, &cfg);
+        assert_eq!(*net.status.read().unwrap(), NetworkStatus::Running { port });
+
+        cfg.renderer = false;
+        cfg.media_server = false;
+        net.apply(&ctl, &cfg);
+        assert_eq!(*net.status.read().unwrap(), NetworkStatus::Off);
+        assert!(net.handle.read().unwrap().is_none());
     }
 }
