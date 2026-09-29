@@ -908,28 +908,24 @@ export component SearchPage inherits PageScroll {
             color: Theme.text;
             overflow: elide;
         }
-        // Library, then each signed-in plugin that searches.
-        if App.search-sources.length > 1: HorizontalLayout {
-            alignment: start;
-            Segmented {
-                options: App.search-sources;
-                selected <=> App.search-source;
-                changed => { App.search-source-changed(); }
-            }
+        // Plugins answer after the library; their results join the lists.
+        if App.search-text != "" && App.search-pending != "": Text {
+            text: @tr("Searching {}…", App.search-pending);
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
         }
-        if App.search-source > 0: BrowseContent {
-            cards: App.ps-cards;
-            tracks: App.ps-tracks;
-            list: "psearch";
-            loading: App.ps-loading;
-            error: App.ps-error;
+        if App.search-text != "" && App.search-errors != "": Text {
+            text: App.search-errors;
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            wrap: word-wrap;
         }
-        if App.search-source == 0 && App.search-text != "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0: EmptyState {
+        if App.search-text != "" && App.search-pending == "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0: EmptyState {
             icon: Icons.search;
             title: @tr("No results");
             body: @tr("Nothing in your library matches. Check the spelling, or try fewer words.");
         }
-        if App.search-source == 0 && App.s-artists.length > 0: VerticalLayout {
+        if App.s-artists.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
             SectionTitle { text: @tr("Artists"); }
@@ -943,19 +939,19 @@ export component SearchPage inherits PageScroll {
                         size: 160px;
                         cover: a.cover;
                         name: a.name;
-                        subtitle: @tr("{n} album" | "{n} albums" % a.albums);
+                        subtitle: a.albums == 0 ? a.source : a.source == "" ? @tr("{n} album" | "{n} albums" % a.albums) : @tr("{n} album" | "{n} albums" % a.albums) + " · " + a.source;
                         open => { App.artist-activate(a.name); }
                     }
                 }
             }
         }
-        if App.search-source == 0 && App.s-tracks.length > 0: VerticalLayout {
+        if App.s-tracks.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
             SectionTitle { text: @tr("Tracks"); }
             TrackTable { rows: App.s-tracks; list: "search"; show-cover: true; header: false; limit: 12; }
         }
-        if App.search-source == 0 && App.s-albums.length > 0: VerticalLayout {
+        if App.s-albums.length > 0: VerticalLayout {
             spacing: 12px;
             padding-top: 16px;
             SectionTitle { text: @tr("Albums"); }

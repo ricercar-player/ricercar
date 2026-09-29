@@ -144,7 +144,8 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
 - `RICERCAR_SNAPSHOT_TOUR=plugins` installs it through the Plugins page
   from a local catalogue (it must sit next to the `ricercar` binary), then
   captures the catalogue, the install dialog, the sign-in dialog, the browse
-  pages, a playing plugin track and the plugin search tab. Headless tours
+  pages, the plugin library in the Albums, Artists and Tracks pages, a plugin
+  album page, a playing plugin track and a search mixing both sources. Headless tours
   never open a browser. Pass `--library` so the tour does not index the
   default music folder.
 - `RICERCAR_PLUGIN_INDEX=<url or file>` replaces the hub's index (local

@@ -17,7 +17,7 @@ use slint::{Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use crate::app::{RowOpts, TILE, Ui, post, set_rows, track_rows, with_ui};
 use crate::images::Source;
 use crate::text::t;
-use crate::{AlbumCard, CatalogRow, Page, PluginNav, PluginRow};
+use crate::{AlbumCard, ArtistCard, CatalogRow, Page, PluginNav, PluginRow};
 
 /// Separates the parts of a browse argument / plugin card id.
 const SEP: char = '\u{1f}';
@@ -49,8 +49,9 @@ pub struct PluginsView {
     /// Browse page: plugin id, ref, next offset.
     browse: Option<(String, String, usize)>,
     browse_serial: u64,
-    /// Plugin ids behind the search tabs (index 1…).
-    search_ids: Vec<String>,
+    /// Global search: local results and each signed-in plugin's part.
+    search_local: Option<LocalResults>,
+    search: Vec<SearchPart>,
     search_serial: u64,
     /// Item being resolved and since when (loading state after 300 ms).
     resolving: Option<(u64, Instant)>,
@@ -67,6 +68,27 @@ pub struct PluginsView {
     loading_libs: std::collections::HashSet<String>,
     /// Cover key (art URL) of the plugin album on the album page.
     pub album_art: Option<String>,
+}
+
+/// Local results of the global search.
+#[derive(Clone, Default)]
+pub struct LocalResults {
+    pub artists: Vec<ArtistCard>,
+    pub albums: Vec<AlbumCard>,
+    pub tracks: Vec<Track>,
+}
+
+/// One plugin's search results: its catalogue search, or matches in its
+/// library list when it cannot search.
+#[derive(Clone, Default)]
+struct SearchPart {
+    id: String,
+    name: String,
+    pending: bool,
+    error: Option<String>,
+    artists: Vec<Item>,
+    albums: Vec<Item>,
+    tracks: Vec<Track>,
 }
 
 /// A plugin's albums, artists and tracks (`library` capability), kept in
@@ -174,7 +196,6 @@ pub fn poll(ui: &Rc<Ui>) {
     refresh_libraries(ui, &statuses);
     refresh_rows(ui, &statuses);
     refresh_sections(ui, &statuses);
-    refresh_search_sources(ui, &statuses);
     let open = ui.plugins.borrow().signin.clone();
     if let Some(id) = open
         && statuses.iter().any(|s| s.id == id && s.signed_in())
@@ -334,36 +355,6 @@ fn rebuild_nav(ui: &Ui) {
         }
     }
     ui.app().set_plugin_nav(ModelRc::new(VecModel::from(rows)));
-}
-
-fn refresh_search_sources(ui: &Ui, statuses: &[PluginStatus]) {
-    let usable: Vec<&PluginStatus> = statuses
-        .iter()
-        .filter(|s| s.signed_in() && s.caps.search)
-        .collect();
-    let mut names: Vec<slint::SharedString> = vec![t("Library").into()];
-    names.extend(
-        usable
-            .iter()
-            .map(|s| slint::SharedString::from(s.name.as_str())),
-    );
-    let ids: Vec<String> = usable.iter().map(|s| s.id.clone()).collect();
-    let app = ui.app();
-    // Keep the selected plugin tab if it is still there.
-    let current = {
-        let pv = ui.plugins.borrow();
-        let i = app.get_search_source();
-        (i > 0)
-            .then(|| pv.search_ids.get(i as usize - 1).cloned())
-            .flatten()
-    };
-    let selected = current
-        .and_then(|c| ids.iter().position(|i| *i == c))
-        .map(|p| p as i32 + 1)
-        .unwrap_or(0);
-    ui.plugins.borrow_mut().search_ids = ids;
-    app.set_search_sources(ModelRc::new(VecModel::from(names)));
-    app.set_search_source(selected);
 }
 
 // ------------------------------------------------------------ sign-in
@@ -741,64 +732,244 @@ fn play_page(ui: &Rc<Ui>, shuffle: bool) {
 
 // ------------------------------------------------------------ search
 
-/// Search the plugin of the selected tab (the library tab is `views`).
-pub fn run_search(ui: &Rc<Ui>, q: &str) {
-    let i = ui.app().get_search_source();
-    let Some(id) = ui
-        .plugins
-        .borrow()
-        .search_ids
-        .get((i - 1).max(0) as usize)
-        .cloned()
-    else {
-        return;
-    };
+/// Most results kept per plugin and list.
+const SEARCH_MAX: usize = 50;
+
+/// Show the local results, then search each signed-in plugin in parallel
+/// (plugins without `search` are matched in their library list). Results
+/// come in as each plugin answers.
+pub fn run_search(ui: &Rc<Ui>, q: &str, local: LocalResults) {
+    let words = search_words(q);
+    let statuses = host(ui).statuses();
     let serial = {
         let mut pv = ui.plugins.borrow_mut();
         pv.search_serial += 1;
+        let mut parts = Vec::new();
+        for s in statuses
+            .iter()
+            .filter(|s| s.signed_in() && !words.is_empty())
+        {
+            if s.caps.search {
+                parts.push(SearchPart {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    pending: true,
+                    ..Default::default()
+                });
+            } else if let Some(lib) = pv.libs.iter().find(|l| l.id == s.id) {
+                parts.push(library_matches(lib, &words));
+            }
+        }
+        pv.search = parts;
+        pv.search_local = Some(local);
         pv.search_serial
     };
-    let app = ui.app();
-    app.set_ps_error("".into());
-    if q.trim().is_empty() {
-        set_rows(&ui.models.ps_cards, Vec::new());
-        set_rows(&ui.models.ps_tracks, Vec::new());
-        return;
-    }
-    app.set_ps_loading(true);
-    let (h, q) = (host(ui), q.to_string());
-    std::thread::spawn(move || {
-        let r = h.search(&id, &q, 0, 50);
-        post(move |ui| {
-            if ui.plugins.borrow().search_serial != serial {
-                return;
-            }
-            let app = ui.app();
-            app.set_ps_loading(false);
-            match r {
-                Ok(groups) => {
-                    let items: Vec<Item> = groups.into_iter().flat_map(|g| g.1).collect();
-                    let cards = items
-                        .iter()
-                        .filter(|i| i.kind != ItemKind::Track && i.is_browsable())
-                        .map(|i| card(ui, &id, i))
-                        .collect();
-                    set_rows(&ui.models.ps_cards, cards);
-                    let tracks = tracks_of(&id, &items);
-                    set_rows(&ui.models.ps_tracks, track_rows(ui, &tracks, row_opts(0)));
-                    ui.st.borrow_mut().lists.insert("psearch".into(), tracks);
-                    if ui.models.ps_cards.row_count() == 0 && ui.models.ps_tracks.row_count() == 0 {
-                        app.set_ps_error(t("No results").into());
+    show_search(ui);
+    let pending: Vec<String> = ui
+        .plugins
+        .borrow()
+        .search
+        .iter()
+        .filter(|p| p.pending)
+        .map(|p| p.id.clone())
+        .collect();
+    for id in pending {
+        let (h, q) = (host(ui), q.to_string());
+        std::thread::spawn(move || {
+            let r = h.search(&id, &q, 0, SEARCH_MAX);
+            post(move |ui| {
+                {
+                    let mut pv = ui.plugins.borrow_mut();
+                    if pv.search_serial != serial {
+                        return;
+                    }
+                    let Some(part) = pv.search.iter_mut().find(|p| p.id == id) else {
+                        return;
+                    };
+                    part.pending = false;
+                    match r {
+                        Ok(groups) => {
+                            let items: Vec<Item> = groups.into_iter().flat_map(|g| g.1).collect();
+                            fill_part(part, &items);
+                        }
+                        Err(e) => part.error = Some(error_text(&part.name, &e)),
                     }
                 }
-                Err(e) => {
-                    set_rows(&ui.models.ps_cards, Vec::new());
-                    set_rows(&ui.models.ps_tracks, Vec::new());
-                    app.set_ps_error(error_text(&name_of(ui, &id), &e).into());
+                show_search(ui);
+            });
+        });
+    }
+}
+
+/// Lowercase words of a query.
+fn search_words(q: &str) -> Vec<String> {
+    q.split_whitespace().map(str::to_lowercase).collect()
+}
+
+/// Whether every word appears in the item's title, artist or album.
+fn item_matches(it: &Item, words: &[String]) -> bool {
+    let text = [
+        Some(it.title.as_str()),
+        it.artist.as_deref(),
+        it.album_artist.as_deref(),
+        it.album.as_deref(),
+        it.subtitle.as_deref(),
+    ]
+    .iter()
+    .flatten()
+    .map(|s| s.to_lowercase())
+    .collect::<Vec<_>>()
+    .join(" ");
+    words.iter().all(|w| text.contains(w.as_str()))
+}
+
+fn library_matches(lib: &PluginLib, words: &[String]) -> SearchPart {
+    let pick = |list: &[Item]| -> Vec<Item> {
+        list.iter()
+            .filter(|i| item_matches(i, words))
+            .take(SEARCH_MAX)
+            .cloned()
+            .collect()
+    };
+    let mut part = SearchPart {
+        id: lib.id.clone(),
+        name: lib.name.clone(),
+        artists: pick(&lib.artists),
+        albums: pick(&lib.albums),
+        ..Default::default()
+    };
+    part.tracks = tracks_of(&lib.id, &pick(&lib.tracks));
+    part
+}
+
+fn fill_part(part: &mut SearchPart, items: &[Item]) {
+    part.artists = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Artist)
+        .cloned()
+        .collect();
+    part.albums = items
+        .iter()
+        .filter(|i| !matches!(i.kind, ItemKind::Track | ItemKind::Artist) && i.is_browsable())
+        .cloned()
+        .collect();
+    part.tracks = tracks_of(&part.id, items);
+}
+
+/// Fill the search page: local results first, each plugin's after them;
+/// tracks alternate between sources so that every source shows near the
+/// top.
+fn show_search(ui: &Rc<Ui>) {
+    let (local, parts) = {
+        let pv = ui.plugins.borrow();
+        (
+            pv.search_local.clone().unwrap_or_default(),
+            pv.search.clone(),
+        )
+    };
+    let mut artists: Vec<(String, ArtistCard)> = local
+        .artists
+        .into_iter()
+        .map(|a| (a.name.to_lowercase(), a))
+        .collect();
+    let mut albums = local.albums;
+    let mut sources = vec![local.tracks];
+    let (mut pending, mut errors) = (Vec::new(), Vec::new());
+    for p in &parts {
+        if p.pending {
+            pending.push(p.name.clone());
+        }
+        errors.extend(p.error.clone());
+        let extra: Vec<(String, Item)> = p
+            .artists
+            .iter()
+            .map(|a| (p.name.clone(), a.clone()))
+            .collect();
+        merge_artist_cards(ui, &mut artists, &extra, true);
+        albums.extend(
+            p.albums
+                .iter()
+                .map(|i| album_card(ui, &p.id, &p.name, i, true)),
+        );
+        sources.push(p.tracks.clone());
+    }
+    let tracks = interleave(sources);
+    let m = &ui.models;
+    set_rows(&m.s_artists, artists.into_iter().map(|(_, c)| c).collect());
+    set_rows(&m.s_albums, albums);
+    set_rows(&m.s_tracks, track_rows(ui, &tracks, row_opts(0)));
+    ui.st.borrow_mut().lists.insert("search".into(), tracks);
+    let app = ui.app();
+    app.set_search_pending(pending.join(", ").into());
+    app.set_search_errors(errors.join("\n").into());
+}
+
+/// Round-robin over lists, keeping each list's order.
+fn interleave<T>(lists: Vec<Vec<T>>) -> Vec<T> {
+    let total = lists.iter().map(Vec::len).sum();
+    let mut iters: Vec<_> = lists.into_iter().map(Vec::into_iter).collect();
+    let mut out = Vec::with_capacity(total);
+    while out.len() < total {
+        for it in iters.iter_mut() {
+            out.extend(it.next());
+        }
+    }
+    out
+}
+
+/// Add plugin artists (plugin name, item) to artist cards keyed by
+/// lowercase name: a known artist gains the plugin's badge, a new one gets
+/// its own card.
+pub fn merge_artist_cards(
+    ui: &Ui,
+    rows: &mut Vec<(String, ArtistCard)>,
+    extra: &[(String, Item)],
+    eager: bool,
+) {
+    let mut index: HashMap<String, usize> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, (k, _))| (k.clone(), i))
+        .collect();
+    for (name, it) in extra {
+        let k = it.title.to_lowercase();
+        match index.get(&k) {
+            Some(&i) => {
+                let card = &mut rows[i].1;
+                if !card.source.split(" · ").any(|s| s == name) {
+                    card.source = if card.source.is_empty() {
+                        name.clone().into()
+                    } else {
+                        format!("{} · {name}", card.source).into()
+                    };
                 }
             }
-        });
-    });
+            None => {
+                let (cover, ckey) = match art_url(it) {
+                    Some(url) if eager => {
+                        (ui.cover(&url, Source::Url(url.clone()), None, TILE), url)
+                    }
+                    Some(url) => (
+                        ui.cover_lazy(&url, Source::Url(url.clone()), None, TILE),
+                        url,
+                    ),
+                    None => (slint::Image::default(), String::new()),
+                };
+                index.insert(k.clone(), rows.len());
+                rows.push((
+                    k,
+                    ArtistCard {
+                        name: it.title.clone().into(),
+                        albums: 0,
+                        tracks: 0,
+                        cover,
+                        ckey: ckey.into(),
+                        source: name.clone().into(),
+                    },
+                ));
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------ libraries
@@ -1136,6 +1307,18 @@ pub fn add_artist_albums(ui: &Rc<Ui>, name: &str) {
                 .collect::<Vec<_>>()
         })
         .collect();
+    let mut refs = refs;
+    for p in &ui.plugins.borrow().search {
+        for a in p
+            .artists
+            .iter()
+            .filter(|a| a.title.to_lowercase() == name.to_lowercase())
+        {
+            if !refs.iter().any(|(i, _, r)| *i == p.id && *r == a.reference) {
+                refs.push((p.id.clone(), p.name.clone(), a.reference.clone()));
+            }
+        }
+    }
     for (id, pname, reference) in refs {
         let (h, name) = (host(ui), name.to_string());
         std::thread::spawn(move || {
@@ -1482,12 +1665,6 @@ pub fn wire(ui: &Rc<Ui>) {
         })
     });
     app.on_library_source_changed(|| with_ui(|ui| ui.reload_page()));
-    app.on_search_source_changed(|| {
-        with_ui(|ui| {
-            let q = ui.app().get_search_text().to_string();
-            crate::views::run_search(ui, &q);
-        })
-    });
     push_output(ui);
     poll(ui);
 }
@@ -1495,6 +1672,23 @@ pub fn wire(ui: &Rc<Ui>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_matches_every_word_and_alternates_sources() {
+        let it = Item {
+            title: "Blue Hour".into(),
+            artist: Some("Demo Ensemble".into()),
+            album: Some("Night Studies".into()),
+            ..Default::default()
+        };
+        assert!(item_matches(&it, &search_words("blue ENSEMBLE")));
+        assert!(item_matches(&it, &search_words("night")));
+        assert!(!item_matches(&it, &search_words("blue red")));
+        assert_eq!(
+            interleave(vec![vec![1, 2, 3], vec![], vec![10, 20]]),
+            [1, 10, 2, 20, 3]
+        );
+    }
 
     #[test]
     fn browse_args_roundtrip() {

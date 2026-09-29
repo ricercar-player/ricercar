@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use ricercar_core::library::{AlbumSort, Track, TrackSort};
+use ricercar_core::plugin::Item;
 use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
@@ -230,52 +231,8 @@ fn load_artists(ui: &Rc<Ui>) {
         .map(|a| (a.name.to_lowercase(), artist_card(ui, a, false)))
         .collect();
     if !extra.is_empty() {
-        let mut index: std::collections::HashMap<String, usize> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, (k, _))| (k.clone(), i))
-            .collect();
-        for (_, name, it) in &extra {
-            let k = it.title.to_lowercase();
-            match index.get(&k) {
-                Some(&i) => {
-                    let card = &mut rows[i].1;
-                    if !card.source.split(" · ").any(|s| s == name) {
-                        card.source = if card.source.is_empty() {
-                            name.clone().into()
-                        } else {
-                            format!("{} · {name}", card.source).into()
-                        };
-                    }
-                }
-                None => {
-                    let (cover, ckey) = match crate::plugins::art_url(it) {
-                        Some(url) => (
-                            ui.cover_lazy(
-                                &url,
-                                crate::images::Source::Url(url.clone()),
-                                None,
-                                TILE,
-                            ),
-                            url,
-                        ),
-                        None => (slint::Image::default(), String::new()),
-                    };
-                    index.insert(k.clone(), rows.len());
-                    rows.push((
-                        k,
-                        crate::ArtistCard {
-                            name: it.title.clone().into(),
-                            albums: 0,
-                            tracks: 0,
-                            cover,
-                            ckey: ckey.into(),
-                            source: name.clone().into(),
-                        },
-                    ));
-                }
-            }
-        }
+        let extra: Vec<(String, Item)> = extra.into_iter().map(|(_, n, i)| (n, i)).collect();
+        crate::plugins::merge_artist_cards(ui, &mut rows, &extra, false);
         rows.sort_by(|a, b| a.0.cmp(&b.0));
     }
     set_rows(
@@ -524,19 +481,15 @@ pub fn refresh_stats(ui: &Rc<Ui>) {
     app.set_lib_duration(long_duration(s.duration_ms).into());
 }
 
+/// Global search: the local library at once, plugins as they answer.
 pub fn run_search(ui: &Rc<Ui>, q: &str) {
-    if ui.app().get_search_source() > 0 {
-        return crate::plugins::run_search(ui, q);
-    }
     let r = ui.ctx.lib.search(q);
-    let m = &ui.models;
-    let artists: Vec<_> = r.artists.iter().map(|a| artist_card(ui, a, true)).collect();
-    set_rows(&m.s_artists, artists);
-    let albums: Vec<_> = r.albums.iter().map(|a| album_card(ui, a, true)).collect();
-    set_rows(&m.s_albums, albums);
-    let tracks: Vec<Track> = r.tracks.into_iter().take(50).collect();
-    set_rows(&m.s_tracks, track_rows(ui, &tracks, opts(true)));
-    ui.st.borrow_mut().lists.insert("search".into(), tracks);
+    let local = crate::plugins::LocalResults {
+        artists: r.artists.iter().map(|a| artist_card(ui, a, true)).collect(),
+        albums: r.albums.iter().map(|a| album_card(ui, a, true)).collect(),
+        tracks: r.tracks.into_iter().take(50).collect(),
+    };
+    crate::plugins::run_search(ui, q, local);
 }
 
 /// Load covers for the rows on screen (virtualized pages).

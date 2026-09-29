@@ -1057,6 +1057,10 @@ msgid "Results for “{}”"
 msgstr "Résultats pour « {} »"
 
 msgctxt "SearchPage"
+msgid "Searching {}…"
+msgstr "Recherche dans {}…"
+
+msgctxt "SearchPage"
 msgid "No results"
 msgstr "Aucun résultat"
 

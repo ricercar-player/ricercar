@@ -261,7 +261,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                 Box::new(|ui| {
                     let app = ui.app();
                     app.set_queue_open(false);
-                    app.set_search_text("blue".into());
+                    app.set_search_text("ensemble".into());
                     app.invoke_search("blue".into());
                 }),
             ),
@@ -733,10 +733,9 @@ fn plugins_tour(dir: std::path::PathBuf) {
                 Box::new(|ui| {
                     let app = ui.app();
                     app.set_now_playing_open(false);
-                    app.set_search_text("blue".into());
+                    app.set_search_text("ensemble".into());
                     ui.navigate(Page::Search, "", true);
-                    app.set_search_source(1);
-                    crate::views::run_search(ui, "blue");
+                    crate::views::run_search(ui, "ensemble");
                 }),
             ),
         ),

@@ -189,15 +189,12 @@ pub struct Models {
     /// Plugin browse page and plugin search tab.
     pub br_cards: Rows<AlbumCard>,
     pub br_tracks: Rows<TrackRow>,
-    pub ps_cards: Rows<AlbumCard>,
-    pub ps_tracks: Rows<TrackRow>,
 }
 
 impl Models {
-    fn album_models(&self) -> [&Rows<AlbumCard>; 12] {
+    fn album_models(&self) -> [&Rows<AlbumCard>; 11] {
         [
             &self.br_cards,
-            &self.ps_cards,
             &self.albums,
             &self.home_played,
             &self.home_added,
@@ -211,10 +208,9 @@ impl Models {
         ]
     }
 
-    pub fn track_models(&self) -> [&Rows<TrackRow>; 9] {
+    pub fn track_models(&self) -> [&Rows<TrackRow>; 8] {
         [
             &self.br_tracks,
-            &self.ps_tracks,
             &self.tracks,
             &self.home_tracks,
             &self.al_tracks,
@@ -236,7 +232,6 @@ impl Models {
             "playlist" => &self.pl_tracks,
             "search" => &self.s_tracks,
             "browse" => &self.br_tracks,
-            "psearch" => &self.ps_tracks,
             _ => return None,
         })
     }
@@ -632,8 +627,6 @@ fn bind_models(ui: &Rc<Ui>) {
     app.set_queue(model(&m.queue));
     app.set_br_cards(model(&m.br_cards));
     app.set_br_tracks(model(&m.br_tracks));
-    app.set_ps_cards(model(&m.ps_cards));
-    app.set_ps_tracks(model(&m.ps_tracks));
     app.set_version(env!("CARGO_PKG_VERSION").into());
     app.set_greeting(crate::text::greeting().into());
 }
@@ -791,7 +784,7 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
                 ckey: ckey.into(),
                 plays: t.play_count as i32,
                 source: ricercar_core::plugin::parse_plugin_uri(&t.path)
-                    .and_then(|(id, _)| names.get(&id).cloned())
+                    .map(|(id, _)| names.get(&id).cloned().unwrap_or(id))
                     .unwrap_or_default()
                     .into(),
             }

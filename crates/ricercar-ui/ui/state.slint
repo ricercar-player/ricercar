@@ -452,14 +452,9 @@ export global App {
     callback br-load-more();
     callback br-sign-in();
     callback br-play(bool);
-    // search: "Library" then each plugin that searches
-    in property <[string]> search-sources;
-    in-out property <int> search-source;
-    callback search-source-changed();
-    in property <[AlbumCard]> ps-cards;
-    in property <[TrackRow]> ps-tracks;
-    in property <bool> ps-loading;
-    in property <string> ps-error;
+    // plugins still searching ("Jellyfin, Demo"), and their errors
+    in property <string> search-pending;
+    in property <string> search-errors;
     // a plugin track's URL is being fetched (shown after 300 ms)
     in property <bool> resolving;
 
