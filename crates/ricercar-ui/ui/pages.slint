@@ -49,7 +49,7 @@ export component PageScroll inherits Rectangle {
     in property <length> fade-at: 200px;
     in-out property <length> scroll-y <=> sv.content-y;
     // Most negative scroll-y: the end of the page.
-    out property <length> max-scroll: min(0px, sv.visible-height - sv.viewport-height);
+    out property <length> max-scroll: min(0px, sv.visible-height - sv.content-height);
     sv := ScrollView {
         VerticalLayout {
             padding-top: 56px;
