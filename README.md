@@ -161,6 +161,14 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 <td align="center"><sub><b>Search</b>: artists, tracks, albums</sub></td>
 <td align="center"><sub><b>Light theme</b></sub></td>
 </tr>
+<tr>
+<td><img src="docs/screenshots/plugins.jpg" alt="Plugins"></td>
+<td><img src="docs/screenshots/plugin-browse.jpg" alt="A plugin's album"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Plugins</b>: installed, and the community catalogue</sub></td>
+<td align="center"><sub><b>Plugin lists</b>: browse and play a plugin's catalogue (demo plugin)</sub></td>
+</tr>
 </table>
 
 <sub>Screenshots use a synthetic demo library (generated tones and artwork).
