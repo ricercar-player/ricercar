@@ -10,7 +10,7 @@ use crate::{OnlineError, Result};
 
 /// User-Agent sent with every request. MusicBrainz, LRCLIB and Radio Browser
 /// all ask clients to identify themselves with a name, version and contact.
-pub const USER_AGENT: &str = "ricercar/0.3 ( https://github.com/ricercar-player/ricercar )";
+pub const USER_AGENT: &str = "ricercar/0.4 ( https://github.com/ricercar-player/ricercar )";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const READ_TIMEOUT: Duration = Duration::from_secs(15);
@@ -98,6 +98,6 @@ mod tests {
 
     #[test]
     fn user_agent_format() {
-        assert!(USER_AGENT.starts_with("ricercar/0.3 ("));
+        assert!(USER_AGENT.starts_with("ricercar/0.4 ("));
     }
 }

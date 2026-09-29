@@ -3,19 +3,19 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/ricercar-player/ricercar"
 rust-version = "1.85"
 
 [workspace.dependencies]
-ricercar-audio = { path = "crates/ricercar-audio", version = "0.3.1" }
-ricercar-core = { path = "crates/ricercar-core", version = "0.3.1" }
-ricercar-upnp = { path = "crates/ricercar-upnp", version = "0.3.1" }
-ricercar-mpris = { path = "crates/ricercar-mpris", version = "0.3.1" }
-ricercar-online = { path = "crates/ricercar-online", version = "0.3.1" }
-ricercar-daemon = { path = "crates/ricercar-daemon", version = "0.3.1" }
+ricercar-audio = { path = "crates/ricercar-audio", version = "0.4.0" }
+ricercar-core = { path = "crates/ricercar-core", version = "0.4.0" }
+ricercar-upnp = { path = "crates/ricercar-upnp", version = "0.4.0" }
+ricercar-mpris = { path = "crates/ricercar-mpris", version = "0.4.0" }
+ricercar-online = { path = "crates/ricercar-online", version = "0.4.0" }
+ricercar-daemon = { path = "crates/ricercar-daemon", version = "0.4.0" }
 
 thiserror = "2"
 tracing = "0.1"
