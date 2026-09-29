@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use ricercar_audio::{DeviceKind, TransportStatus};
 use ricercar_core::{CtlEvent, CtlState, Origin, PlayContext, Repeat, TrackInfo};
 use ricercar_online::lyrics::{LyricLine as Line, LyricsSource};
-use slint::{Model, ModelRc, VecModel};
+use slint::{ModelRc, VecModel};
 
 use crate::app::{LARGE, THUMB, Ui, post, with_ui};
 use crate::images::{Lookup, Source};
@@ -421,16 +421,16 @@ fn context_label(ui: &Ui, ctx: &PlayContext) -> String {
 
 fn mark_playing(ui: &Ui, path: Option<&str>) {
     let started = Instant::now();
+    let old = ui.st.borrow_mut().marked_playing.take();
     for m in ui.models.track_models() {
-        for i in 0..m.row_count() {
-            let mut r = m.row_data(i).unwrap();
-            let p = path.is_some_and(|p| r.key == p);
-            if r.playing != p {
-                r.playing = p;
-                m.set_row_data(i, r);
-            }
+        if let Some(old) = &old {
+            m.update_path(old, |r| std::mem::replace(&mut r.playing, false));
+        }
+        if let Some(p) = path {
+            m.update_path(p, |r| !std::mem::replace(&mut r.playing, true));
         }
     }
+    ui.st.borrow_mut().marked_playing = path.map(str::to_string);
     crate::profile::add("mark playing", started.elapsed());
 }
 
@@ -619,39 +619,44 @@ fn rebuild_queue(ui: &Rc<Ui>, st: &CtlState) {
     let started = Instant::now();
     ui.st.borrow_mut().queue_rev = st.queue_rev;
     let cur = st.current;
+    // Past items are not shown; upcoming covers load as rows scroll in.
+    let row = |i: usize, q: &ricercar_core::QueueItem, eager: bool| {
+        let (cover, ckey) = match cover_source(&q.info) {
+            Some((k, s)) if eager => (ui.cover(&k, s, None, THUMB), k),
+            Some((k, s)) => (ui.cover_lazy(&k, s, None, THUMB), k),
+            None => (Default::default(), String::new()),
+        };
+        QueueRow {
+            id: q.id as i32,
+            index: i as i32,
+            title: q.info.title.clone().into(),
+            artist: q.info.artist.clone().unwrap_or_default().into(),
+            dur: if q.info.duration_ms > 0 {
+                mmss(q.info.duration_ms)
+            } else {
+                String::new()
+            }
+            .into(),
+            cover,
+            ckey: ckey.into(),
+            current: Some(i) == cur,
+            past: cur.is_some_and(|c| i < c),
+        }
+    };
+    let first = cur.map(|c| c + 1).unwrap_or(0);
     let rows: Vec<QueueRow> = st
         .queue
         .iter()
         .enumerate()
-        .map(|(i, q)| {
-            let (cover, ckey) = match cover_source(&q.info) {
-                Some((k, s)) => (ui.cover(&k, s, None, THUMB), k),
-                None => (Default::default(), String::new()),
-            };
-            QueueRow {
-                id: q.id as i32,
-                title: q.info.title.clone().into(),
-                artist: q.info.artist.clone().unwrap_or_default().into(),
-                dur: if q.info.duration_ms > 0 {
-                    mmss(q.info.duration_ms)
-                } else {
-                    String::new()
-                }
-                .into(),
-                cover,
-                ckey: ckey.into(),
-                current: Some(i) == cur,
-                past: cur.is_some_and(|c| i < c),
-            }
-        })
+        .skip(first)
+        .map(|(i, q)| row(i, q, false))
         .collect();
-    let upcoming: Vec<_> = st
-        .queue
-        .iter()
-        .skip(cur.map(|c| c + 1).unwrap_or(0))
-        .collect();
+    let now = cur.and_then(|c| st.queue.get(c).map(|q| row(c, q, true)));
+    let upcoming = &st.queue[first.min(st.queue.len())..];
     let dur: u64 = upcoming.iter().map(|q| q.info.duration_ms).sum();
     let app = ui.app();
+    app.set_queue_has_now(now.is_some());
+    app.set_queue_now(now.unwrap_or_default());
     app.set_queue_meta(
         format!(
             "{}{}",
@@ -665,7 +670,7 @@ fn rebuild_queue(ui: &Rc<Ui>, st: &CtlState) {
         .into(),
     );
     app.set_queue_current(cur.map(|c| c as i32).unwrap_or(-1));
-    ui.queue_model.set_vec(rows);
+    ui.models.queue.set(rows);
     crate::profile::add("rebuild queue", started.elapsed());
 }
 

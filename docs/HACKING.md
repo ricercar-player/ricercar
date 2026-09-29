@@ -124,6 +124,17 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
   which is derived from `home.png`. Refresh them when a visible feature
   changes.
 
+### Performance
+
+- `RICERCAR_PROFILE=1` prints `[profile]` timings to stderr: page loads, the
+  frame that shows them, first frame, scans, memory.
+- `scripts/perf.sh <dir>` runs the headless perf tour on synthetic libraries
+  of 50 000 tracks and 5 000 files. Results and method:
+  [docs/perf.md](perf.md).
+- Lists that can grow with the library are virtualized (`ListView`) and load
+  covers for the rows on screen only (`App.visible`). Patch rows through the
+  `Rows` indexes in `app.rs` rather than walking whole models.
+
 ## Tests and checks
 
 These must all pass before every commit (this is what CI runs):

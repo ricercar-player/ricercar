@@ -216,6 +216,7 @@ fn schema(conn: &Connection) -> rusqlite::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist COLLATE NOCASE);
          CREATE INDEX IF NOT EXISTS idx_tracks_aa ON tracks(album_artist COLLATE NOCASE);
          CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at);
+         CREATE INDEX IF NOT EXISTS idx_tracks_name ON tracks(COALESCE(album_artist, artist) COLLATE NOCASE);
 
          CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
             title, artist, album, album_artist, genre, composer,
@@ -377,6 +378,38 @@ fn row_to_album(r: &rusqlite::Row<'_>) -> rusqlite::Result<Album> {
         cover_path: r.get(14)?,
         dir,
         favorite: r.get(16)?,
+    })
+}
+
+const PLAYLIST_SELECT: &str =
+    "SELECT p.id, p.name, COUNT(t.path), COALESCE(SUM(t.duration_ms), 0), p.updated_at,
+        (SELECT i.path FROM playlist_items i WHERE i.playlist_id = p.id ORDER BY i.pos LIMIT 1)
+     FROM playlists p
+     LEFT JOIN playlist_items i ON i.playlist_id = p.id
+     LEFT JOIN tracks t ON t.path = i.path";
+
+fn row_to_playlist(r: &rusqlite::Row<'_>) -> rusqlite::Result<Playlist> {
+    Ok(Playlist {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        track_count: r.get(2)?,
+        duration_ms: r.get::<_, i64>(3)? as u64,
+        updated_at: r.get(4)?,
+        cover_path: r.get(5)?,
+    })
+}
+
+/// Artist rows: `COALESCE(album_artist, artist)` grouped case-insensitively
+/// (the expression matches `idx_tracks_name`).
+const ARTIST_SELECT: &str = "SELECT COALESCE(album_artist, artist) AS name,
+    COUNT(DISTINCT album_id), COUNT(*), MIN(path) FROM tracks";
+
+fn row_to_artist(r: &rusqlite::Row<'_>) -> rusqlite::Result<Artist> {
+    Ok(Artist {
+        name: r.get(0)?,
+        album_count: r.get(1)?,
+        track_count: r.get(2)?,
+        cover_path: r.get(3)?,
     })
 }
 
@@ -812,18 +845,28 @@ impl Library {
 
     pub fn artists(&self) -> Vec<Artist> {
         self.query(
-            "SELECT COALESCE(album_artist, artist) AS name, COUNT(DISTINCT album_id), COUNT(*), MIN(path)
-             FROM tracks WHERE name IS NOT NULL AND name != ''
-             GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE",
+            &format!(
+                "{ARTIST_SELECT} WHERE name IS NOT NULL AND name != ''
+                 GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE"
+            ),
             [],
-            |r| {
-                Ok(Artist {
-                    name: r.get(0)?,
-                    album_count: r.get(1)?,
-                    track_count: r.get(2)?,
-                    cover_path: r.get(3)?,
-                })
-            },
+            row_to_artist,
+        )
+    }
+
+    /// The artists with these names (any case), in no particular order.
+    fn artists_named(&self, names: &[String]) -> Vec<Artist> {
+        if names.is_empty() {
+            return Vec::new();
+        }
+        let marks = vec!["?"; names.len()].join(",");
+        self.query(
+            &format!(
+                "{ARTIST_SELECT} WHERE COALESCE(album_artist, artist) COLLATE NOCASE IN ({marks})
+                 GROUP BY name COLLATE NOCASE"
+            ),
+            params_from_iter(names.iter()),
+            row_to_artist,
         )
     }
 
@@ -900,6 +943,12 @@ impl Library {
     // ------------------------------------------------------------ tracks
 
     pub fn tracks(&self, sort: TrackSort) -> Vec<Track> {
+        self.tracks_range(sort, 0, usize::MAX)
+    }
+
+    /// A slice of `tracks(sort)`: pages of one sort always line up (ties are
+    /// broken by row id), so a list can be loaded in several queries.
+    pub fn tracks_range(&self, sort: TrackSort, offset: usize, limit: usize) -> Vec<Track> {
         let order = match sort {
             TrackSort::Artist => {
                 "COALESCE(t.album_artist, t.artist) COLLATE NOCASE, t.year, t.album_id, COALESCE(t.disc,1), COALESCE(t.track,0)"
@@ -910,11 +959,13 @@ impl Library {
             TrackSort::RecentlyAdded => "t.added_at DESC, t.path",
             TrackSort::MostPlayed => "COALESCE(s.play_count,0) DESC, t.title COLLATE NOCASE",
         };
+        let limit = i64::try_from(limit).unwrap_or(-1);
         self.query(
             &format!(
-                "SELECT {TRACK_COLS} FROM tracks t LEFT JOIN stats s ON s.path = t.path ORDER BY {order}"
+                "SELECT {TRACK_COLS} FROM tracks t LEFT JOIN stats s ON s.path = t.path
+                 ORDER BY {order}, t.id LIMIT ?1 OFFSET ?2"
             ),
-            [],
+            params![limit, offset as i64],
             row_to_track,
         )
     }
@@ -1004,20 +1055,27 @@ impl Library {
         let Some(fq) = fts_query(q) else {
             return SearchResults::default();
         };
+        // Rank inside the index first and join only the rows kept: short
+        // prefixes match a large share of a big library.
         let tracks = self.query(
             &format!(
-                "SELECT {TRACK_COLS} FROM tracks_fts f JOIN tracks t ON t.id = f.rowid
+                "SELECT {TRACK_COLS} FROM (
+                    SELECT rowid, bm25(tracks_fts, 10.0, 5.0, 4.0, 4.0, 1.0, 2.0) AS score
+                    FROM tracks_fts WHERE tracks_fts MATCH ?1 ORDER BY score LIMIT 200) m
+                 JOIN tracks t ON t.id = m.rowid
                  LEFT JOIN stats s ON s.path = t.path
-                 WHERE tracks_fts MATCH ?1 ORDER BY bm25(tracks_fts, 10.0, 5.0, 4.0, 4.0, 1.0, 2.0) LIMIT 200"
+                 ORDER BY m.score"
             ),
             [&fq],
             row_to_track,
         );
+        // An album ranks by its best track; the best 2000 tracks are enough
+        // to find the best 40 albums unless albums are huge.
         let album_ids: Vec<String> = self.query(
-            "WITH m AS MATERIALIZED (
+            "SELECT t.album_id FROM (
                 SELECT rowid, bm25(tracks_fts, 1.0, 5.0, 10.0, 8.0, 1.0, 2.0) AS score
-                FROM tracks_fts WHERE tracks_fts MATCH ?1)
-             SELECT t.album_id FROM m JOIN tracks t ON t.id = m.rowid
+                FROM tracks_fts WHERE tracks_fts MATCH ?1 ORDER BY score LIMIT 2000) m
+             JOIN tracks t ON t.id = m.rowid
              GROUP BY t.album_id ORDER BY MIN(m.score) LIMIT 40",
             [format!("{{album album_artist artist}} : ({fq})")],
             |r| r.get(0),
@@ -1029,12 +1087,7 @@ impl Library {
             [format!("{{artist album_artist}} : ({fq})")],
             |r| r.get(0),
         );
-        let wanted: HashSet<String> = artist_names.iter().map(|n| n.to_lowercase()).collect();
-        let mut artists: Vec<Artist> = self
-            .artists()
-            .into_iter()
-            .filter(|a| wanted.contains(&a.name.to_lowercase()))
-            .collect();
+        let mut artists = self.artists_named(&artist_names);
         artists.sort_by_key(|a| {
             artist_names
                 .iter()
@@ -1052,28 +1105,20 @@ impl Library {
 
     pub fn playlists(&self) -> Vec<Playlist> {
         self.query(
-            "SELECT p.id, p.name, COUNT(t.path), COALESCE(SUM(t.duration_ms), 0), p.updated_at,
-                (SELECT i.path FROM playlist_items i WHERE i.playlist_id = p.id ORDER BY i.pos LIMIT 1)
-             FROM playlists p
-             LEFT JOIN playlist_items i ON i.playlist_id = p.id
-             LEFT JOIN tracks t ON t.path = i.path
-             GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
+            &format!("{PLAYLIST_SELECT} GROUP BY p.id ORDER BY p.name COLLATE NOCASE"),
             [],
-            |r| {
-                Ok(Playlist {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    track_count: r.get(2)?,
-                    duration_ms: r.get::<_, i64>(3)? as u64,
-                    updated_at: r.get(4)?,
-                    cover_path: r.get(5)?,
-                })
-            },
+            row_to_playlist,
         )
     }
 
     pub fn playlist(&self, id: i64) -> Option<Playlist> {
-        self.playlists().into_iter().find(|p| p.id == id)
+        self.query(
+            &format!("{PLAYLIST_SELECT} WHERE p.id = ?1 GROUP BY p.id"),
+            [id],
+            row_to_playlist,
+        )
+        .into_iter()
+        .next()
     }
 
     pub fn create_playlist(&self, name: &str) -> i64 {

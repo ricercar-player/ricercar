@@ -651,7 +651,7 @@ export component TracksPage inherits Rectangle {
                 color: Theme.text;
                 vertical-alignment: center;
             }
-            Text { text: App.tracks.length; font-size: Theme.fs-lg; color: Theme.text3; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: App.lib-tracks; font-size: Theme.fs-lg; color: Theme.text3; vertical-alignment: center; horizontal-stretch: 1; }
             Segmented {
                 y: (parent.height - self.height) / 2;
                 options: [@tr("Artist"), @tr("Title"), @tr("Album"), @tr("Length"), @tr("Added"), @tr("Plays")];

@@ -66,6 +66,12 @@ pub fn cache_id(key: &str, size: u32) -> String {
     format!("{size}:{key}")
 }
 
+/// Inverse of `cache_id`: (key, size).
+pub fn split_cache_id(id: &str) -> Option<(String, u32)> {
+    let (size, key) = id.split_once(':')?;
+    Some((key.to_string(), size.parse().ok()?))
+}
+
 impl Loader {
     pub fn new(covers: Arc<CoverCache>, deliver: Delivery) -> Loader {
         let shared = Arc::new(Shared {

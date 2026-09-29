@@ -7,7 +7,7 @@ use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use crate::app::{
-    RowOpts, THUMB, TILE, Ui, album_card, artist_card, set_rows, track_rows, with_ui,
+    Row, RowOpts, Rows, THUMB, TILE, Ui, album_card, artist_card, set_rows, track_rows, with_ui,
 };
 use crate::images::{Lookup, Source};
 use crate::text::{long_duration, quality, t};
@@ -60,6 +60,7 @@ fn opts(cover: bool) -> RowOpts {
         track_numbers: false,
         discs: false,
         album_artist: None,
+        start: 0,
     }
 }
 
@@ -106,16 +107,7 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
             visible(ui, "artists", 0, 40);
         }
         Page::Artist => load_artist(ui, arg),
-        Page::Tracks => {
-            let tracks = lib.tracks(track_sort(app.get_track_sort()));
-            let o = RowOpts {
-                eager: false,
-                ..opts(true)
-            };
-            set_rows(&m.tracks, track_rows(ui, &tracks, o));
-            ui.st.borrow_mut().lists.insert("tracks".into(), tracks);
-            visible(ui, "tracks", 0, 30);
-        }
+        Page::Tracks => load_tracks(ui),
         Page::Genres => {
             let rows: Vec<_> = lib
                 .genres()
@@ -171,6 +163,62 @@ pub fn load_albums(ui: &Rc<Ui>) {
     visible(ui, "albums", 0, 36);
 }
 
+/// Rows built per event-loop turn on the Tracks page.
+const TRACKS_CHUNK: usize = 2000;
+
+fn tracks_opts(start: usize) -> RowOpts {
+    RowOpts {
+        eager: false,
+        start,
+        ..opts(true)
+    }
+}
+
+/// The Tracks page shows its first rows at once; the rest is queried on a
+/// worker thread and appended chunk by chunk, so the page opens instantly
+/// and input stays responsive on very large libraries.
+pub fn load_tracks(ui: &Rc<Ui>) {
+    let sort = track_sort(ui.app().get_track_sort());
+    let serial = {
+        let mut st = ui.st.borrow_mut();
+        st.tracks_serial += 1;
+        st.tracks_serial
+    };
+    let lib = ui.ctx.lib.clone();
+    let first = lib.tracks_range(sort, 0, TRACKS_CHUNK);
+    set_rows(&ui.models.tracks, track_rows(ui, &first, tracks_opts(0)));
+    let complete = first.len() < TRACKS_CHUNK;
+    ui.st.borrow_mut().lists.insert("tracks".into(), first);
+    visible(ui, "tracks", 0, 30);
+    if complete {
+        return;
+    }
+    let started = std::time::Instant::now();
+    std::thread::spawn(move || {
+        let rest = lib.tracks_range(sort, TRACKS_CHUNK, usize::MAX);
+        crate::app::post(move |ui| append_tracks(ui, serial, rest, started));
+    });
+}
+
+fn append_tracks(ui: &Rc<Ui>, serial: u64, mut rest: Vec<Track>, started: std::time::Instant) {
+    if ui.st.borrow().tracks_serial != serial {
+        return;
+    }
+    let chunk: Vec<Track> = rest.drain(..TRACKS_CHUNK.min(rest.len())).collect();
+    let rows = track_rows(ui, &chunk, tracks_opts(ui.models.tracks.row_count()));
+    ui.models.tracks.extend(rows);
+    if let Some(list) = ui.st.borrow_mut().lists.get_mut("tracks") {
+        list.extend(chunk);
+    }
+    if rest.is_empty() {
+        crate::profile::record("tracks page: all rows", started.elapsed());
+        return;
+    }
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        with_ui(|ui| append_tracks(ui, serial, rest, started))
+    });
+}
+
 fn load_album(ui: &Rc<Ui>, id: &str) {
     let lib = &ui.ctx.lib;
     let Some(a) = lib.album(id) else { return };
@@ -219,6 +267,7 @@ fn load_album(ui: &Rc<Ui>, id: &str) {
         track_numbers: true,
         discs: true,
         album_artist: Some(a.artist.clone()),
+        start: 0,
     };
     set_rows(&ui.models.al_tracks, track_rows(ui, &tracks, o));
     ui.st.borrow_mut().lists.insert("album".into(), tracks);
@@ -334,29 +383,20 @@ pub fn run_search(ui: &Rc<Ui>, q: &str) {
 
 /// Load covers for the rows on screen (virtualized pages).
 pub fn visible(ui: &Rc<Ui>, list: &str, first: usize, last: usize) {
+    fn missing<T: Row>(m: &Rows<T>, first: usize, last: usize, size: u32) -> Vec<(String, u32)> {
+        (first..last.min(m.row_count()))
+            .filter_map(|i| m.row_data(i))
+            .filter(|r| r.cover_missing())
+            .map(|r| (r.ckey().to_string(), size))
+            .collect()
+    }
+    let m = &ui.models;
     let keys: Vec<(String, u32)> = match list {
-        "albums" => {
-            let m = &ui.models.albums;
-            (first..last.min(m.row_count()))
-                .filter_map(|i| m.row_data(i))
-                .filter(|r| r.cover.size().width == 0)
-                .map(|r| (r.ckey.to_string(), TILE))
-                .collect()
-        }
-        "artists" => {
-            let m = &ui.models.artists;
-            (first..last.min(m.row_count()))
-                .filter_map(|i| m.row_data(i))
-                .filter(|r| r.cover.size().width == 0)
-                .map(|r| (r.ckey.to_string(), TILE))
-                .collect()
-        }
-        other => match ui.models.track_model(other) {
-            Some(m) => (first..last.min(m.row_count()))
-                .filter_map(|i| m.row_data(i))
-                .filter(|r| r.cover.size().width == 0 && !r.ckey.is_empty())
-                .map(|r| (r.ckey.to_string(), THUMB))
-                .collect(),
+        "albums" => missing(&m.albums, first, last, TILE),
+        "artists" => missing(&m.artists, first, last, TILE),
+        "queue" => missing(&m.queue, first, last, THUMB),
+        other => match m.track_model(other) {
+            Some(m) => missing(m, first, last, THUMB),
             None => Vec::new(),
         },
     };
@@ -504,13 +544,7 @@ fn add_to_playlist(ui: &Rc<Ui>, target: &str, paths: &[String]) {
 
 fn mark_fav(ui: &Ui, path: &str, fav: bool) {
     for m in ui.models.track_models() {
-        for i in 0..m.row_count() {
-            let mut r = m.row_data(i).unwrap();
-            if r.key == path {
-                r.fav = fav;
-                m.set_row_data(i, r);
-            }
-        }
+        m.update_path(path, |r| std::mem::replace(&mut r.fav, fav) != fav);
     }
     crate::player::sync_fav(ui);
 }

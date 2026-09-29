@@ -34,56 +34,161 @@ pub const TILE: u32 = 320;
 pub const THUMB: u32 = 96;
 pub const LARGE: u32 = 640;
 
-/// All the list models the window shows, kept so covers and "playing"
-/// markers can be patched in place.
-pub struct Models {
-    pub albums: Rc<VecModel<AlbumCard>>,
-    pub home_played: Rc<VecModel<AlbumCard>>,
-    pub home_added: Rc<VecModel<AlbumCard>>,
-    pub home_top: Rc<VecModel<AlbumCard>>,
-    pub al_more: Rc<VecModel<AlbumCard>>,
-    pub ar_own: Rc<VecModel<AlbumCard>>,
-    pub ar_appears: Rc<VecModel<AlbumCard>>,
-    pub ge_albums: Rc<VecModel<AlbumCard>>,
-    pub fav_albums: Rc<VecModel<AlbumCard>>,
-    pub s_albums: Rc<VecModel<AlbumCard>>,
-    pub artists: Rc<VecModel<ArtistCard>>,
-    pub s_artists: Rc<VecModel<ArtistCard>>,
-    pub tracks: Rc<VecModel<TrackRow>>,
-    pub home_tracks: Rc<VecModel<TrackRow>>,
-    pub al_tracks: Rc<VecModel<TrackRow>>,
-    pub ar_top: Rc<VecModel<TrackRow>>,
-    pub fav_tracks: Rc<VecModel<TrackRow>>,
-    pub pl_tracks: Rc<VecModel<TrackRow>>,
-    pub s_tracks: Rc<VecModel<TrackRow>>,
+/// A list model plus two indexes, cover key → rows and track path → rows,
+/// so arriving covers and the "playing" / favourite markers only touch the
+/// rows concerned instead of walking every list.
+pub struct Rows<T: Row> {
+    pub model: Rc<VecModel<T>>,
+    by_cover: RefCell<HashMap<SharedString, Vec<usize>>>,
+    by_path: RefCell<HashMap<SharedString, Vec<usize>>>,
 }
 
-impl Models {
-    fn new() -> Models {
-        Models {
-            albums: Rc::new(VecModel::default()),
-            home_played: Rc::new(VecModel::default()),
-            home_added: Rc::new(VecModel::default()),
-            home_top: Rc::new(VecModel::default()),
-            al_more: Rc::new(VecModel::default()),
-            ar_own: Rc::new(VecModel::default()),
-            ar_appears: Rc::new(VecModel::default()),
-            ge_albums: Rc::new(VecModel::default()),
-            fav_albums: Rc::new(VecModel::default()),
-            s_albums: Rc::new(VecModel::default()),
-            artists: Rc::new(VecModel::default()),
-            s_artists: Rc::new(VecModel::default()),
-            tracks: Rc::new(VecModel::default()),
-            home_tracks: Rc::new(VecModel::default()),
-            al_tracks: Rc::new(VecModel::default()),
-            ar_top: Rc::new(VecModel::default()),
-            fav_tracks: Rc::new(VecModel::default()),
-            pl_tracks: Rc::new(VecModel::default()),
-            s_tracks: Rc::new(VecModel::default()),
+pub trait Row: Clone + 'static {
+    fn ckey(&self) -> &SharedString;
+    /// Track rows: the file path.
+    fn path(&self) -> Option<&SharedString> {
+        None
+    }
+    fn cover_missing(&self) -> bool;
+    fn set_cover(&mut self, img: slint::Image);
+}
+
+macro_rules! cover_row {
+    ($t:ty) => {
+        impl Row for $t {
+            fn ckey(&self) -> &SharedString {
+                &self.ckey
+            }
+            fn cover_missing(&self) -> bool {
+                !self.ckey.is_empty() && self.cover.size().width == 0
+            }
+            fn set_cover(&mut self, img: slint::Image) {
+                self.cover = img;
+            }
+        }
+    };
+}
+cover_row!(AlbumCard);
+cover_row!(ArtistCard);
+cover_row!(crate::QueueRow);
+
+impl Row for TrackRow {
+    fn ckey(&self) -> &SharedString {
+        &self.ckey
+    }
+    fn path(&self) -> Option<&SharedString> {
+        Some(&self.key)
+    }
+    fn cover_missing(&self) -> bool {
+        !self.ckey.is_empty() && self.cover.size().width == 0
+    }
+    fn set_cover(&mut self, img: slint::Image) {
+        self.cover = img;
+    }
+}
+
+impl<T: Row> Default for Rows<T> {
+    fn default() -> Self {
+        Rows {
+            model: Rc::new(VecModel::default()),
+            by_cover: RefCell::default(),
+            by_path: RefCell::default(),
+        }
+    }
+}
+
+impl<T: Row> std::ops::Deref for Rows<T> {
+    type Target = VecModel<T>;
+    fn deref(&self) -> &VecModel<T> {
+        &self.model
+    }
+}
+
+impl<T: Row> Rows<T> {
+    fn index(&self, rows: &[T], offset: usize) {
+        let mut covers = self.by_cover.borrow_mut();
+        let mut paths = self.by_path.borrow_mut();
+        for (i, r) in rows.iter().enumerate() {
+            if !r.ckey().is_empty() {
+                covers.entry(r.ckey().clone()).or_default().push(offset + i);
+            }
+            if let Some(p) = r.path() {
+                paths.entry(p.clone()).or_default().push(offset + i);
+            }
         }
     }
 
-    fn album_models(&self) -> [&Rc<VecModel<AlbumCard>>; 10] {
+    pub fn set(&self, rows: Vec<T>) {
+        self.by_cover.borrow_mut().clear();
+        self.by_path.borrow_mut().clear();
+        self.index(&rows, 0);
+        self.model.set_vec(rows);
+    }
+
+    /// Append rows (lists loaded in chunks).
+    pub fn extend(&self, rows: Vec<T>) {
+        self.index(&rows, self.model.row_count());
+        self.model.extend(rows);
+    }
+
+    /// Put a freshly decoded cover on the rows that wait for it.
+    pub fn patch_cover(&self, key: &str, img: &slint::Image) {
+        let Some(idx) = self.by_cover.borrow().get(key).cloned() else {
+            return;
+        };
+        for i in idx {
+            if let Some(mut r) = self.model.row_data(i)
+                && r.cover_missing()
+            {
+                r.set_cover(img.clone());
+                self.model.set_row_data(i, r);
+            }
+        }
+    }
+
+    /// Update the rows of one track; `f` returns false to skip the write.
+    pub fn update_path(&self, path: &str, f: impl Fn(&mut T) -> bool) {
+        let Some(idx) = self.by_path.borrow().get(path).cloned() else {
+            return;
+        };
+        for i in idx {
+            if let Some(mut r) = self.model.row_data(i)
+                && f(&mut r)
+            {
+                self.model.set_row_data(i, r);
+            }
+        }
+    }
+}
+
+/// All the list models the window shows, kept so covers and "playing"
+/// markers can be patched in place.
+#[derive(Default)]
+pub struct Models {
+    pub albums: Rows<AlbumCard>,
+    pub home_played: Rows<AlbumCard>,
+    pub home_added: Rows<AlbumCard>,
+    pub home_top: Rows<AlbumCard>,
+    pub al_more: Rows<AlbumCard>,
+    pub ar_own: Rows<AlbumCard>,
+    pub ar_appears: Rows<AlbumCard>,
+    pub ge_albums: Rows<AlbumCard>,
+    pub fav_albums: Rows<AlbumCard>,
+    pub s_albums: Rows<AlbumCard>,
+    pub artists: Rows<ArtistCard>,
+    pub s_artists: Rows<ArtistCard>,
+    pub tracks: Rows<TrackRow>,
+    pub home_tracks: Rows<TrackRow>,
+    pub al_tracks: Rows<TrackRow>,
+    pub ar_top: Rows<TrackRow>,
+    pub fav_tracks: Rows<TrackRow>,
+    pub pl_tracks: Rows<TrackRow>,
+    pub s_tracks: Rows<TrackRow>,
+    pub queue: Rows<crate::QueueRow>,
+}
+
+impl Models {
+    fn album_models(&self) -> [&Rows<AlbumCard>; 10] {
         [
             &self.albums,
             &self.home_played,
@@ -98,7 +203,7 @@ impl Models {
         ]
     }
 
-    pub fn track_models(&self) -> [&Rc<VecModel<TrackRow>>; 7] {
+    pub fn track_models(&self) -> [&Rows<TrackRow>; 7] {
         [
             &self.tracks,
             &self.home_tracks,
@@ -111,7 +216,7 @@ impl Models {
     }
 
     /// The model behind a track list name used in callbacks.
-    pub fn track_model(&self, list: &str) -> Option<&Rc<VecModel<TrackRow>>> {
+    pub fn track_model(&self, list: &str) -> Option<&Rows<TrackRow>> {
         Some(match list {
             "tracks" => &self.tracks,
             "home-tracks" => &self.home_tracks,
@@ -140,8 +245,13 @@ pub struct State {
     pub queue_rev: u64,
     pub now_key: Option<String>,
     pub now_path: Option<String>,
-    pub covers_dirty: bool,
+    /// Covers decoded since the last refill: (key, size).
+    pub arrived: Vec<(String, u32)>,
+    /// Track path currently marked as playing in the lists.
+    pub marked_playing: Option<String>,
     pub search_serial: u64,
+    /// Bumped on every Tracks page load, to drop stale background chunks.
+    pub tracks_serial: u64,
     /// Raw colour picked from the playing cover (made readable per theme).
     pub cover_rgb: Option<[u8; 3]>,
 }
@@ -152,7 +262,6 @@ pub struct Ui {
     pub st: RefCell<State>,
     pub models: Models,
     pub loader: RefCell<Loader>,
-    pub queue_model: Rc<VecModel<crate::QueueRow>>,
     pub timers: RefCell<Vec<slint::Timer>>,
     pub extras: RefCell<crate::extras::Extras>,
     pub player: RefCell<crate::player::PlayerView>,
@@ -206,56 +315,34 @@ impl Ui {
         }
     }
 
-    /// Patch freshly decoded covers into every model (debounced).
+    /// Patch freshly decoded covers into the rows waiting for them
+    /// (debounced: covers arrive in bursts).
     pub fn refill_covers(&self) {
-        if !std::mem::take(&mut self.st.borrow_mut().covers_dirty) {
+        let arrived = std::mem::take(&mut self.st.borrow_mut().arrived);
+        if arrived.is_empty() {
             return;
         }
         let started = std::time::Instant::now();
         let loader = self.loader.borrow();
-        for m in self.models.album_models() {
-            for i in 0..m.row_count() {
-                let mut r = m.row_data(i).unwrap();
-                if r.cover.size().width == 0
-                    && let Some(img) = loader.peek(&r.ckey, TILE)
-                {
-                    r.cover = img;
-                    m.set_row_data(i, r);
+        for (key, size) in &arrived {
+            let Some(img) = loader.peek(key, *size) else {
+                continue;
+            };
+            match *size {
+                TILE => {
+                    for m in self.models.album_models() {
+                        m.patch_cover(key, &img);
+                    }
+                    self.models.artists.patch_cover(key, &img);
+                    self.models.s_artists.patch_cover(key, &img);
                 }
-            }
-        }
-        for m in [&self.models.artists, &self.models.s_artists] {
-            for i in 0..m.row_count() {
-                let mut r = m.row_data(i).unwrap();
-                if r.cover.size().width == 0
-                    && let Some(img) = loader.peek(&r.ckey, TILE)
-                {
-                    r.cover = img;
-                    m.set_row_data(i, r);
+                THUMB => {
+                    for m in self.models.track_models() {
+                        m.patch_cover(key, &img);
+                    }
+                    self.models.queue.patch_cover(key, &img);
                 }
-            }
-        }
-        for m in self.models.track_models() {
-            for i in 0..m.row_count() {
-                let mut r = m.row_data(i).unwrap();
-                if !r.ckey.is_empty()
-                    && r.cover.size().width == 0
-                    && let Some(img) = loader.peek(&r.ckey, THUMB)
-                {
-                    r.cover = img;
-                    m.set_row_data(i, r);
-                }
-            }
-        }
-        let q = &self.queue_model;
-        for i in 0..q.row_count() {
-            let mut r = q.row_data(i).unwrap();
-            if !r.ckey.is_empty()
-                && r.cover.size().width == 0
-                && let Some(img) = loader.peek(&r.ckey, THUMB)
-            {
-                r.cover = img;
-                q.set_row_data(i, r);
+                _ => {}
             }
         }
         drop(loader);
@@ -361,8 +448,8 @@ pub fn sync_tray(ui: &Ui) {
     });
 }
 
-pub fn model<T: Clone + 'static>(m: &Rc<VecModel<T>>) -> ModelRc<T> {
-    ModelRc::from(m.clone())
+pub fn model<T: Row>(m: &Rows<T>) -> ModelRc<T> {
+    ModelRc::from(m.model.clone())
 }
 
 pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -397,8 +484,13 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         ctx.covers.clone(),
         Box::new(|id, buf| {
             post(move |ui| {
+                let key = crate::images::split_cache_id(&id);
+                if buf.is_some()
+                    && let Some(k) = key
+                {
+                    ui.st.borrow_mut().arrived.push(k);
+                }
                 ui.loader.borrow_mut().arrived(id, buf);
-                ui.st.borrow_mut().covers_dirty = true;
             })
         }),
     );
@@ -408,9 +500,8 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         window: window.clone_strong(),
         ctx: ctx.clone(),
         st: RefCell::new(State::default()),
-        models: Models::new(),
+        models: Models::default(),
         loader: RefCell::new(loader),
-        queue_model: Rc::new(VecModel::default()),
         timers: RefCell::new(Vec::new()),
         extras: RefCell::new(crate::extras::Extras::default()),
         player: RefCell::new(crate::player::PlayerView::default()),
@@ -497,7 +588,7 @@ fn bind_models(ui: &Rc<Ui>) {
     app.set_artists(model(&m.artists));
     app.set_tracks(model(&m.tracks));
     app.set_pl_tracks(model(&m.pl_tracks));
-    app.set_queue(model(&ui.queue_model));
+    app.set_queue(model(&m.queue));
     app.set_version(env!("CARGO_PKG_VERSION").into());
     app.set_greeting(crate::text::greeting().into());
 }
@@ -559,6 +650,8 @@ pub struct RowOpts {
     pub discs: bool,
     /// Hide the artist when it equals the album artist.
     pub album_artist: Option<String>,
+    /// Position of the first row in the list (chunked lists).
+    pub start: usize,
 }
 
 pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
@@ -604,7 +697,7 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
                 n: if o.track_numbers {
                     t.track.map(|n| n.to_string()).unwrap_or_default()
                 } else {
-                    (i + 1).to_string()
+                    (o.start + i + 1).to_string()
                 }
                 .into(),
                 title: t.title.clone().into(),
@@ -634,8 +727,8 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
         .collect()
 }
 
-pub fn set_rows<T: Clone + 'static>(m: &Rc<VecModel<T>>, rows: Vec<T>) {
-    m.set_vec(rows);
+pub fn set_rows<T: Row>(m: &Rows<T>, rows: Vec<T>) {
+    m.set(rows);
 }
 
 pub fn unknown_artist() -> &'static str {

@@ -1,4 +1,4 @@
-import { ScrollView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, QueueRow, MenuEntry, Page } from "state.slint";
@@ -85,49 +85,54 @@ component QueueLine inherits Rectangle {
 export component QueueList inherits Rectangle {
     in property <bool> compact;
     private property <int> first-upcoming: App.queue-current + 1;
+    private property <int> last-index: App.queue.length > 0 ? App.queue[App.queue.length - 1].index : 0;
+    // Upcoming rows are virtualized; report the ones on screen for covers.
+    private property <int> first: max(0, floor(-lv.content-y / 58px));
+    private property <string> window-key: first + ":" + lv.height / 1px + ":" + App.queue.length;
+    changed window-key => {
+        App.visible("queue", first, min(App.queue.length, first + ceil(lv.height / 58px) + 2));
+    }
     VerticalLayout {
-        spacing: 8px;
-        if App.queue.length == 0: VerticalLayout {
-            alignment: center;
-            spacing: 8px;
-            padding: 32px;
-            vertical-stretch: 1;
-            HorizontalLayout { alignment: center; Icon { source: Icons.list-music; size: 36px; tint: Theme.text3; } }
-            Text { text: @tr("The queue is empty"); font-size: Theme.fs-lg; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
-            Text { text: @tr("Play an album or add tracks with “Add to queue”."); font-size: Theme.fs-sm; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
+        spacing: 2px;
+        if App.queue-has-now: Text {
+            text: @tr("Now playing");
+            font-size: Theme.fs-xs;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            color: Theme.text3;
+            height: 28px;
+            vertical-alignment: center;
         }
-        if App.queue.length > 0: ScrollView {
+        if App.queue-has-now: QueueLine {
+            item: App.queue-now;
+            index: App.queue-current;
+            drop-at(from, to) => { App.queue-move(from, max(first-upcoming, min(last-index, to))); }
+        }
+        if App.queue.length > 0: Text {
+            text: @tr("Next up") + " · " + App.queue-meta;
+            font-size: Theme.fs-xs;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            color: Theme.text3;
+            height: 36px;
+            vertical-alignment: bottom;
+        }
+        lv := ListView {
             vertical-stretch: 1;
-            VerticalLayout {
-                spacing: 2px;
-                alignment: start;
-                if App.queue-current >= 0: Text {
-                    text: @tr("Now playing");
-                    font-size: Theme.fs-xs;
-                    font-weight: 700;
-                    letter-spacing: 0.6px;
-                    color: Theme.text3;
-                    height: 28px;
-                    vertical-alignment: center;
-                }
-                for q[i] in App.queue: VerticalLayout {
-                    if i == first-upcoming: Text {
-                        text: @tr("Next up") + " · " + App.queue-meta;
-                        font-size: Theme.fs-xs;
-                        font-weight: 700;
-                        letter-spacing: 0.6px;
-                        color: Theme.text3;
-                        height: 36px;
-                        vertical-alignment: bottom;
-                    }
-                    if !q.past: QueueLine {
-                        item: q;
-                        index: i;
-                        drop-at(from, to) => { App.queue-move(from, max(first-upcoming, min(App.queue.length - 1, to))); }
-                    }
-                }
+            for q in App.queue: QueueLine {
+                item: q;
+                index: q.index;
+                drop-at(from, to) => { App.queue-move(from, max(first-upcoming, min(last-index, to))); }
             }
         }
+    }
+    if App.queue.length == 0 && !App.queue-has-now: VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+        padding: 32px;
+        HorizontalLayout { alignment: center; Icon { source: Icons.list-music; size: 36px; tint: Theme.text3; } }
+        Text { text: @tr("The queue is empty"); font-size: Theme.fs-lg; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
+        Text { text: @tr("Play an album or add tracks with “Add to queue”."); font-size: Theme.fs-sm; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
     }
 }
 
@@ -142,7 +147,7 @@ export component QueuePanel inherits Rectangle {
         HorizontalLayout {
             spacing: 6px;
             Text { text: @tr("Queue"); font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
-            if App.queue.length > 1: Button {
+            if App.queue.length > 0: Button {
                 text: @tr("Clear");
                 clicked => { App.queue-clear(); }
             }
