@@ -491,6 +491,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     // Wayland app-id / X11 class matching ricercar.desktop (icon, grouping);
     // needs the backend (created above) and must precede `show()`.
     let _ = slint::set_xdg_app_id("ricercar");
+    smooth_touchpad(&window);
 
     let loader = Loader::new(
         ctx.covers.clone(),
@@ -893,3 +894,34 @@ pub fn save_state(ui: &Ui) {
     }
 }
 
+/// Touchpads send many small scroll events. Slint animates each one and
+/// adds what is left of the previous animation, so a touchpad swipe runs
+/// away; hand those to Slint as plain scroll events instead (applied as
+/// they come, no animation). Mouse wheels keep the smooth scroll.
+fn smooth_touchpad(window: &MainWindow) {
+    use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+    let cursor = std::cell::Cell::new(slint::LogicalPosition::default());
+    window
+        .window()
+        .on_winit_window_event(move |w, event| match event {
+            winit::event::WindowEvent::CursorMoved { position, .. } => {
+                let p: winit::dpi::LogicalPosition<f32> =
+                    position.to_logical(w.scale_factor() as f64);
+                cursor.set(slint::LogicalPosition::new(p.x, p.y));
+                EventResult::Propagate
+            }
+            winit::event::WindowEvent::MouseWheel {
+                delta: winit::event::MouseScrollDelta::PixelDelta(d),
+                ..
+            } => {
+                let d: winit::dpi::LogicalPosition<f32> = d.to_logical(w.scale_factor() as f64);
+                w.dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                    position: cursor.get(),
+                    delta_x: d.x,
+                    delta_y: d.y,
+                });
+                EventResult::PreventDefault
+            }
+            _ => EventResult::Propagate,
+        });
+}
