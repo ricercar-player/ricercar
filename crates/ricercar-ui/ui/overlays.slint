@@ -320,6 +320,11 @@ export component NowPlayingView inherits Rectangle {
                 drop-shadow-blur: 40px;
                 drop-shadow-offset-y: 18px;
                 drop-shadow-color: #000000b3;
+                // Clicking the large cover closes the view, like the small one.
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { App.now-playing-open = false; }
+                }
             }
             Text {
                 text: App.title;

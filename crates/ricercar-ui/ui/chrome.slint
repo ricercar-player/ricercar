@@ -346,17 +346,18 @@ export component PlayerBar inherits Rectangle {
                 radius: 6px;
                 source: App.cover;
                 placeholder: App.live ? Icons.radio : Icons.music;
+                // Opens the now-playing view, and closes it again.
                 TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { App.now-playing-open = true; }
+                    clicked => { App.now-playing-open = !App.now-playing-open; }
                 }
                 if App.has-track: Rectangle {
                     background: cta.has-hover ? #00000080 : transparent;
                     cta := TouchArea {
                         mouse-cursor: pointer;
-                        clicked => { App.now-playing-open = true; }
+                        clicked => { App.now-playing-open = !App.now-playing-open; }
                     }
-                    if cta.has-hover: Icon { source: Icons.maximize-2; size: 18px; tint: #ffffff; }
+                    if cta.has-hover: Icon { source: App.now-playing-open ? Icons.minimize-2 : Icons.maximize-2; size: 18px; tint: #ffffff; }
                 }
             }
             VerticalLayout {
