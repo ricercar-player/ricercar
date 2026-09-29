@@ -114,6 +114,10 @@ pub fn report(ui: &Ui) -> String {
             body: ui.ctx.network_report(),
         },
         Section {
+            title: "Plugins",
+            body: ui.ctx.plugins_report(),
+        },
+        Section {
             title: "Settings (secrets hidden)",
             body: format!("```toml\n{}```", diag::masked_config(&cfg)),
         },

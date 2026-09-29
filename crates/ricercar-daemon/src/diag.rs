@@ -45,6 +45,32 @@ pub fn kernel() -> String {
 }
 
 impl AppContext {
+    /// One line per declared plugin: state, version, sign-in.
+    pub fn plugins_report(&self) -> String {
+        use ricercar_core::plugin::RunState;
+        let list = self.plugins.statuses();
+        if list.is_empty() {
+            return "None declared".into();
+        }
+        list.iter()
+            .map(|s| {
+                let state = match &s.state {
+                    RunState::Disabled => "disabled".to_string(),
+                    RunState::Starting => "starting".into(),
+                    RunState::Running => "running".into(),
+                    RunState::Restarting { in_secs } => format!("restarting in {in_secs} s"),
+                    RunState::Failed(m) => format!("failed: {m}"),
+                };
+                let auth = match &s.auth {
+                    Some(a) => format!(" · {:?}", a.state),
+                    None => String::new(),
+                };
+                format!("- {} ({} {}) · {state}{auth}", s.id, s.name, s.version)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Services, port and interfaces, one fact per line.
     pub fn network_report(&self) -> String {
         let cfg = self.config.read().unwrap().network.clone();

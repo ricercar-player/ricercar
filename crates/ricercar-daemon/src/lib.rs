@@ -157,6 +157,8 @@ pub struct AppContext {
     pub config: Arc<RwLock<Config>>,
     pub config_path: PathBuf,
     pub quit: Arc<AtomicBool>,
+    /// Source plugins declared in the config (docs/plugins.md).
+    pub plugins: ricercar_core::plugin::PluginHost,
     network: Arc<Network>,
     watcher: Arc<RwLock<Option<WatcherHandle>>>,
     _mpris: Option<zbus::blocking::Connection>,
@@ -279,6 +281,15 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     let covers = Arc::new(CoverCache::new(CoverCache::default_dir()));
 
     let ctl = Arc::new(Controller::new(lib.clone(), &cfg.audio.device));
+    let plugins = ricercar_core::plugin::PluginHost::new(
+        env!("CARGO_PKG_VERSION"),
+        config::data_dir(),
+        config::cache_dir(),
+    );
+    ctl.set_resolver(Arc::new(plugins.clone()));
+    plugins.attach(&ctl);
+    plugins.set_output(output_info(&cfg.audio.device, None));
+    plugins.reconcile(&cfg.plugins);
     if !args.no_session {
         ctl.enable_session(
             config::data_dir().join("session.json"),
@@ -327,6 +338,12 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
 
     let config = Arc::new(RwLock::new(cfg));
     scrobble::spawn(ctl.clone(), config.clone());
+    watch_plugin_tables(
+        config_path.clone(),
+        config.clone(),
+        plugins.clone(),
+        quit.clone(),
+    );
 
     if !args.open.is_empty() {
         let infos = args
@@ -338,6 +355,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     }
 
     Ok(AppContext {
+        plugins,
         network,
         ctl,
         lib,
@@ -348,6 +366,64 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         watcher,
         _mpris: mpris,
     })
+}
+
+/// What plugins are told about the output. `caps`: accepted rates and
+/// deepest content bits, when the device was probed.
+pub fn output_info(
+    device: &str,
+    caps: Option<(Vec<u32>, Option<u8>)>,
+) -> ricercar_core::plugin::OutputInfo {
+    let kind = ricercar_audio::device::classify(device);
+    let (rates, max_bits) = caps.unwrap_or_default();
+    ricercar_core::plugin::OutputInfo {
+        device: device.to_string(),
+        bit_perfect: kind == ricercar_audio::DeviceKind::Hardware,
+        max_rate: rates.iter().copied().max(),
+        max_bits,
+        rates,
+    }
+}
+
+/// `[[plugins]]` edited in config.toml by hand applies without a restart:
+/// only that section is taken from the file (the rest is ours to save).
+fn watch_plugin_tables(
+    path: PathBuf,
+    config: Arc<RwLock<Config>>,
+    host: ricercar_core::plugin::PluginHost,
+    quit: Arc<AtomicBool>,
+) {
+    let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let _ = std::thread::Builder::new()
+        .name("ricercar-config-watch".into())
+        .spawn(move || {
+            let mut seen = mtime(&path);
+            while !quit.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let now = mtime(&path);
+                if now == seen {
+                    continue;
+                }
+                seen = now;
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                // A half-written or broken file changes nothing.
+                let Ok(file) = toml::from_str::<Config>(&text) else {
+                    continue;
+                };
+                let changed = {
+                    let mut c = config.write().unwrap();
+                    let changed = c.plugins != file.plugins;
+                    c.plugins = file.plugins.clone();
+                    changed
+                };
+                if changed {
+                    tracing::info!("plugins changed in {}", path.display());
+                    host.reconcile(&file.plugins);
+                }
+            }
+        });
 }
 
 /// Incremental scan of the configured roots off the calling thread, then
@@ -391,17 +467,25 @@ fn rescan_in_background(
 impl AppContext {
     /// Persist the config and apply library changes (roots/watch).
     pub fn update_config(&self, f: impl FnOnce(&mut Config)) {
-        let (old_roots, old_network, cfg) = {
+        let (old_roots, old_network, old_plugins, cfg) = {
             let mut c = self.config.write().unwrap();
-            let (roots, network) = (c.library.clone(), c.network.clone());
+            let (roots, network, plugins) =
+                (c.library.clone(), c.network.clone(), c.plugins.clone());
             f(&mut c);
-            (roots, network, c.clone())
+            (roots, network, plugins, c.clone())
         };
         if let Err(e) = cfg.save(&self.config_path) {
             tracing::warn!("save config: {e}");
         }
         if cfg.audio.device != self.ctl.device_name() {
             self.ctl.set_device(&cfg.audio.device);
+            self.plugins
+                .set_output(output_info(&cfg.audio.device, None));
+        }
+        if old_plugins != cfg.plugins {
+            // Stopping a plugin can take its 2 s grace: not on the caller.
+            let (host, list) = (self.plugins.clone(), cfg.plugins.clone());
+            std::thread::spawn(move || host.reconcile(&list));
         }
         if old_roots != cfg.library {
             self.lib.retain_roots(&cfg.library.roots);
@@ -463,6 +547,7 @@ impl AppContext {
         if let Some(mut h) = self.network.handle.write().unwrap().take() {
             h.stop();
         }
+        self.plugins.shutdown();
         self.ctl.shutdown();
         tracing::info!("bye");
     }
@@ -510,5 +595,40 @@ mod tests {
         net.apply(&ctl, &cfg);
         assert_eq!(*net.status.read().unwrap(), NetworkStatus::Off);
         assert!(net.handle.read().unwrap().is_none());
+    }
+
+    #[test]
+    fn output_info_for_plugins() {
+        let o = output_info("hw:1,0", Some((vec![44_100, 96_000, 192_000], Some(24))));
+        assert!(o.bit_perfect);
+        assert_eq!((o.max_rate, o.max_bits), (Some(192_000), Some(24)));
+        let o = output_info("default", None);
+        assert!(!o.bit_perfect && o.rates.is_empty() && o.max_rate.is_none());
+    }
+
+    #[test]
+    fn plugin_tables_edited_by_hand_apply_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[audio]\ndevice = \"null\"\n").unwrap();
+        let config = Arc::new(RwLock::new(Config::load(&path)));
+        let host =
+            ricercar_core::plugin::PluginHost::new("t", dir.path().join("d"), dir.path().join("c"));
+        let quit = Arc::new(AtomicBool::new(false));
+        watch_plugin_tables(path.clone(), config.clone(), host.clone(), quit.clone());
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(
+            &path,
+            "[audio]\ndevice = \"null\"\n\n[[plugins]]\nid = \"hand\"\ncommand = \"/nonexistent/plugin\"\nenabled = false\n",
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while host.statuses().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        quit.store(true, Ordering::SeqCst);
+        assert_eq!(host.statuses()[0].id, "hand");
+        assert_eq!(config.read().unwrap().plugins.len(), 1);
+        host.shutdown();
     }
 }
