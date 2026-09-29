@@ -141,10 +141,16 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
   reference plugin used by `crates/ricercar-core/tests/plugins.rs`. It serves
   generated FLAC files from 127.0.0.1 (sign-in code: `DEMO`) and has options
   to exercise the error paths (see the top of its `main.rs`).
-- `RICERCAR_SNAPSHOT_TOUR=plugins` declares it (it must sit next to the
-  `ricercar` binary) and captures the sign-in dialog, the browse pages, a
-  playing plugin track and the plugin search tab. Headless tours never open
-  a browser.
+- `RICERCAR_SNAPSHOT_TOUR=plugins` installs it through the Plugins page
+  from a local catalogue (it must sit next to the `ricercar` binary), then
+  captures the catalogue, the install dialog, the sign-in dialog, the browse
+  pages, a playing plugin track and the plugin search tab. Headless tours
+  never open a browser. Pass `--library` so the tour does not index the
+  default music folder.
+- `RICERCAR_PLUGIN_INDEX=<url or file>` replaces the hub's index (local
+  files may then use `file://` assets). The hub itself is
+  [ricercar-player/ricercar-plugins](https://github.com/ricercar-player/ricercar-plugins);
+  `plugin::catalog` reads it and installs from it.
 - Declare it by hand to try the UI:
 
   ```toml

@@ -20,8 +20,10 @@
   it, and the signal path keeps showing each hop.
 - **Isolation.** A plugin is a separate process, written in any language. It
   can crash, hang or be slow without taking the player down.
-- **Explicit user choice.** ricercar never downloads, suggests or bundles
-  plugins. The user installs an executable and declares it in the config.
+- **Explicit user choice.** ricercar bundles no plugin and never installs or
+  runs one on its own. The user either declares an executable in the config,
+  or installs one from the [community hub](#community-hub) on the Plugins
+  page, one explicit confirmation per plugin.
 
 ### Non-goals (v1)
 
@@ -48,6 +50,47 @@ A queue item from a plugin carries a **plugin URI**,
 `plugin://<plugin-id>/<ref>`. Just before the engine needs the item, the host
 asks the plugin to *resolve* it into a playable URL.
 
+## Community hub
+
+[github.com/ricercar-player/ricercar-plugins](https://github.com/ricercar-player/ricercar-plugins)
+is an index of third-party plugins, open to anyone through a pull request.
+It hosts no plugin code: each entry points at its author's repository and at
+prebuilt binaries the author publishes, with their SHA-256 pinned in the
+entry. Listing is not a review or an endorsement.
+
+The hub's CI turns the entries into `index.json`, which the app reads only
+when the Plugins page opens (and never when Settings → Online extras →
+Plugin catalogue is off):
+
+```jsonc
+{"version": 1, "plugins": [{
+  "id": "example", "name": "Example Music",
+  "description": "…", "author": "someone", "license": "MIT",
+  "repository": "https://github.com/someone/ricercar-example",
+  "version": "1.2.0", "protocol": 1,
+  "capabilities": ["auth", "browse", "search", "resolve"],
+  "args": [],
+  "assets": [
+    {"arch": "x86_64", "url": "https://github.com/someone/…/example-x86_64", "sha256": "…"},
+    {"arch": "aarch64", "url": "https://github.com/someone/…/example-aarch64", "sha256": "…"}
+  ]
+}]}
+```
+
+- Entries with a bad id, a non-`https` repository or asset, or a malformed
+  digest are ignored. An entry without an asset for this computer (or for
+  another protocol version) is shown but cannot be installed.
+- **Install** asks for confirmation (what, by whom, from which host, and
+  what is and is not checked), downloads the binary for this architecture
+  (256 MB at most), checks its SHA-256, puts it in
+  `$XDG_DATA_HOME/ricercar/plugin-bin/<id>/<version>/<id>` and adds a
+  `[[plugins]]` table with `version` set. **Update** does the same with the
+  newer version and removes the old one. **Remove** deletes the table and,
+  for hub installs only, the binaries; the plugin's data directory stays.
+- `RICERCAR_PLUGIN_INDEX` points the app at another index (a URL or a local
+  file, whose assets may then be `file://`), for tests and the screenshot
+  tour.
+
 ## Declaring a plugin
 
 Plugins are declared in `config.toml`, one table per plugin:
@@ -58,6 +101,7 @@ id = "example"                 # [a-z0-9-]+, unique; used in plugin:// URIs
 command = "/usr/local/bin/example-plugin"
 args = ["--serve"]
 enabled = true
+# version = "1.2.0"            # set by installs from the hub only
 ```
 
 - The host passes nothing secret on the command line and does not expand

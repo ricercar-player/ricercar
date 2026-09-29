@@ -108,8 +108,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - **UPnP MediaServer**: browse your library from any DLNA app
 - **MPRIS**: media keys, desktop widgets, `playerctl`
 - **Scrobbling** to ListenBrainz & Last.fm (offline queue)
-- **Source plugins**: catalogues from programs you install and declare
-  (browse, search, sign-in in your browser); playback stays bit-perfect
+- **Source plugins**: catalogues from third-party programs, installed from
+  the [community hub](https://github.com/ricercar-player/ricercar-plugins) or
+  declared by hand (browse, search, sign-in in your browser); playback stays
+  bit-perfect
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
 </td>
@@ -369,6 +371,7 @@ running hands the file to the running instance.
 | `~/.local/share/ricercar/ui-state.json` | window size, last page, sorts, DAC capabilities |
 | `~/.local/state/ricercar/ricercar.log` | log (3 × 2 MB, rotated) |
 | `~/.local/share/ricercar/plugins/<id>/` | a plugin's own data (ricercar never reads it) |
+| `~/.local/share/ricercar/plugin-bin/<id>/` | plugins installed from the hub |
 | `~/.cache/ricercar/` | cover thumbnails, lyrics, stream spool |
 </details>
 
@@ -382,6 +385,8 @@ ricercar works fully offline. Its optional online features contact only:
 | MusicBrainz / Cover Art Archive | missing album covers | Settings → Online extras |
 | Radio Browser | the Radio page | opening the page |
 | ListenBrainz / Last.fm | scrobbling | only with your own credentials |
+| GitHub (raw.githubusercontent.com) | community plugin catalogue | opening the Plugins page · Settings → Online extras |
+| a plugin author's download host | the plugin binary | only when you click Install or Update |
 
 No telemetry, no account, and never a streaming-service API in ricercar
 itself. Plugins you declare are separate programs: what they contact is up
@@ -447,10 +452,11 @@ UPnP or OpenHome, the way it would to a network streamer.
 
 ricercar can also run **source plugins**: separate programs, written by
 third parties and installed by you, that bring a catalogue and hand ricercar
-playable URLs ([docs/plugins.md](docs/plugins.md)). The project does not
-ship, list or promote any plugin, and a plugin runs with your permissions:
-install only plugins you trust, and check that they respect the service's
-terms.
+playable URLs ([docs/plugins.md](docs/plugins.md)). The
+[community hub](https://github.com/ricercar-player/ricercar-plugins) lists them with
+links to their authors; it hosts no plugin code and reviews none. A plugin
+runs with your permissions: install only plugins you trust, and check that
+they respect the terms of the service they use.
 </details>
 
 <details>
