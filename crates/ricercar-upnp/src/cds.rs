@@ -288,8 +288,7 @@ impl Renderer {
             Node::Top(_) => return None,
             Node::Artist(name) => albums(id_of(&["artists", name]), lib.artist_albums(name).0),
             Node::Genre(g) => albums(id_of(&["genres", g]), lib.genre_albums(g)),
-            Node::Playlist(pid) => lib
-                .playlist_tracks(*pid)
+            Node::Playlist(pid) => local_playlist_tracks(lib, *pid)
                 .into_iter()
                 .enumerate()
                 .map(|(pos, track)| Entry::PlaylistItem {
@@ -351,7 +350,7 @@ impl Renderer {
             Node::PlaylistItem { pid, pos } => Entry::PlaylistItem {
                 pid: *pid,
                 pos: *pos,
-                track: lib.playlist_tracks(*pid).into_iter().nth(*pos)?,
+                track: local_playlist_tracks(lib, *pid).into_iter().nth(*pos)?,
             },
         })
     }
@@ -705,6 +704,14 @@ fn parse_criteria(s: &str) -> Option<Expr> {
     };
     let e = p.or()?;
     (p.pos == p.toks.len()).then_some(e)
+}
+
+/// The library only: plugin entries of a playlist are not served.
+fn local_playlist_tracks(lib: &ricercar_core::Library, pid: i64) -> Vec<ricercar_core::Track> {
+    lib.playlist_tracks(pid)
+        .into_iter()
+        .filter(|t| !t.is_plugin())
+        .collect()
 }
 
 #[cfg(test)]

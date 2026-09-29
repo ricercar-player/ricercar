@@ -52,9 +52,40 @@ pub struct Track {
     pub mb_album_id: Option<String>,
     pub favorite: bool,
     pub play_count: u32,
+    /// Cover image URL (plugin tracks in playlists; library tracks use
+    /// their file).
+    #[serde(default)]
+    pub art: Option<String>,
 }
 
 impl Track {
+    /// A `plugin://` entry of a playlist rather than a library file.
+    pub fn is_plugin(&self) -> bool {
+        crate::plugin::is_plugin_uri(&self.path)
+    }
+
+    /// Playlist entry of a plugin track, from its saved metadata.
+    pub fn from_info(info: &crate::controller::TrackInfo) -> Track {
+        Track {
+            path: info.uri.clone(),
+            uri: info.uri.clone(),
+            title: info.title.clone(),
+            artist: info.artist.clone(),
+            album_artist: info.album_artist.clone(),
+            album: info.album.clone(),
+            album_id: String::new(),
+            track: info.track_no,
+            year: info.year,
+            genre: info.genre.clone(),
+            duration_ms: info.duration_ms,
+            sample_rate: info.sample_rate,
+            bits: info.bits,
+            codec: info.codec.clone(),
+            art: info.cover.clone(),
+            ..Default::default()
+        }
+    }
+
     pub fn is_hires(&self) -> bool {
         is_hires(self.sample_rate, self.bits)
     }
@@ -275,6 +306,13 @@ fn schema(conn: &Connection) -> rusqlite::Result<()> {
             PRIMARY KEY (playlist_id, pos)
          );",
     )?;
+    // Metadata of plugin:// playlist entries (no row in `tracks`).
+    let has_info: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('playlist_items') WHERE name = 'info'")?
+        .exists([])?;
+    if !has_info {
+        conn.execute_batch("ALTER TABLE playlist_items ADD COLUMN info TEXT")?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
@@ -341,6 +379,7 @@ fn row_to_track(r: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
         mb_album_id: r.get(21)?,
         favorite: r.get::<_, i64>(22)? != 0,
         play_count: r.get(23)?,
+        art: None,
     })
 }
 
@@ -389,8 +428,10 @@ fn row_to_album(r: &rusqlite::Row<'_>) -> rusqlite::Result<Album> {
     })
 }
 
-const PLAYLIST_SELECT: &str =
-    "SELECT p.id, p.name, COUNT(t.path), COALESCE(SUM(t.duration_ms), 0), p.updated_at,
+const PLAYLIST_SELECT: &str = "SELECT p.id, p.name,
+        SUM(CASE WHEN t.path IS NOT NULL OR i.info IS NOT NULL THEN 1 ELSE 0 END),
+        COALESCE(SUM(COALESCE(t.duration_ms, json_extract(i.info, '$.duration_ms'))), 0),
+        p.updated_at,
         (SELECT i.path FROM playlist_items i WHERE i.playlist_id = p.id ORDER BY i.pos LIMIT 1)
      FROM playlists p
      LEFT JOIN playlist_items i ON i.playlist_id = p.id
@@ -1176,35 +1217,48 @@ impl Library {
         self.touch();
     }
 
+    /// Library tracks and plugin entries of a playlist, in order; files
+    /// that left the library are skipped.
     pub fn playlist_tracks(&self, id: i64) -> Vec<Track> {
-        self.query(
+        let rows: Vec<Option<Track>> = self.query(
             &format!(
-                "SELECT {TRACK_COLS} FROM playlist_items i JOIN tracks t ON t.path = i.path
-                 LEFT JOIN stats s ON s.path = t.path
+                "SELECT {TRACK_COLS}, i.info FROM playlist_items i
+                 LEFT JOIN tracks t ON t.path = i.path
+                 LEFT JOIN stats s ON s.path = i.path
                  WHERE i.playlist_id = ?1 ORDER BY i.pos"
             ),
             [id],
-            row_to_track,
-        )
+            |r| {
+                if r.get::<_, Option<String>>(0)?.is_some() {
+                    return row_to_track(r).map(Some);
+                }
+                let info: Option<String> = r.get(24)?;
+                Ok(info
+                    .and_then(|j| serde_json::from_str::<crate::controller::TrackInfo>(&j).ok())
+                    .filter(|i| crate::plugin::is_plugin_uri(&i.uri))
+                    .map(|i| Track::from_info(&i)))
+            },
+        );
+        rows.into_iter().flatten().collect()
     }
 
-    fn playlist_paths(&self, id: i64) -> Vec<String> {
+    /// (path or plugin URI, saved metadata) of every entry.
+    fn playlist_items(&self, id: i64) -> Vec<(String, Option<String>)> {
         self.query(
-            "SELECT path FROM playlist_items WHERE playlist_id = ?1 ORDER BY pos",
+            "SELECT path, info FROM playlist_items WHERE playlist_id = ?1 ORDER BY pos",
             [id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
     }
 
-    /// Replace the whole item list (simplest correct way to reorder/remove).
-    pub fn set_playlist_paths(&self, id: i64, paths: &[String]) {
+    fn set_playlist_items(&self, id: i64, items: &[(String, Option<String>)]) {
         let mut conn = self.w();
         if let Ok(tx) = conn.transaction() {
             let _ = tx.execute("DELETE FROM playlist_items WHERE playlist_id = ?1", [id]);
-            for (pos, p) in paths.iter().enumerate() {
+            for (pos, (p, info)) in items.iter().enumerate() {
                 let _ = tx.execute(
-                    "INSERT INTO playlist_items (playlist_id, pos, path) VALUES (?1, ?2, ?3)",
-                    params![id, pos as i64, p],
+                    "INSERT INTO playlist_items (playlist_id, pos, path, info) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, pos as i64, p, info],
                 );
             }
             let _ = tx.execute(
@@ -1215,6 +1269,42 @@ impl Library {
         }
         drop(conn);
         self.touch();
+    }
+
+    fn playlist_paths(&self, id: i64) -> Vec<String> {
+        self.playlist_items(id)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect()
+    }
+
+    /// Replace the whole item list (simplest correct way to reorder/remove);
+    /// plugin entries keep their saved metadata.
+    pub fn set_playlist_paths(&self, id: i64, paths: &[String]) {
+        let infos: HashMap<String, String> = self
+            .playlist_items(id)
+            .into_iter()
+            .filter_map(|(p, i)| Some((p, i?)))
+            .collect();
+        let items: Vec<(String, Option<String>)> = paths
+            .iter()
+            .map(|p| (p.clone(), infos.get(p).cloned()))
+            .collect();
+        self.set_playlist_items(id, &items);
+    }
+
+    /// Append queue entries: library files by path, plugin tracks by URI
+    /// with their metadata (shown even when the plugin is gone).
+    pub fn add_infos_to_playlist(&self, id: i64, infos: &[crate::controller::TrackInfo]) {
+        let mut all = self.playlist_items(id);
+        for i in infos {
+            if crate::plugin::is_plugin_uri(&i.uri) {
+                all.push((i.uri.clone(), serde_json::to_string(i).ok()));
+            } else if let Some(p) = &i.path {
+                all.push((p.clone(), None));
+            }
+        }
+        self.set_playlist_items(id, &all);
     }
 
     pub fn add_to_playlist(&self, id: i64, paths: &[String]) {
@@ -1252,7 +1342,12 @@ impl Library {
 
     pub fn export_m3u(&self, id: i64, dest: &Path) -> std::io::Result<()> {
         let mut out = String::from("#EXTM3U\n");
-        for t in self.playlist_tracks(id) {
+        // plugin:// entries mean nothing to other players.
+        for t in self
+            .playlist_tracks(id)
+            .into_iter()
+            .filter(|t| !t.is_plugin())
+        {
             out.push_str(&format!(
                 "#EXTINF:{},{} - {}\n{}\n",
                 t.duration_ms / 1000,
@@ -1520,6 +1615,32 @@ mod tests {
         lib.export_m3u(id, &m3u).unwrap();
         let id2 = lib.import_m3u(&m3u).unwrap();
         assert_eq!(lib.playlist_tracks(id2).len(), 2);
+        // Plugin tracks live in playlists by URI, with their metadata.
+        let plugin = crate::controller::TrackInfo {
+            uri: crate::plugin::plugin_uri("demo", "track/9"),
+            title: "Far".into(),
+            duration_ms: 60_000,
+            cover: Some("https://x/c.jpg".into()),
+            ..Default::default()
+        };
+        let local = crate::controller::TrackInfo::from(&lib.track("/m/a/3.flac").unwrap());
+        lib.add_infos_to_playlist(id2, &[plugin.clone(), local]);
+        let t = lib.playlist_tracks(id2);
+        assert_eq!(t.len(), 4);
+        assert!(t[2].is_plugin() && t[2].title == "Far");
+        assert_eq!(
+            crate::controller::TrackInfo::from(&t[2]).cover,
+            plugin.cover
+        );
+        assert_eq!(crate::controller::TrackInfo::from(&t[2]).path, None);
+        let p = lib.playlist(id2).unwrap();
+        assert_eq!((p.track_count, p.duration_ms), (4, 3 * 180_000 + 60_000));
+        lib.move_in_playlist(id2, 2, 0);
+        assert_eq!(lib.playlist_tracks(id2)[0].title, "Far");
+        lib.export_m3u(id2, &m3u).unwrap();
+        assert!(!std::fs::read_to_string(&m3u).unwrap().contains("plugin://"));
+        lib.remove_from_playlist(id2, &[0]);
+        assert_eq!(lib.playlist_tracks(id2).len(), 3);
         lib.rename_playlist(id2, "Copy");
         lib.delete_playlist(id);
         assert_eq!(lib.playlists().len(), 1);

@@ -49,6 +49,24 @@ pub struct TrackInfo {
 
 impl From<&Track> for TrackInfo {
     fn from(t: &Track) -> Self {
+        if t.is_plugin() {
+            return TrackInfo {
+                uri: t.uri.clone(),
+                title: t.title.clone(),
+                artist: t.artist.clone(),
+                album: t.album.clone(),
+                album_artist: t.album_artist.clone(),
+                duration_ms: t.duration_ms,
+                cover: t.art.clone(),
+                track_no: t.track,
+                year: t.year,
+                genre: t.genre.clone(),
+                sample_rate: t.sample_rate,
+                bits: t.bits,
+                codec: t.codec.clone(),
+                ..Default::default()
+            };
+        }
         TrackInfo {
             uri: t.uri.clone(),
             path: Some(t.path.clone()),
