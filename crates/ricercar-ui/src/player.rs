@@ -29,6 +29,9 @@ pub struct PlayerView {
     last_reload: Option<Instant>,
     was_scanning: bool,
     notif_id: u32,
+    /// What the last notification showed (path or title, live title):
+    /// now-playing refreshes of the same track do not notify again.
+    notified: Option<(String, Option<String>)>,
     events: Option<std::sync::mpsc::Receiver<CtlEvent>>,
 }
 
@@ -864,6 +867,14 @@ fn notify(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
         })
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "ricercar".into());
+    let shown = (
+        info.path.clone().unwrap_or_else(|| info.title.clone()),
+        live_title.map(str::to_string),
+    );
+    if ui.player.borrow().notified.as_ref() == Some(&shown) {
+        return;
+    }
+    ui.player.borrow_mut().notified = Some(shown);
     let replace = ui.player.borrow().notif_id;
     std::thread::spawn(move || {
         let Ok(conn) = zbus::blocking::Connection::session() else {
