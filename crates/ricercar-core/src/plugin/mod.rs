@@ -2,6 +2,7 @@
 //! over stdio that bring catalogues and turn their items into playable URLs.
 //! The host never contains service-specific code or credentials.
 
+pub mod catalog;
 mod host;
 mod rpc;
 

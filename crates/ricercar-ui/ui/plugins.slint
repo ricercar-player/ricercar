@@ -4,7 +4,7 @@
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App } from "state.slint";
-import { Button, TextField } from "widgets.slint";
+import { Button, TextField, Toggle, SectionTitle } from "widgets.slint";
 import { BrowseContent } from "lists.slint";
 import { PageScroll } from "pages.slint";
 
@@ -148,6 +148,179 @@ export component SignInDialog inherits Rectangle {
                     primary: true;
                     enabled: App.signin-input != "" && !App.signin-busy;
                     clicked => { App.signin-complete(App.signin-input); }
+                }
+            }
+        }
+    }
+}
+
+component PanelRow inherits HorizontalLayout {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    spacing: 16px;
+    min-height: 60px;
+}
+
+component Panel inherits Rectangle {
+    border-radius: Theme.r-lg;
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: Theme.line;
+    VerticalLayout {
+        padding: 4px;
+        @children
+    }
+}
+
+component Hairline inherits Rectangle {
+    height: 1px;
+    Rectangle { x: 16px; width: parent.width - 32px; background: Theme.line; }
+}
+
+/// Installed plugins and the community catalogue.
+export component PluginsPage inherits PageScroll {
+    title: @tr("Plugins");
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 12px;
+        Text {
+            text: @tr("Plugins");
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+        }
+        Text {
+            text: @tr("Plugins are programs made by other people. They run with your permissions and ricercar does not review them: install only plugins you trust, and check that they follow the terms of the service they use.");
+            font-size: Theme.fs-md;
+            color: Theme.text2;
+            wrap: word-wrap;
+        }
+
+        SectionTitle { text: @tr("Installed"); }
+        if App.plugin-rows.length == 0: Text {
+            text: @tr("No plugins yet. Install one from the catalogue below, or declare it in config.toml.");
+            font-size: Theme.fs-md;
+            color: Theme.text3;
+            wrap: word-wrap;
+        }
+        if App.plugin-rows.length > 0: Panel {
+            for p[i] in App.plugin-rows: VerticalLayout {
+                if i > 0: Hairline { }
+                PanelRow {
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text { text: p.name; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
+                        Text {
+                            text: p.detail + " · " + p.status;
+                            font-size: Theme.fs-sm;
+                            color: p.state == 2 ? Theme.bad : Theme.text2;
+                            wrap: word-wrap;
+                        }
+                    }
+                    if p.enabled && p.auth && !p.signed-in && p.state == 0: Button {
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("Sign in");
+                        primary: true;
+                        clicked => { App.plugin-sign-in(p.id); }
+                    }
+                    if p.enabled && p.signed-in: Button {
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("Sign out");
+                        clicked => { App.plugin-sign-out(p.id); }
+                    }
+                    if p.update: Button {
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("Update");
+                        icon: Icons.download;
+                        clicked => { App.plugin-update(p.id); }
+                    }
+                    Button {
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("Remove");
+                        danger: true;
+                        clicked => { App.plugin-remove(p.id); }
+                    }
+                    Toggle {
+                        y: (parent.height - self.height) / 2;
+                        checked: p.enabled;
+                        toggled(on) => { App.plugin-toggle(p.id, on); }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-top: 12px;
+            spacing: 12px;
+            SectionTitle { text: @tr("Community catalogue"); horizontal-stretch: 1; }
+            Button { y: (parent.height - self.height) / 2; text: @tr("Open the hub"); clicked => { App.open-hub(); } }
+        }
+        Text {
+            text: @tr("Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256.");
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            wrap: word-wrap;
+        }
+        TextField {
+            icon: Icons.search;
+            placeholder: @tr("Filter plugins");
+            clearable: true;
+            text <=> App.catalog-filter;
+            edited(t) => { App.catalog-filter-edited(t); }
+        }
+        if App.catalog-status != "": Text {
+            text: App.catalog-status;
+            font-size: Theme.fs-md;
+            color: Theme.text3;
+            wrap: word-wrap;
+        }
+        if App.catalog-rows.length > 0: Panel {
+            for c[i] in App.catalog-rows: VerticalLayout {
+                if i > 0: Hairline { }
+                PanelRow {
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        horizontal-stretch: 1;
+                        Text { text: c.name; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
+                        Text { text: c.byline; font-size: Theme.fs-sm; color: Theme.text3; overflow: elide; }
+                        if c.description != "": Text { text: c.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+                        if c.caps != "": Text { text: c.caps; font-size: Theme.fs-xs; color: Theme.text3; }
+                    }
+                    Button {
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("Repository");
+                        clicked => { App.catalog-open-repo(c.id); }
+                    }
+                    if c.state == 0: Button {
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("Install");
+                        icon: Icons.download;
+                        primary: true;
+                        clicked => { App.catalog-install(c.id); }
+                    }
+                    if c.state == 1: Text {
+                        text: @tr("Installed");
+                        font-size: Theme.fs-sm;
+                        color: Theme.text3;
+                        vertical-alignment: center;
+                    }
+                    if c.state == 2: Text {
+                        width: 150px;
+                        text: @tr("No build for this computer");
+                        font-size: Theme.fs-sm;
+                        color: Theme.text3;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
                 }
             }
         }

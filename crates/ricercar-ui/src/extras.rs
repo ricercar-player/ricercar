@@ -360,6 +360,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     );
     app.set_lyrics_online(cfg.online.lyrics);
     app.set_covers_online(cfg.online.cover_art);
+    app.set_plugins_online(cfg.online.plugin_catalog);
     app.set_notifications(cfg.ui.notifications);
     app.set_close_to_tray(cfg.ui.close_to_tray);
     app.set_theme_dark(cfg.ui.theme == ThemeCfg::Dark);
@@ -646,6 +647,7 @@ fn settings_changed(ui: &Rc<Ui>) {
         c.network.media_server = app.get_server_enabled();
         c.online.lyrics = app.get_lyrics_online();
         c.online.cover_art = app.get_covers_online();
+        c.online.plugin_catalog = app.get_plugins_online();
         c.ui.notifications = app.get_notifications();
         c.ui.close_to_tray = app.get_close_to_tray();
         c.ui.theme = if app.get_theme_dark() {

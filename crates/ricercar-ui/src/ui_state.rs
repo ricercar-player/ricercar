@@ -74,7 +74,7 @@ impl UiState {
     }
 }
 
-const PAGES: [(Page, &str); 14] = [
+const PAGES: [(Page, &str); 15] = [
     (Page::Home, "home"),
     (Page::Albums, "albums"),
     (Page::Album, "album"),
@@ -89,6 +89,7 @@ const PAGES: [(Page, &str); 14] = [
     (Page::Search, "search"),
     (Page::Settings, "settings"),
     (Page::Browse, "browse"),
+    (Page::Plugins, "plugins"),
 ];
 
 pub fn page_name(p: Page) -> &'static str {

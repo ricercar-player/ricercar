@@ -4070,6 +4070,7 @@ dependencies = [
  "notify",
  "rayon",
  "ricercar-audio",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

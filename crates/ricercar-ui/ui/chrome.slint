@@ -139,6 +139,12 @@ export component Sidebar inherits Rectangle {
             active: App.page == Page.radio;
             clicked => { App.navigate(Page.radio, ""); }
         }
+        NavItem {
+            icon: Icons.puzzle;
+            text: @tr("Plugins");
+            active: App.page == Page.plugins;
+            clicked => { App.navigate(Page.plugins, ""); }
+        }
         // Sections of each signed-in plugin, under its name.
         for n in App.plugin-nav: VerticalLayout {
             spacing: 2px;

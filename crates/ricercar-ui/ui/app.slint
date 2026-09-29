@@ -7,7 +7,7 @@ import { Sidebar, PlayerBar, ChainPanel } from "chrome.slint";
 import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, GenresPage, GenrePage, FavoritesPage, PlaylistPage, SearchPage } from "pages.slint";
 import { RadioPage, SettingsPage } from "more.slint";
 import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays.slint";
-import { BrowsePage, SignInDialog } from "plugins.slint";
+import { BrowsePage, SignInDialog, PluginsPage } from "plugins.slint";
 
 export { App, Page, Theme, TrackMenu }
 export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, MenuEntry } from "state.slint";
@@ -68,7 +68,7 @@ export component MainWindow inherits Window {
 
     keys := FocusScope {
         key-pressed(e) => {
-            if dialog != 0 || App.signin-open { return reject; }
+            if dialog != 0 || App.signin-open || App.install-open { return reject; }
             if e.text == " " {
                 App.play-pause();
                 return accept;
@@ -155,6 +155,7 @@ export component MainWindow inherits Window {
                     if App.page == Page.radio: RadioPage { }
                     if App.page == Page.settings: SettingsPage { }
                     if App.page == Page.browse: BrowsePage { }
+                    if App.page == Page.plugins: PluginsPage { }
                 }
                 if App.queue-open && !App.now-playing-open: QueuePanel { }
             }
@@ -231,6 +232,14 @@ export component MainWindow inherits Window {
                 keys.focus();
             }
         }
+    }
+
+    if App.install-open: Dialog {
+        title: App.install-title;
+        body: App.install-body;
+        confirm-text: App.install-busy ? @tr("Installing…") : @tr("Install");
+        confirm(v) => { if !App.install-busy { App.install-confirm(); } }
+        cancel => { App.install-cancel(); }
     }
 
     if App.signin-open: SignInDialog {

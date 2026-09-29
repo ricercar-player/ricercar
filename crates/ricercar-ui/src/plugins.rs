@@ -8,14 +8,16 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use ricercar_core::library::Track;
-use ricercar_core::plugin::{AuthState, Item, ItemKind, PluginError, PluginStatus, RunState};
+use ricercar_core::plugin::{
+    AuthState, Item, ItemKind, PluginError, PluginStatus, RunState, catalog,
+};
 use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
 use slint::{Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use crate::app::{RowOpts, TILE, Ui, post, set_rows, track_rows, with_ui};
 use crate::images::Source;
 use crate::text::t;
-use crate::{AlbumCard, Page, PluginNav, PluginRow};
+use crate::{AlbumCard, CatalogRow, Page, PluginNav, PluginRow};
 
 /// Separates the parts of a browse argument / plugin card id.
 const SEP: char = '\u{1f}';
@@ -43,6 +45,13 @@ pub struct PluginsView {
     search_serial: u64,
     /// Item being resolved and since when (loading state after 300 ms).
     resolving: Option<(u64, Instant)>,
+    /// Community catalogue as last read, and the read in flight.
+    catalog: Vec<catalog::Entry>,
+    catalog_serial: u64,
+    /// Entry waiting for the install confirmation.
+    pending_install: Option<catalog::Entry>,
+    /// Index to read instead of the hub's (the headless tour).
+    pub index_override: Option<String>,
 }
 
 pub fn browse_arg(id: &str, reference: &str, title: &str) -> String {
@@ -156,15 +165,16 @@ fn status_text(s: &PluginStatus) -> (String, i32) {
 }
 
 fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
-    let enabled: HashMap<String, bool> = ui
+    let declared: HashMap<String, ricercar_core::config::PluginConfig> = ui
         .ctx
         .config
         .read()
         .unwrap()
         .plugins
         .iter()
-        .map(|p| (p.id.clone(), p.enabled))
+        .map(|p| (p.id.clone(), p.clone()))
         .collect();
+    let pv = ui.plugins.borrow();
     let rows: Vec<PluginRow> = statuses
         .iter()
         .map(|s| {
@@ -180,12 +190,20 @@ fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
                 .into(),
                 status: status.into(),
                 state,
-                enabled: enabled.get(&s.id).copied().unwrap_or(false),
+                enabled: declared.get(&s.id).is_some_and(|d| d.enabled),
                 auth: s.caps.auth,
                 signed_in: s.caps.auth && s.signed_in(),
+                from_hub: declared.get(&s.id).is_some_and(|d| d.version.is_some()),
+                update: declared.get(&s.id).is_some_and(|d| {
+                    pv.catalog
+                        .iter()
+                        .find(|e| e.id == s.id)
+                        .is_some_and(|e| e.installable() && catalog::update_available(d, e))
+                }),
             }
         })
         .collect();
+    drop(pv);
     ui.app().set_plugin_rows(ModelRc::new(VecModel::from(rows)));
 }
 
@@ -720,6 +738,238 @@ pub fn run_search(ui: &Rc<Ui>, q: &str) {
     });
 }
 
+// ------------------------------------------------------------ catalogue
+
+/// Hub index to read, and whether local files are allowed (only for an
+/// index given by the tour or `RICERCAR_PLUGIN_INDEX`).
+fn index_source(ui: &Ui) -> (String, bool) {
+    if let Some(o) = ui.plugins.borrow().index_override.clone() {
+        return (o, true);
+    }
+    match std::env::var("RICERCAR_PLUGIN_INDEX") {
+        Ok(v) if !v.is_empty() => (v, true),
+        _ => (catalog::INDEX_URL.to_string(), false),
+    }
+}
+
+/// The Plugins page: installed plugins, then the community catalogue
+/// (read from the hub only when the page opens, if allowed).
+pub fn load_page(ui: &Rc<Ui>) {
+    ui.plugins.borrow_mut().rev = None;
+    poll(ui);
+    if !ui.ctx.config.read().unwrap().online.plugin_catalog {
+        ui.plugins.borrow_mut().catalog.clear();
+        ui.app().set_catalog_status(
+            t("The community catalogue is off (Settings → Online extras).").into(),
+        );
+        refresh_catalog_rows(ui);
+        return;
+    }
+    let serial = {
+        let mut pv = ui.plugins.borrow_mut();
+        pv.catalog_serial += 1;
+        pv.catalog_serial
+    };
+    ui.app()
+        .set_catalog_status(t("Loading the catalogue…").into());
+    let (url, local) = index_source(ui);
+    std::thread::spawn(move || {
+        let r = catalog::fetch_index(&url, local);
+        post(move |ui| {
+            if ui.plugins.borrow().catalog_serial != serial {
+                return;
+            }
+            match r {
+                Ok(list) => {
+                    ui.app().set_catalog_status(
+                        if list.is_empty() {
+                            t("The catalogue is empty for now.")
+                        } else {
+                            ""
+                        }
+                        .into(),
+                    );
+                    ui.plugins.borrow_mut().catalog = list;
+                }
+                Err(e) => ui.app().set_catalog_status(
+                    format!("{}: {e}", t("Could not read the catalogue")).into(),
+                ),
+            }
+            refresh_catalog_rows(ui);
+            let statuses = host(ui).statuses();
+            refresh_rows(ui, &statuses);
+        });
+    });
+}
+
+fn capability_names(caps: &[String]) -> String {
+    caps.iter()
+        .filter_map(|c| match c.as_str() {
+            "auth" => Some(t("sign-in")),
+            "browse" => Some(t("browse")),
+            "search" => Some(t("search")),
+            "favorites" => Some(t("favourites")),
+            "remote_control" => Some(t("remote control")),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn refresh_catalog_rows(ui: &Ui) {
+    let filter = ui.app().get_catalog_filter().to_lowercase();
+    let installed: Vec<String> = ui
+        .ctx
+        .config
+        .read()
+        .unwrap()
+        .plugins
+        .iter()
+        .map(|p| p.id.clone())
+        .collect();
+    let rows: Vec<CatalogRow> = ui
+        .plugins
+        .borrow()
+        .catalog
+        .iter()
+        .filter(|e| {
+            filter.is_empty()
+                || [&e.name, &e.description, &e.author, &e.id]
+                    .iter()
+                    .any(|f| f.to_lowercase().contains(filter.trim()))
+        })
+        .map(|e| {
+            let mut by = Vec::new();
+            if !e.author.is_empty() {
+                by.push(format!("{} {}", t("by"), e.author));
+            }
+            if !e.license.is_empty() {
+                by.push(e.license.clone());
+            }
+            if !e.version.is_empty() {
+                by.push(e.version.clone());
+            }
+            CatalogRow {
+                id: e.id.clone().into(),
+                name: e.name.chars().take(80).collect::<String>().into(),
+                byline: by.join(" · ").into(),
+                description: e.description.chars().take(400).collect::<String>().into(),
+                caps: capability_names(&e.capabilities).into(),
+                state: if installed.contains(&e.id) {
+                    1
+                } else if e.installable() {
+                    0
+                } else {
+                    2
+                },
+            }
+        })
+        .collect();
+    ui.app()
+        .set_catalog_rows(ModelRc::new(VecModel::from(rows)));
+}
+
+fn entry(ui: &Ui, id: &str) -> Option<catalog::Entry> {
+    ui.plugins
+        .borrow()
+        .catalog
+        .iter()
+        .find(|e| e.id == id)
+        .cloned()
+}
+
+/// Ask before downloading and running anything.
+pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
+    let Some(e) = entry(ui, id) else { return };
+    let Some(asset) = e.asset_for(catalog::current_arch()) else {
+        return;
+    };
+    let host_name = asset
+        .url
+        .split("://")
+        .nth(1)
+        .and_then(|r| r.split('/').next())
+        .filter(|h| !h.is_empty())
+        .unwrap_or(t("this computer"))
+        .to_string();
+    let app = ui.app();
+    app.set_install_title(
+        if update {
+            format!("{} {}?", t("Update"), e.name)
+        } else {
+            format!("{} {}?", t("Install"), e.name)
+        }
+        .into(),
+    );
+    app.set_install_body(
+        crate::text::install_body(&e.name, &e.version, &e.author, &host_name, &e.repository).into(),
+    );
+    app.set_install_busy(false);
+    ui.plugins.borrow_mut().pending_install = Some(e);
+    app.set_install_open(true);
+}
+
+pub fn do_install(ui: &Ui) {
+    let Some(e) = ui.plugins.borrow().pending_install.clone() else {
+        return;
+    };
+    ui.app().set_install_busy(true);
+    let (_, local) = index_source(ui);
+    let root = catalog::bin_root(&ricercar_core::config::data_dir());
+    std::thread::spawn(move || {
+        let r = catalog::install(&e, &root, local);
+        post(move |ui| {
+            ui.app().set_install_busy(false);
+            ui.app().set_install_open(false);
+            ui.plugins.borrow_mut().pending_install = None;
+            match r {
+                Ok(cfg) => {
+                    ui.ctx
+                        .update_config(|c| match c.plugins.iter_mut().find(|p| p.id == cfg.id) {
+                            Some(p) => *p = cfg.clone(),
+                            None => c.plugins.push(cfg.clone()),
+                        });
+                    ui.toast(format!("{} {}", t("Installed"), e.name), false);
+                }
+                Err(err) => ui.toast(format!("{}: {err}", e.name), true),
+            }
+            ui.plugins.borrow_mut().rev = None;
+            refresh_catalog_rows(ui);
+        });
+    });
+}
+
+/// Remove a plugin: its declaration, and its binaries when the hub
+/// installed it (a plugin declared by hand keeps its files). Its data
+/// directory, which the plugin owns, stays.
+fn remove(ui: &Ui, id: &str) {
+    let declared = ui
+        .ctx
+        .config
+        .read()
+        .unwrap()
+        .plugins
+        .iter()
+        .find(|p| p.id == id)
+        .cloned();
+    let Some(d) = declared else { return };
+    ui.ctx.update_config(|c| c.plugins.retain(|p| p.id != id));
+    if d.version.is_some() {
+        let root = catalog::bin_root(&ricercar_core::config::data_dir());
+        let id = id.to_string();
+        // After the host has had time to stop it.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if let Err(e) = catalog::uninstall(&root, &id) {
+                tracing::warn!("uninstall plugin {id}: {e}");
+            }
+        });
+    }
+    ui.toast(format!("{} {}", t("Removed"), name_of(ui, id)), false);
+    ui.plugins.borrow_mut().rev = None;
+    refresh_catalog_rows(ui);
+}
+
 // ------------------------------------------------------------ output
 
 /// Tell plugins what the output takes natively (probed capabilities when
@@ -779,6 +1029,25 @@ pub fn wire(ui: &Rc<Ui>) {
         })
     });
     app.on_br_play(|shuffle| with_ui(|ui| play_page(ui, shuffle)));
+    app.on_plugin_update(|id| with_ui(|ui| confirm_install(ui, &id, true)));
+    app.on_plugin_remove(|id| with_ui(|ui| remove(ui, &id)));
+    app.on_catalog_install(|id| with_ui(|ui| confirm_install(ui, &id, false)));
+    app.on_catalog_filter_edited(|_| with_ui(|ui| refresh_catalog_rows(ui)));
+    app.on_catalog_open_repo(|id| {
+        with_ui(|ui| {
+            if let Some(e) = entry(ui, &id) {
+                open_url(&e.repository);
+            }
+        })
+    });
+    app.on_open_hub(|| open_url("https://github.com/ricercar-player/ricercar-plugins"));
+    app.on_install_confirm(|| with_ui(|ui| do_install(ui)));
+    app.on_install_cancel(|| {
+        with_ui(|ui| {
+            ui.plugins.borrow_mut().pending_install = None;
+            ui.app().set_install_open(false);
+        })
+    });
     app.on_search_source_changed(|| {
         with_ui(|ui| {
             let q = ui.app().get_search_text().to_string();

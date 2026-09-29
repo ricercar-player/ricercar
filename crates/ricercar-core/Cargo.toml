@@ -10,6 +10,7 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 lofty = "0.25.4"
 notify = "8.2.0"
 rayon = "1.12.0"
+ring = "0.17"
 ricercar-audio.workspace = true
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

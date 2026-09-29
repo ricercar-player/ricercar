@@ -135,6 +135,23 @@ pub fn t(en: &'static str) -> &'static str {
         "No results" => "Aucun résultat",
         "plugin" => "plugin",
         "Stream" => "Flux",
+        "The community catalogue is off (Settings → Online extras)." => {
+            "Le catalogue communautaire est désactivé (Réglages → Extras en ligne)."
+        }
+        "Loading the catalogue…" => "Chargement du catalogue…",
+        "The catalogue is empty for now." => "Le catalogue est vide pour l'instant.",
+        "Could not read the catalogue" => "Impossible de lire le catalogue",
+        "sign-in" => "connexion",
+        "browse" => "navigation",
+        "search" => "recherche",
+        "favourites" => "favoris",
+        "remote control" => "contrôle à distance",
+        "by" => "par",
+        "Update" => "Mettre à jour",
+        "Install" => "Installer",
+        "Installed" => "Installé",
+        "Removed" => "Retiré",
+        "this computer" => "cet ordinateur",
         "Report saved to" => "Rapport enregistré dans",
         "Folder added; indexing…" => "Dossier ajouté ; indexation…",
         "Folder removed" => "Dossier retiré",
@@ -223,6 +240,26 @@ pub fn unsupported_albums(n: u32, rate: u32) -> String {
         (true, false) => {
             format!("{n} albums à {k} kHz ne pourront pas être lus nativement sur ce DAC")
         }
+    }
+}
+
+/// Install confirmation: what comes from where, and what is not checked.
+pub fn install_body(name: &str, version: &str, author: &str, host: &str, repo: &str) -> String {
+    let who = if author.is_empty() {
+        String::new()
+    } else if fr() {
+        format!(" de {author}")
+    } else {
+        format!(" by {author}")
+    };
+    if fr() {
+        format!(
+            "{name} {version}{who} sera téléchargé depuis {host} et lancé avec vos droits. ricercar vérifie que le fichier correspond au catalogue (SHA-256), mais ne relit pas ce que fait le plugin. Code source : {repo}"
+        )
+    } else {
+        format!(
+            "{name} {version}{who} will be downloaded from {host} and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: {repo}"
+        )
     }
 }
 

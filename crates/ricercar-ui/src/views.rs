@@ -145,6 +145,7 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
         Page::Search => run_search(ui, &app.get_search_text()),
         Page::Radio => crate::extras::load_radio(ui),
         Page::Browse => crate::plugins::load_browse(ui, arg),
+        Page::Plugins => crate::plugins::load_page(ui),
         Page::Settings => crate::extras::load_settings(ui),
     }
 }

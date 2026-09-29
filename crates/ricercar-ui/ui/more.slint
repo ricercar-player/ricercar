@@ -1,7 +1,7 @@
 import { ScrollView, Slider } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { App, StationRow, DeviceRow, CapChip } from "state.slint";
+import { App, Page, StationRow, DeviceRow, CapChip } from "state.slint";
 import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Toggle, TextField, Badge } from "widgets.slint";
 import { PageScroll } from "pages.slint";
 
@@ -406,30 +406,11 @@ export component SettingsPage inherits PageScroll {
 
         Group {
             title: @tr("Plugins");
-            subtitle: @tr("Plugins add catalogues from other sources. Each one is a separate program running with your permissions: install only plugins you trust. They are declared in config.toml.");
-            if App.plugin-rows.length == 0: Row {
-                label: @tr("No plugins declared");
-                hint: @tr("Add a [[plugins]] table to config.toml; it applies without a restart.");
-            }
-            for p[i] in App.plugin-rows: VerticalLayout {
-                if i > 0: Divider { }
-                Row {
-                    label: p.name;
-                    hint: p.detail + " · " + p.status;
-                    if p.enabled && p.auth && !p.signed-in && p.state == 0: Button {
-                        text: @tr("Sign in");
-                        primary: true;
-                        clicked => { App.plugin-sign-in(p.id); }
-                    }
-                    if p.enabled && p.signed-in: Button {
-                        text: @tr("Sign out");
-                        clicked => { App.plugin-sign-out(p.id); }
-                    }
-                    Toggle {
-                        checked: p.enabled;
-                        toggled(on) => { App.plugin-toggle(p.id, on); }
-                    }
-                }
+            subtitle: @tr("Plugins add catalogues from other sources. Each one is a separate program running with your permissions: install only plugins you trust.");
+            Row {
+                label: @tr("Installed plugins and community catalogue");
+                hint: App.plugin-rows.length == 0 ? @tr("None installed") : @tr("{n} plugin" | "{n} plugins" % App.plugin-rows.length);
+                Button { text: @tr("Open"); icon: Icons.puzzle; clicked => { App.navigate(Page.plugins, ""); } }
             }
         }
 
@@ -493,6 +474,12 @@ export component SettingsPage inherits PageScroll {
                 label: @tr("Missing album art");
                 hint: @tr("Fetch covers from MusicBrainz / Cover Art Archive for albums without art.");
                 Toggle { checked <=> App.covers-online; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Plugin catalogue");
+                hint: @tr("Read the list of community plugins from GitHub when you open the Plugins page.");
+                Toggle { checked <=> App.plugins-online; toggled => { App.settings-changed(); } }
             }
         }
 

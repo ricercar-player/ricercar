@@ -607,18 +607,51 @@ fn plugins_tour(dir: std::path::PathBuf) {
         let _ = slint::quit_event_loop();
         return;
     };
+    // A local catalogue whose one entry points at the demo binary.
+    let bytes = std::fs::read(&bin).unwrap_or_default();
+    let index = serde_json::json!({"version": 1, "plugins": [{
+        "id": "demo",
+        "name": "Demo Music",
+        "description": "Reference plugin: a few generated tracks served from this computer. Sign-in code: DEMO.",
+        "repository": "https://github.com/ricercar-player/ricercar",
+        "author": "ricercar",
+        "license": "MIT",
+        "version": "1.0.0",
+        "protocol": 1,
+        "capabilities": ["auth", "browse", "search", "resolve", "favorites"],
+        "assets": [{
+            "arch": ricercar_core::plugin::catalog::current_arch(),
+            "url": format!("file://{}", bin.display()),
+            "sha256": ricercar_core::plugin::catalog::sha256_hex(&bytes),
+        }]
+    }]});
+    let index_path = dir.join("plugin-index.json");
+    let _ = std::fs::write(&index_path, index.to_string());
     with_ui(|ui| {
-        ui.ctx.update_config(|c| {
-            c.plugins = vec![ricercar_core::config::PluginConfig {
-                id: "demo".into(),
-                command: bin.clone(),
-                args: Vec::new(),
-                enabled: true,
-            }];
-        })
+        ui.plugins.borrow_mut().index_override = Some(index_path.display().to_string());
     });
     let album = |r: &str, t: &str| crate::plugins::browse_arg("demo", r, t);
     let steps: Vec<(&str, Step)> = vec![
+        (
+            "plugins-catalogue",
+            (1500, Box::new(|ui| ui.navigate(Page::Plugins, "", true))),
+        ),
+        (
+            "plugins-install",
+            (
+                900,
+                Box::new(|ui| crate::plugins::confirm_install(ui, "demo", false)),
+            ),
+        ),
+        (
+            "plugins-installed",
+            (
+                3000,
+                Box::new(|ui| {
+                    crate::plugins::do_install(ui);
+                }),
+            ),
+        ),
         (
             "plugin-sign-in",
             (

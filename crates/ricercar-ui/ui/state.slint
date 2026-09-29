@@ -1,6 +1,6 @@
 // Data exchanged with Rust, and the single global that carries it.
 
-export enum Page { home, albums, album, artists, artist, tracks, genres, genre, favorites, playlist, radio, search, settings, browse }
+export enum Page { home, albums, album, artists, artist, tracks, genres, genre, favorites, playlist, radio, search, settings, browse, plugins }
 
 export struct AlbumCard {
     id: string,
@@ -121,6 +121,23 @@ export struct PluginRow {
     // has a sign-in, and is signed in
     auth: bool,
     signed-in: bool,
+    // installed from the hub (removable, updatable)
+    from-hub: bool,
+    // the hub has another version
+    update: bool,
+}
+
+// A plugin of the community hub.
+export struct CatalogRow {
+    id: string,
+    name: string,
+    // "by author · license · version"
+    byline: string,
+    description: string,
+    // "browse · search · sign-in"
+    caps: string,
+    // 0 can be installed, 1 installed, 2 not for this computer
+    state: int,
 }
 
 // Sidebar entry of a signed-in plugin: a header (its name) or a section.
@@ -376,6 +393,24 @@ export global App {
     callback plugin-sign-in(string);
     callback plugin-sign-out(string);
     in property <[PluginNav]> plugin-nav;
+    callback plugin-update(string);
+    callback plugin-remove(string);
+    // community catalogue (Plugins page)
+    in-out property <bool> plugins-online;
+    in property <[CatalogRow]> catalog-rows;
+    in property <string> catalog-status;
+    in-out property <string> catalog-filter;
+    callback catalog-filter-edited(string);
+    callback catalog-install(string);
+    callback catalog-open-repo(string);
+    callback open-hub();
+    // install / update confirmation
+    in-out property <bool> install-open;
+    in property <string> install-title;
+    in property <string> install-body;
+    in property <bool> install-busy;
+    callback install-confirm();
+    callback install-cancel();
     // sign-in dialog
     in-out property <bool> signin-open;
     in property <string> signin-title;

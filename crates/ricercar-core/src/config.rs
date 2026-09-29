@@ -142,6 +142,8 @@ pub struct OnlineConfig {
     /// Fetch missing album art from MusicBrainz / Cover Art Archive.
     pub cover_art: bool,
     pub radio: bool,
+    /// Read the community plugin catalogue (GitHub) on the Plugins page.
+    pub plugin_catalog: bool,
 }
 
 impl Default for OnlineConfig {
@@ -150,6 +152,7 @@ impl Default for OnlineConfig {
             lyrics: true,
             cover_art: true,
             radio: true,
+            plugin_catalog: true,
         }
     }
 }
@@ -165,6 +168,10 @@ pub struct PluginConfig {
     pub args: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Set when installed from the plugin hub (the version installed);
+    /// absent for plugins declared by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 fn yes() -> bool {

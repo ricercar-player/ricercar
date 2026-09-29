@@ -94,6 +94,7 @@ fn config(args: &[&str], enabled: bool) -> PluginConfig {
         command: PathBuf::from(BIN),
         args: args.iter().map(|a| a.to_string()).collect(),
         enabled,
+        version: None,
     }
 }
 
