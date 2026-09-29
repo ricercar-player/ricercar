@@ -98,6 +98,9 @@ pub struct LocalResults {
 struct SearchPart {
     id: String,
     name: String,
+    /// Matches in the user's library on the service (favourites,
+    /// playlists), shown before the catalogue's results.
+    mine: bool,
     pending: bool,
     error: Option<String>,
     artists: Vec<Item>,
@@ -881,19 +884,22 @@ pub fn run_search(ui: &Rc<Ui>, q: &str, local: LocalResults) {
         let mut pv = ui.plugins.borrow_mut();
         pv.search_serial += 1;
         let mut parts = Vec::new();
+        // Search page scope: 0 everything, 1 the user's library only.
+        let catalogue = ui.app().get_search_scope() == 0;
         for s in statuses
             .iter()
             .filter(|s| s.signed_in() && !words.is_empty())
         {
-            if s.caps.search {
+            if let Some(lib) = pv.libs.iter().find(|l| l.id == s.id) {
+                parts.push(library_matches(lib, &words));
+            }
+            if s.caps.search && catalogue {
                 parts.push(SearchPart {
                     id: s.id.clone(),
                     name: s.name.clone(),
                     pending: true,
                     ..Default::default()
                 });
-            } else if let Some(lib) = pv.libs.iter().find(|l| l.id == s.id) {
-                parts.push(library_matches(lib, &words));
             }
         }
         pv.search = parts;
@@ -919,7 +925,7 @@ pub fn run_search(ui: &Rc<Ui>, q: &str, local: LocalResults) {
                     if pv.search_serial != serial {
                         return;
                     }
-                    let Some(part) = pv.search.iter_mut().find(|p| p.id == id) else {
+                    let Some(part) = pv.search.iter_mut().find(|p| p.id == id && !p.mine) else {
                         return;
                     };
                     part.pending = false;
@@ -970,8 +976,10 @@ fn library_matches(lib: &PluginLib, words: &[String]) -> SearchPart {
     let mut part = SearchPart {
         id: lib.id.clone(),
         name: lib.name.clone(),
+        mine: true,
         artists: pick(&lib.artists),
         albums: pick(&lib.albums),
+        playlists: pick(&lib.playlists),
         ..Default::default()
     };
     part.tracks = tracks_of(&lib.id, &pick(&lib.tracks));
@@ -1002,9 +1010,10 @@ fn fill_part(part: &mut SearchPart, items: &[Item]) {
     part.tracks = tracks_of(&part.id, items);
 }
 
-/// Fill the search page: local results first, each plugin's after them;
-/// tracks alternate between sources so that every source shows near the
-/// top.
+/// Fill the search page: the user's library first (local files and
+/// playlists, then what plugins hold for them), the catalogues after;
+/// within each, tracks alternate between sources so that every source
+/// shows near the top.
 fn show_search(ui: &Rc<Ui>) {
     let (local, parts) = {
         let pv = ui.plugins.borrow();
@@ -1021,8 +1030,10 @@ fn show_search(ui: &Rc<Ui>) {
     let mut albums = local.albums;
     let mut playlists = local.playlists;
     let mut sources = vec![local.tracks];
+    let mut catalogue = Vec::new();
     let (mut pending, mut errors) = (Vec::new(), Vec::new());
-    for p in &parts {
+    let (mine, theirs): (Vec<&SearchPart>, Vec<&SearchPart>) = parts.iter().partition(|p| p.mine);
+    for p in mine.into_iter().chain(theirs) {
         if p.pending {
             pending.push(p.name.clone());
         }
@@ -1033,19 +1044,29 @@ fn show_search(ui: &Rc<Ui>) {
             .map(|a| (p.name.clone(), a.clone()))
             .collect();
         merge_artist_cards(ui, &mut artists, &extra, true);
-        playlists.extend(
-            p.playlists
-                .iter()
-                .map(|i| album_card(ui, &p.id, &p.name, i, true)),
-        );
-        albums.extend(
-            p.albums
-                .iter()
-                .map(|i| album_card(ui, &p.id, &p.name, i, true)),
-        );
-        sources.push(p.tracks.clone());
+        // An item found in both the library and the catalogue shows once.
+        let add = |cards: &mut Vec<AlbumCard>, items: &[Item]| {
+            for i in items {
+                let c = album_card(ui, &p.id, &p.name, i, true);
+                if !cards.iter().any(|x| x.id == c.id) {
+                    cards.push(c);
+                }
+            }
+        };
+        add(&mut playlists, &p.playlists);
+        add(&mut albums, &p.albums);
+        if p.mine {
+            sources.push(p.tracks.clone());
+        } else {
+            catalogue.push(p.tracks.clone());
+        }
     }
-    let tracks = interleave(sources);
+    let mut tracks = interleave(sources);
+    for t in interleave(catalogue) {
+        if !tracks.iter().any(|x| x.path == t.path) {
+            tracks.push(t);
+        }
+    }
     let m = &ui.models;
     set_rows(&m.s_artists, artists.into_iter().map(|(_, c)| c).collect());
     set_rows(&m.s_albums, albums);
@@ -1948,6 +1969,12 @@ pub fn wire(ui: &Rc<Ui>) {
         })
     });
     app.on_library_source_changed(|| with_ui(|ui| ui.reload_page()));
+    app.on_search_scope_changed(|| {
+        with_ui(|ui| {
+            let q = ui.app().get_search_text().to_string();
+            crate::views::run_search(ui, &q);
+        })
+    });
     push_output(ui);
     poll(ui);
 }

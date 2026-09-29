@@ -924,6 +924,12 @@ export component SearchPage inherits PageScroll {
         // Narrow the results to one kind.
         if App.search-text != "": HorizontalLayout {
             alignment: start;
+            spacing: 12px;
+            Segmented {
+                options: [@tr("Everything"), @tr("My library")];
+                selected <=> App.search-scope;
+                changed => { App.search-scope-changed(); }
+            }
             Segmented {
                 options: [@tr("All"), @tr("Artists"), @tr("Tracks"), @tr("Albums"), @tr("Playlists")];
                 selected <=> App.search-kind;

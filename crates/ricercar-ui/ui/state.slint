@@ -362,6 +362,9 @@ export global App {
     in property <[AlbumCard]> s-playlists;
     // search results shown: 0 all, 1 artists, 2 tracks, 3 albums, 4 playlists
     in-out property <int> search-kind;
+    // 0 everything, 1 my library (no catalogue search)
+    in-out property <int> search-scope;
+    callback search-scope-changed();
     in property <[TrackRow]> s-tracks;
 
     // ---------------------------------------------------------------- radio

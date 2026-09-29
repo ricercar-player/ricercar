@@ -765,6 +765,18 @@ fn plugins_tour(dir: std::path::PathBuf) {
             "plugin-search-playlists",
             (200, Box::new(|ui| ui.app().set_search_kind(4))),
         ),
+        (
+            "plugin-search-library",
+            (
+                200,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_search_kind(0);
+                    app.set_search_scope(1);
+                    app.invoke_search_scope_changed();
+                }),
+            ),
+        ),
     ];
     let mut delay = 0u64;
     let dir = Rc::new(dir);

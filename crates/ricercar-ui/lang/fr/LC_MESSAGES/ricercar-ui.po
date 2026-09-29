@@ -1095,6 +1095,14 @@ msgid "Results for “{}”"
 msgstr "Résultats pour « {} »"
 
 msgctxt "SearchPage"
+msgid "Everything"
+msgstr "Partout"
+
+msgctxt "SearchPage"
+msgid "My library"
+msgstr "Ma bibliothèque"
+
+msgctxt "SearchPage"
 msgid "All"
 msgstr "Tout"
 
