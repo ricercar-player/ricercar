@@ -109,6 +109,8 @@ pub struct UiConfig {
     pub tray: bool,
     /// Keep running in the tray when the window is closed.
     pub close_to_tray: bool,
+    /// Interface language: "en", "fr", or empty to follow the system.
+    pub language: String,
 }
 
 impl Default for UiConfig {
@@ -120,6 +122,7 @@ impl Default for UiConfig {
             notifications: true,
             tray: true,
             close_to_tray: false,
+            language: String::new(),
         }
     }
 }

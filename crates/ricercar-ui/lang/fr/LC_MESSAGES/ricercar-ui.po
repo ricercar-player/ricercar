@@ -523,6 +523,14 @@ msgid "Appearance"
 msgstr "Apparence"
 
 msgctxt "SettingsPage"
+msgid "Language"
+msgstr "Langue"
+
+msgctxt "SettingsPage"
+msgid "System"
+msgstr "Système"
+
+msgctxt "SettingsPage"
 msgid "Theme"
 msgstr "Thème"
 
@@ -807,10 +815,6 @@ msgid "Pick up where you left off"
 msgstr "Reprendre là où vous en étiez"
 
 msgctxt "HomePage"
-msgid "Recently played"
-msgstr "Écoutés récemment"
-
-msgctxt "HomePage"
 msgid "albums"
 msgstr "albums"
 
@@ -833,6 +837,10 @@ msgstr "de musique"
 msgctxt "HomePage"
 msgid "Shuffle library"
 msgstr "Toute la bibliothèque en aléatoire"
+
+msgctxt "HomePage"
+msgid "Recently played"
+msgstr "Écoutés récemment"
 
 msgctxt "HomePage"
 msgid "Your library is empty"

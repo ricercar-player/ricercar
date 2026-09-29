@@ -1,24 +1,37 @@
 //! Strings produced on the Rust side (toasts, statuses, chain labels) and
 //! small formatting helpers. The .slint side is translated through gettext.
 
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-static FRENCH: OnceLock<bool> = OnceLock::new();
+static FRENCH: AtomicBool = AtomicBool::new(false);
 
-/// UI language from the usual POSIX variables (LC_ALL > LC_MESSAGES > LANG).
-pub fn detect_language() -> &'static str {
-    let lang = ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .filter_map(|v| std::env::var(v).ok())
-        .find(|v| !v.is_empty())
-        .unwrap_or_default();
+/// Pick the interface language: `pref` ("en", "fr") from the settings, or
+/// when empty the usual POSIX variables (LC_ALL > LC_MESSAGES > LANG).
+/// Applies it to both the Rust strings and the .slint side.
+pub fn set_language(pref: &str) -> &'static str {
+    let lang = if pref.is_empty() {
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .filter_map(|v| std::env::var(v).ok())
+            .find(|v| !v.is_empty())
+            .unwrap_or_default()
+    } else {
+        pref.to_string()
+    };
     let fr = lang.starts_with("fr");
-    let _ = FRENCH.set(fr);
-    if fr { "fr" } else { "en" }
+    FRENCH.store(fr, Ordering::Relaxed);
+    let code = if fr { "fr" } else { "en" };
+    let _ = slint::select_bundled_translation(code);
+    code
 }
 
 fn fr() -> bool {
-    *FRENCH.get().unwrap_or(&false)
+    FRENCH.load(Ordering::Relaxed)
+}
+
+/// Language in use ("en" or "fr").
+pub fn language() -> &'static str {
+    if fr() { "fr" } else { "en" }
 }
 
 /// Translate a Rust-side string (English is the key).

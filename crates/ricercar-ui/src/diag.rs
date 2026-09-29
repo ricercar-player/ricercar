@@ -98,7 +98,7 @@ pub fn report(ui: &Ui) -> String {
                 diag::kernel(),
                 diag::distribution(),
                 display_backend(),
-                crate::text::detect_language(),
+                crate::text::language(),
             ),
         },
         Section {

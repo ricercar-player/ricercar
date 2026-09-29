@@ -468,9 +468,6 @@ pub fn model<T: Row>(m: &Rows<T>) -> ModelRc<T> {
 }
 
 pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>> {
-    let lang = crate::text::detect_language();
-    let _ = slint::select_bundled_translation(lang);
-
     let hooks = ricercar_daemon::Hooks {
         on_raise: Some(Arc::new(|| {
             post(|ui| {
@@ -491,6 +488,8 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     }
     let ctx = Rc::new(ricercar_daemon::startup(args, hooks)?);
     let window = MainWindow::new()?;
+    // Slint knows its bundled translations once a window exists.
+    crate::text::set_language(&ctx.config.read().unwrap().ui.language);
     // Wayland app-id / X11 class matching ricercar.desktop (icon, grouping);
     // needs the backend (created above) and must precede `show()`.
     let _ = slint::set_xdg_app_id("ricercar");

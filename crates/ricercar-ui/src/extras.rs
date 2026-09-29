@@ -365,6 +365,11 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_notifications(cfg.ui.notifications);
     app.set_close_to_tray(cfg.ui.close_to_tray);
     app.set_theme_dark(cfg.ui.theme == ThemeCfg::Dark);
+    app.set_ui_language(match cfg.ui.language.as_str() {
+        "en" => 1,
+        "fr" => 2,
+        _ => 0,
+    });
     app.set_adaptive_colors(cfg.ui.adaptive_colors);
     app.set_accent_choice(
         ACCENTS
@@ -659,7 +664,16 @@ fn settings_changed(ui: &Rc<Ui>) {
         };
         c.ui.adaptive_colors = app.get_adaptive_colors();
         c.ui.accent = accent.into();
+        c.ui.language = ["", "en", "fr"][app.get_ui_language().clamp(0, 2) as usize].into();
     });
+    // Language, live: the .slint side switches at once; strings built on
+    // the Rust side come back with the page and the settings.
+    let lang = ui.ctx.config.read().unwrap().ui.language.clone();
+    let before = crate::text::language();
+    if crate::text::set_language(&lang) != before {
+        ui.reload_page();
+        load_settings(ui);
+    }
     ui.ctx.ctl.set_replaygain(rg, preamp);
     ui.loader.borrow().set_online(app.get_covers_online());
     apply_theme(ui);
