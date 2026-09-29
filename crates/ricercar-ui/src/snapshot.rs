@@ -727,6 +727,18 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            "plugin-now-album",
+            (
+                600,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_now_playing_open(false);
+                    // The bar's title of a playing plugin track.
+                    app.invoke_go_to_album();
+                }),
+            ),
+        ),
+        (
             "plugin-home",
             (
                 600,

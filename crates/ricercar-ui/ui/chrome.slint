@@ -430,10 +430,11 @@ export component PlayerBar inherits Rectangle {
                     text: App.has-track ? App.title : @tr("Nothing playing");
                     font-size: Theme.fs-md;
                     font-weight: 600;
-                    color: App.has-track ? Theme.text : Theme.text3;
+                    color: App.has-track ? (tta.has-hover && !App.live ? Theme.accent : Theme.text) : Theme.text3;
                     overflow: elide;
-                    TouchArea {
-                        mouse-cursor: App.album-id != "" ? pointer : default;
+                    // title → album page, artist → artist page
+                    tta := TouchArea {
+                        mouse-cursor: App.has-track && !App.live ? pointer : default;
                         clicked => { App.go-to-album(); }
                     }
                 }

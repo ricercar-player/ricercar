@@ -1125,6 +1125,100 @@ pub fn merge_artist_cards(
     }
 }
 
+// ------------------------------------------------------------ now playing
+
+/// The album of a playing plugin track: from the plugin's library list,
+/// else the first album of that title its search finds.
+pub fn open_track_album(ui: &Rc<Ui>, info: &TrackInfo) {
+    let Some((id, _)) = ricercar_core::plugin::parse_plugin_uri(&info.uri) else {
+        return;
+    };
+    let Some(album) = info.album.clone().filter(|a| !a.is_empty()) else {
+        return;
+    };
+    let artist = info
+        .album_artist
+        .clone()
+        .or(info.artist.clone())
+        .unwrap_or_default();
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    let known = ui
+        .plugins
+        .borrow()
+        .libs
+        .iter()
+        .find(|l| l.id == id)
+        .and_then(|l| {
+            l.albums
+                .iter()
+                .find(|a| {
+                    same(&a.title, &album) && a.artist.as_deref().is_none_or(|x| same(x, &artist))
+                })
+                .cloned()
+        });
+    if let Some(it) = known {
+        return open_plugin_album(ui, &id, &it);
+    }
+    let h = host(ui);
+    std::thread::spawn(move || {
+        let found = h
+            .search(&id, &format!("{album} {artist}"), 0, 20)
+            .ok()
+            .and_then(|groups| {
+                groups
+                    .into_iter()
+                    .flat_map(|g| g.1)
+                    .find(|i| i.kind == ItemKind::Album && same(&i.title, &album))
+            });
+        if let Some(it) = found {
+            post(move |ui| open_plugin_album(ui, &id, &it));
+        }
+    });
+}
+
+fn open_plugin_album(ui: &Rc<Ui>, id: &str, it: &Item) {
+    let arg = format!("{ALBUM_CARD}{}", browse_arg(id, &it.reference, &it.title));
+    ui.navigate(Page::Album, &arg, true);
+}
+
+/// The artist of a playing plugin track: the artist page when the plugin
+/// shares its library (it lists the plugin's albums there), else the
+/// plugin's own artist page found by its search.
+pub fn open_track_artist(ui: &Rc<Ui>, info: &TrackInfo) {
+    let Some((id, _)) = ricercar_core::plugin::parse_plugin_uri(&info.uri) else {
+        return;
+    };
+    let Some(name) = info
+        .artist
+        .clone()
+        .or(info.album_artist.clone())
+        .filter(|a| !a.is_empty())
+    else {
+        return;
+    };
+    if ui.plugins.borrow().libs.iter().any(|l| l.id == id) {
+        return ui.navigate(Page::Artist, &name, true);
+    }
+    let h = host(ui);
+    std::thread::spawn(move || {
+        let found = h.search(&id, &name, 0, 20).ok().and_then(|groups| {
+            groups.into_iter().flat_map(|g| g.1).find(|i| {
+                i.kind == ItemKind::Artist
+                    && i.is_browsable()
+                    && i.title.trim().eq_ignore_ascii_case(name.trim())
+            })
+        });
+        post(move |ui| match found {
+            Some(it) => ui.navigate(
+                Page::Browse,
+                &browse_arg(&id, &it.reference, &it.title),
+                true,
+            ),
+            None => ui.navigate(Page::Artist, &name, true),
+        });
+    });
+}
+
 // ------------------------------------------------------------ libraries
 
 /// Plugin names by id.

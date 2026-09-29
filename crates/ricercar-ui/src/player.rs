@@ -112,17 +112,21 @@ pub fn wire(ui: &Rc<Ui>) {
             let id = ui.app().get_album_id();
             if !id.is_empty() {
                 ui.navigate(Page::Album, &id, true);
+            } else if let Some(info) = ui.ctx.ctl.lock().track() {
+                crate::plugins::open_track_album(ui, &info);
             }
         })
     });
     app.on_go_to_artist(|| {
         with_ui(|ui| {
             let info = ui.ctx.ctl.lock().track();
-            if let Some(i) = info
-                && i.path.is_some()
-            {
-                let name = i.album_artist.or(i.artist).unwrap_or_default();
-                ui.navigate(Page::Artist, &name, true);
+            if let Some(i) = info {
+                if i.path.is_some() {
+                    let name = i.album_artist.or(i.artist).unwrap_or_default();
+                    ui.navigate(Page::Artist, &name, true);
+                } else {
+                    crate::plugins::open_track_artist(ui, &i);
+                }
             }
         })
     });
