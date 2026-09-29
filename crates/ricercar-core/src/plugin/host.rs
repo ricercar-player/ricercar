@@ -647,6 +647,31 @@ impl PluginHost {
             .collect())
     }
 
+    /// A whole `library.*` list, page by page, up to `max` items.
+    pub fn library_all(
+        &self,
+        id: &str,
+        list: super::LibraryList,
+        max: usize,
+    ) -> Result<Vec<Item>, PluginError> {
+        let mut out = Vec::new();
+        loop {
+            let v = self.call(
+                id,
+                list.method(),
+                json!({"offset": out.len(), "limit": 200}),
+            )?;
+            let items = items_of(v.get("items"));
+            let more = v.get("has_more").and_then(Value::as_bool).unwrap_or(false);
+            let got = items.len();
+            out.extend(items);
+            if !more || got == 0 || out.len() >= max {
+                out.truncate(max);
+                return Ok(out);
+            }
+        }
+    }
+
     pub fn item_get(&self, id: &str, reference: &str) -> Result<Item, PluginError> {
         let v = self.call(id, "item.get", json!({ "ref": reference }))?;
         items_of(Some(&json!([v])))

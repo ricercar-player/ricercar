@@ -167,6 +167,17 @@ fn album_item(st: &State, a: &(u32, &str, i32)) -> Value {
     })
 }
 
+fn artist_item(st: &State) -> Value {
+    json!({
+        "ref": "artist/1",
+        "kind": "artist",
+        "title": ARTIST,
+        "subtitle": "2 albums",
+        "art": format!("{}/art/1.jpg", st.base()),
+        "browsable": true,
+    })
+}
+
 fn children(st: &State, r: &str) -> Option<Vec<Value>> {
     let tracks = |f: &dyn Fn(&Track) -> bool| -> Vec<Value> {
         TRACKS
@@ -182,6 +193,7 @@ fn children(st: &State, r: &str) -> Option<Vec<Value>> {
             "subtitle": "3 tracks", "art": format!("{}/art/1.jpg", st.base()), "browsable": true,
         })],
         "favorites" => tracks(&|t| st.favorites.contains(&format!("track/{}", t.n))),
+        "artist/1" => ALBUMS.iter().map(|a| album_item(st, a)).collect(),
         "playlist/1" => PLAYLIST
             .iter()
             .filter_map(|n| TRACKS.iter().find(|t| t.n == *n))
@@ -430,7 +442,8 @@ fn main() {
                         "plugin": {"id": "demo", "name": "Demo Music", "version": "1.0.0"},
                         "capabilities": {
                             "auth": st.opts.auth, "browse": true, "search": true, "resolve": true,
-                            "favorites": true, "reporting": true, "remote_control": true
+                            "favorites": true, "reporting": true, "remote_control": true,
+                            "library": true
                         }
                     }))
                 }
@@ -515,6 +528,18 @@ fn main() {
                             ]}))
                         }
                     }
+                }
+                "library.albums" | "library.artists" | "library.tracks" => {
+                    let all: Vec<Value> = match method.as_str() {
+                        "library.albums" => ALBUMS.iter().map(|a| album_item(&st, a)).collect(),
+                        "library.artists" => vec![artist_item(&st)],
+                        _ => TRACKS.iter().map(|t| track_item(&st, t)).collect(),
+                    };
+                    let offset = params["offset"].as_u64().unwrap_or(0) as usize;
+                    let limit = params["limit"].as_u64().unwrap_or(200).min(200) as usize;
+                    let total = all.len();
+                    let page: Vec<Value> = all.into_iter().skip(offset).take(limit).collect();
+                    Ok(json!({"items": page, "total": total, "has_more": offset + limit < total}))
                 }
                 "item.get" => find_item(&st, &r).ok_or_else(|| err(-32002, "no such item")),
                 "favorites.set" => {

@@ -162,7 +162,8 @@ enabled = true
   "plugin": {"id":"example","name":"Example Music","version":"1.2.0"},
   "capabilities": {
     "auth": true, "browse": true, "search": true, "resolve": true,
-    "favorites": true, "reporting": false, "remote_control": false
+    "favorites": true, "reporting": false, "remote_control": false,
+    "library": true
   }
 }}
 ```
@@ -226,7 +227,33 @@ Every entry a plugin returns is an **item**:
 | `item.get {ref}` | One item, fresh. Used to refresh metadata of restored sessions. |
 | `favorites.set {ref, on}` | Only with the `favorites` capability. |
 
-The host caches nothing beyond the current page and the cover images.
+The host caches nothing beyond the current page and the cover images,
+except the library lists below.
+
+## Library (optional)
+
+With the `library` capability, the plugin's music joins the host's own
+**Albums**, **Artists** and **Tracks** pages and its search results, next to
+the local library and marked with the plugin's name. A plugin that only
+declares `browse` keeps its sections in the sidebar.
+
+| Method | Result |
+|---|---|
+| `library.albums {offset, limit}` | `{items: [item], total?, has_more}`: every album of the user's library on the service (kind `album`, browsable: its children are its tracks). |
+| `library.artists {offset, limit}` | Same, kind `artist` (browsable: its children are its albums). |
+| `library.tracks {offset, limit}` | Same, kind `track`. |
+
+- "The user's library" is what the service considers theirs: all the
+  music of a personal server, the saved albums and tracks of a streaming
+  account. Not the whole catalogue.
+- Pages of at most 200. The order does not matter: the host sorts.
+- The host reads every page (up to 20 000 items per list) after sign-in
+  and keeps the lists **in memory** for the session, to sort and merge them
+  with the local library; they are read again after a new sign-in or when
+  the user asks to refresh. Nothing is written to disk.
+- For the host's album and artist pages, an album's `artist`, `year` and
+  `art`, and an artist's `art`, should be filled in; an album's tracks
+  come from `browse.list` on its `ref`, an artist's albums likewise.
 
 ## Resolving
 

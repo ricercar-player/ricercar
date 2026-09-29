@@ -39,7 +39,30 @@ pub struct Capabilities {
     pub favorites: bool,
     pub reporting: bool,
     pub remote_control: bool,
+    /// Albums, artists and tracks join the host's own pages.
+    pub library: bool,
 }
+
+/// The lists of the `library` capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LibraryList {
+    Albums,
+    Artists,
+    Tracks,
+}
+
+impl LibraryList {
+    pub fn method(self) -> &'static str {
+        match self {
+            LibraryList::Albums => "library.albums",
+            LibraryList::Artists => "library.artists",
+            LibraryList::Tracks => "library.tracks",
+        }
+    }
+}
+
+/// Most items read per library list and plugin.
+pub const LIBRARY_MAX: usize = 20_000;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

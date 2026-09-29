@@ -198,6 +198,33 @@ fn sign_in_browse_search_and_errors() {
     );
 
     assert_eq!(h.item_get("demo", "track/4").unwrap().title, "Blue Hour");
+    use ricercar_core::plugin::LibraryList;
+    assert!(h.status("demo").unwrap().caps.library);
+    assert_eq!(
+        h.library_all("demo", LibraryList::Albums, 100)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        h.library_all("demo", LibraryList::Tracks, 100)
+            .unwrap()
+            .len(),
+        6
+    );
+    assert_eq!(
+        h.library_all("demo", LibraryList::Tracks, 4).unwrap().len(),
+        4
+    );
+    let artists = h.library_all("demo", LibraryList::Artists, 100).unwrap();
+    assert_eq!(artists[0].kind, ItemKind::Artist);
+    assert_eq!(
+        h.browse_list("demo", &artists[0].reference, 0, 50)
+            .unwrap()
+            .0
+            .len(),
+        2
+    );
     h.favorites_set("demo", "track/4", true).unwrap();
     assert_eq!(
         h.browse_list("demo", "favorites", 0, 50).unwrap().0.len(),
