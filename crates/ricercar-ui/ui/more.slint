@@ -243,6 +243,11 @@ component Divider inherits Rectangle {
 export component SettingsPage inherits PageScroll {
     title: @tr("Settings");
     fade-at: 40px;
+    // Mirror of a global (changed-callbacks do not fire on globals).
+    private property <bool> want-end: App.settings-at-end;
+    changed want-end => {
+        if want-end { self.scroll-y = self.max-scroll; }
+    }
     private property <[color]> accents: [#d4a35a, #e0785a, #d66a9c, #8b7cf6, #4f9cf0, #3fb8a8, #7cc46a];
     VerticalLayout {
         padding-left: 32px;
@@ -535,6 +540,13 @@ export component SettingsPage inherits PageScroll {
                 label: "ricercar " + App.version;
                 hint: @tr("A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service.");
                 Button { text: "GitHub"; clicked => { App.open-url("https://github.com/ricercar-player/ricercar"); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Diagnostic report");
+                hint: @tr("For compatibility reports. Secrets are hidden.");
+                Button { text: @tr("Open logs folder"); icon: Icons.folder-open; clicked => { App.open-logs(); } }
+                Button { text: @tr("Copy diagnostic report"); icon: Icons.info; clicked => { App.copy-report(); } }
             }
         }
     }

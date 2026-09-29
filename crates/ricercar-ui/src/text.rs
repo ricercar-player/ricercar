@@ -106,6 +106,8 @@ pub fn t(en: &'static str) -> &'static str {
             "En cours d'utilisation : capacités relevées à l'arrêt de la lecture."
         }
         "Could not read the device" => "Impossible d'interroger le périphérique",
+        "Diagnostic report copied" => "Rapport de diagnostic copié",
+        "Report saved to" => "Rapport enregistré dans",
         "Folder added; indexing…" => "Dossier ajouté ; indexation…",
         "Folder removed" => "Dossier retiré",
         "Output device" => "Sortie audio",

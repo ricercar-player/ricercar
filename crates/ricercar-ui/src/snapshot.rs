@@ -312,6 +312,15 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            "settings-about",
+            (
+                900,
+                Box::new(|ui| {
+                    ui.app().set_settings_at_end(true);
+                }),
+            ),
+        ),
+        (
             "album-light",
             (
                 1200,

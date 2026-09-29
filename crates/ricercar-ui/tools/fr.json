@@ -196,5 +196,9 @@
 "Hide capabilities": "Masquer les capacités",
 "Sample rates": "Fréquences",
 "Containers": "Conteneurs",
-"Channels": "Canaux"
+"Channels": "Canaux",
+"Diagnostic report": "Rapport de diagnostic",
+"For compatibility reports. Secrets are hidden.": "Pour les rapports de compatibilité. Les secrets sont masqués.",
+"Open logs folder": "Ouvrir le dossier des journaux",
+"Copy diagnostic report": "Copier le rapport de diagnostic"
 }

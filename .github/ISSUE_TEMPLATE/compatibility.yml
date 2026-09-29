@@ -1,0 +1,48 @@
+name: Compatibility report
+description: How ricercar behaves with your control point app or your DAC
+title: "[compat] "
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Verified reports end up in docs/CONTROLS.md. Please attach the
+        diagnostic report: **Settings → About → Copy diagnostic report**
+        (tokens and keys are hidden), then paste it below.
+  - type: input
+    id: what
+    attributes:
+      label: Control point app or DAC
+      description: Name and version (BubbleUPnP 3.8, Symfonium 12, Kazoo 4.x, FiiO K7…)
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How ricercar was used
+      options:
+        - UPnP AV renderer
+        - OpenHome renderer
+        - Media server (browsing the library)
+        - Local playback on this DAC
+    validations:
+      required: true
+  - type: textarea
+    id: worked
+    attributes:
+      label: What worked
+  - type: textarea
+    id: broke
+    attributes:
+      label: What broke
+      description: Steps to reproduce, what you expected, what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostic report
+      description: Settings → About → Copy diagnostic report, pasted here.
+      render: text
+    validations:
+      required: true

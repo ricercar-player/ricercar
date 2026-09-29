@@ -338,6 +338,10 @@ export global App {
     in-out property <bool> adaptive-colors: true;
     in-out property <int> accent-choice;
     in property <string> version;
+    // scroll the settings page to its end (the screenshot tour shows About)
+    in property <bool> settings-at-end;
+    callback copy-report();
+    callback open-logs();
 
     // ---------------------------------------------------------------- toasts
     in property <string> toast;

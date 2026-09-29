@@ -4,6 +4,7 @@ slint::include_modules!();
 
 mod app;
 mod dac;
+mod diag;
 mod extras;
 mod images;
 mod player;

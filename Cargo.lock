@@ -4085,6 +4085,8 @@ dependencies = [
  "ricercar-mpris",
  "ricercar-online",
  "ricercar-upnp",
+ "tempfile",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "zbus",

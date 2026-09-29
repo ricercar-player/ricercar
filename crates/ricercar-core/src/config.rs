@@ -25,6 +25,11 @@ pub fn cache_dir() -> PathBuf {
     xdg("XDG_CACHE_HOME", ".cache")
 }
 
+/// Logs (`$XDG_STATE_HOME/ricercar`, else `~/.local/state/ricercar`).
+pub fn state_dir() -> PathBuf {
+    xdg("XDG_STATE_HOME", ".local/state")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ReplayGain {

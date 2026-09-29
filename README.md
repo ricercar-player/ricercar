@@ -93,6 +93,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Queue drawer with drag-to-reorder, context menus everywhere
 - Dark & light themes, 7 accents, English & French
 - Keyboard shortcuts, notifications, tray icon
+- Diagnostic report and rotating log for compatibility reports
 - Remembers your queue and position, and reopens as you left it (window
   size, page, sorts)
 
@@ -360,7 +361,8 @@ running hands the file to the running instance.
 | `~/.config/ricercar/config.toml` | settings |
 | `~/.local/share/ricercar/library.db` | library index, stats, playlists |
 | `~/.local/share/ricercar/session.json` | queue & position |
-| `~/.local/share/ricercar/ui-state.json` | window size, last page, sorts |
+| `~/.local/share/ricercar/ui-state.json` | window size, last page, sorts, DAC capabilities |
+| `~/.local/state/ricercar/ricercar.log` | log (3 × 2 MB, rotated) |
 | `~/.cache/ricercar/` | cover thumbnails, lyrics, stream spool |
 </details>
 

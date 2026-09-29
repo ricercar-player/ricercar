@@ -490,6 +490,22 @@ msgctxt "SettingsPage"
 msgid "A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service."
 msgstr "Un lecteur de musique bit-perfect et récepteur réseau pour Linux. Licence MIT. Sans lien avec aucun label ni service de streaming."
 
+msgctxt "SettingsPage"
+msgid "Diagnostic report"
+msgstr "Rapport de diagnostic"
+
+msgctxt "SettingsPage"
+msgid "For compatibility reports. Secrets are hidden."
+msgstr "Pour les rapports de compatibilité. Les secrets sont masqués."
+
+msgctxt "SettingsPage"
+msgid "Open logs folder"
+msgstr "Ouvrir le dossier des journaux"
+
+msgctxt "SettingsPage"
+msgid "Copy diagnostic report"
+msgstr "Copier le rapport de diagnostic"
+
 msgctxt "QueueLine"
 msgid "Remove"
 msgstr "Retirer"

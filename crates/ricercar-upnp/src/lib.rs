@@ -39,6 +39,24 @@ use ricercar_core::{Controller, QueueItem, Repeat, TrackInfo};
 use events::Subscribers;
 use soap::{Args, Reply};
 
+/// Non-loopback IPv4 interfaces (name, address): where SSDP announces us.
+pub fn interfaces() -> Vec<(String, std::net::Ipv4Addr)> {
+    let mut v: Vec<(String, std::net::Ipv4Addr)> = if_addrs::get_if_addrs()
+        .map(|l| {
+            l.into_iter()
+                .filter(|i| !i.is_loopback())
+                .filter_map(|i| match i.addr {
+                    if_addrs::IfAddr::V4(a) => Some((i.name, a.ip)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v.dedup();
+    v
+}
+
 /// Exposed for tests and UI integration.
 pub fn xml_escape_pub(s: &str) -> String {
     xml::escape(s)

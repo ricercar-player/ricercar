@@ -7,7 +7,10 @@ Thanks for helping! A few ground rules keep the project healthy.
 The most valuable contribution today: tell us how ricercar behaves with your
 **control point** (BubbleUPnP, Symfonium, Kazoo, mConnect…) and your **DAC**.
 Open an issue with the app and version, renderer mode (UPnP AV or OpenHome),
-what worked and what broke, and `RUST_LOG=debug` output if something failed.
+what worked and what broke, and the diagnostic report (**Settings → About →
+Copy diagnostic report**; tokens and keys are hidden). The issue template
+"Compatibility report" asks for all of this. For a failure, `RUST_LOG=debug`
+output helps too; the log lives in `~/.local/state/ricercar/`.
 Verified reports are added to [docs/CONTROLS.md](docs/CONTROLS.md).
 
 ## Code

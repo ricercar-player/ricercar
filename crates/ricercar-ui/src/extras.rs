@@ -765,6 +765,8 @@ pub fn wire(ui: &Rc<Ui>) {
             probe_devices(ui);
         })
     });
+    app.on_copy_report(|| with_ui(|ui| crate::diag::copy_report(ui)));
+    app.on_open_logs(crate::diag::open_logs);
     app.on_toggle_device_caps(|name| {
         with_ui(|ui| {
             let name = name.to_string();

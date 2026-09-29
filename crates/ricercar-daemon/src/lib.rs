@@ -10,6 +10,8 @@ use ricercar_core::config::{self, Config};
 use ricercar_core::covers::CoverCache;
 use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
+pub mod diag;
+pub mod logging;
 mod scrobble;
 
 /// Command-line overrides on top of the config file.
@@ -237,12 +239,7 @@ impl Network {
 }
 
 pub fn init_logging() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,symphonia=warn".into()),
-        )
-        .try_init();
+    logging::init();
 }
 
 pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::error::Error>> {
