@@ -522,8 +522,21 @@ fn main() {
                                 })
                                 .map(|a| album_item(&st, a))
                                 .collect();
+                            let by_artist = ARTIST.to_lowercase().contains(&q);
+                            let artists: Vec<Value> = if by_artist {
+                                vec![artist_item(&st)]
+                            } else {
+                                Vec::new()
+                            };
+                            let playlists: Vec<Value> = if by_artist || "demo mix".contains(&q) {
+                                children(&st, "playlists").unwrap_or_default()
+                            } else {
+                                Vec::new()
+                            };
                             Ok(json!({"groups": [
+                                {"kind": "artist", "items": artists, "has_more": false},
                                 {"kind": "album", "items": albums, "has_more": false},
+                                {"kind": "playlist", "items": playlists, "has_more": false},
                                 {"kind": "track", "items": tracks, "has_more": false}
                             ]}))
                         }

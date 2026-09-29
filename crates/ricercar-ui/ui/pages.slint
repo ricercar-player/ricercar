@@ -908,6 +908,14 @@ export component SearchPage inherits PageScroll {
             color: Theme.text;
             overflow: elide;
         }
+        // Narrow the results to one kind.
+        if App.search-text != "": HorizontalLayout {
+            alignment: start;
+            Segmented {
+                options: [@tr("All"), @tr("Artists"), @tr("Tracks"), @tr("Albums"), @tr("Playlists")];
+                selected <=> App.search-kind;
+            }
+        }
         // Plugins answer after the library; their results join the lists.
         if App.search-text != "" && App.search-pending != "": Text {
             text: @tr("Searching {}…", App.search-pending);
@@ -920,12 +928,12 @@ export component SearchPage inherits PageScroll {
             color: Theme.text3;
             wrap: word-wrap;
         }
-        if App.search-text != "" && App.search-pending == "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0: EmptyState {
+        if App.search-text != "" && App.search-pending == "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0 && App.s-playlists.length == 0: EmptyState {
             icon: Icons.search;
             title: @tr("No results");
             body: @tr("Nothing in your library matches. Check the spelling, or try fewer words.");
         }
-        if App.s-artists.length > 0: VerticalLayout {
+        if (App.search-kind == 0 || App.search-kind == 1) && App.s-artists.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
             SectionTitle { text: @tr("Artists"); }
@@ -945,17 +953,29 @@ export component SearchPage inherits PageScroll {
                 }
             }
         }
-        if App.s-tracks.length > 0: VerticalLayout {
+        if (App.search-kind == 0 || App.search-kind == 2) && App.s-tracks.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
             SectionTitle { text: @tr("Tracks"); }
-            TrackTable { rows: App.s-tracks; list: "search"; show-cover: true; header: false; limit: 12; }
+            // every track when narrowed to tracks
+            TrackTable { rows: App.s-tracks; list: "search"; show-cover: true; header: false; limit: App.search-kind == 2 ? 100000 : 12; }
         }
-        if App.s-albums.length > 0: VerticalLayout {
+        if (App.search-kind == 0 || App.search-kind == 3) && App.s-albums.length > 0: VerticalLayout {
             spacing: 12px;
             padding-top: 16px;
             SectionTitle { text: @tr("Albums"); }
             AlbumFlow { albums: App.s-albums; playing-album: App.album-id; }
+        }
+        if (App.search-kind == 0 || App.search-kind == 4) && App.s-playlists.length > 0: VerticalLayout {
+            spacing: 12px;
+            padding-top: 16px;
+            SectionTitle { text: @tr("Playlists"); }
+            AlbumFlow { albums: App.s-playlists; playing-album: ""; }
+        }
+        if App.search-kind > 0 && App.search-text != "" && App.search-pending == "" && (App.search-kind == 1 ? App.s-artists.length : App.search-kind == 2 ? App.s-tracks.length : App.search-kind == 3 ? App.s-albums.length : App.s-playlists.length) == 0 && (App.s-tracks.length + App.s-albums.length + App.s-artists.length + App.s-playlists.length) > 0: Text {
+            text: @tr("Nothing of this kind matches.");
+            font-size: Theme.fs-md;
+            color: Theme.text3;
         }
     }
 }

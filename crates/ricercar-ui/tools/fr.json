@@ -111,6 +111,8 @@
 "Next up": "À suivre",
 "Clear": "Vider",
 "Close": "Fermer",
+"All": "Tout",
+"Nothing of this kind matches.": "Rien de ce type ne correspond.",
 "Updates": "Mises à jour",
 "Once a day at startup, ask GitHub whether a new ricercar is out, and check installed plugins against the catalogue. Nothing is installed without you.": "Une fois par jour au démarrage, demander à GitHub si une nouvelle version de ricercar est sortie, et comparer les plugins installés au catalogue. Rien n’est installé sans vous.",
 "ricercar {} is available": "ricercar {} est disponible",

@@ -481,12 +481,56 @@ pub fn refresh_stats(ui: &Rc<Ui>) {
     app.set_lib_duration(long_duration(s.duration_ms).into());
 }
 
+/// Prefix of the card ids of local playlists (search results).
+pub const PLAYLIST_CARD: &str = "playlist\u{1f}";
+
+/// A local playlist as a tile (search results).
+fn playlist_card(ui: &Ui, p: &ricercar_core::library::Playlist) -> crate::AlbumCard {
+    let (cover, ckey) = match &p.cover_path {
+        Some(path) => {
+            let key = format!("p:{path}");
+            let src = Source::Track {
+                key: key.clone(),
+                path: path.clone().into(),
+            };
+            (ui.cover(&key, src, None, TILE), key)
+        }
+        None => (slint::Image::default(), String::new()),
+    };
+    crate::AlbumCard {
+        id: format!("{PLAYLIST_CARD}{}", p.id).into(),
+        title: p.name.clone().into(),
+        artist: t("Playlist").into(),
+        cover,
+        ckey: ckey.into(),
+        // no album or artist page behind it
+        plugin: true,
+        ..Default::default()
+    }
+}
+
 /// Global search: the local library at once, plugins as they answer.
 pub fn run_search(ui: &Rc<Ui>, q: &str) {
     let r = ui.ctx.lib.search(q);
+    let words: Vec<String> = q.split_whitespace().map(str::to_lowercase).collect();
+    let playlists = if words.is_empty() {
+        Vec::new()
+    } else {
+        ui.ctx
+            .lib
+            .playlists()
+            .into_iter()
+            .filter(|p| {
+                let name = p.name.to_lowercase();
+                words.iter().all(|w| name.contains(w.as_str()))
+            })
+            .map(|p| playlist_card(ui, &p))
+            .collect()
+    };
     let local = crate::plugins::LocalResults {
         artists: r.artists.iter().map(|a| artist_card(ui, a, true)).collect(),
         albums: r.albums.iter().map(|a| album_card(ui, a, true)).collect(),
+        playlists,
         tracks: r.tracks.into_iter().take(50).collect(),
     };
     crate::plugins::run_search(ui, q, local);
@@ -698,6 +742,22 @@ pub fn show_in_folder(path: &str) {
     }
 }
 
+fn play_or_queue(ui: &Ui, tracks: &[Track], ctx: PlayContext, action: &str) {
+    let ctl = &ui.ctx.ctl;
+    match action {
+        "play" => ctl.play_tracks(infos(tracks), 0, ctx),
+        "shuffle" => ctl.play_shuffled(infos(tracks), ctx),
+        "next" => {
+            ctl.enqueue(infos(tracks), EnqueueAt::Next);
+            ui.toast(t("Will play next"), false);
+        }
+        _ => {
+            ctl.enqueue(infos(tracks), EnqueueAt::End);
+            ui.toast(t("Added to the queue"), false);
+        }
+    }
+}
+
 pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
     if let Some((arg, _)) = crate::plugins::card_target(id) {
         return crate::plugins::card_action(ui, arg, action);
@@ -733,22 +793,24 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
         }
         _ => {}
     }
+    // A local playlist tile (search): play or queue its tracks.
+    if let Some(pid) = id.strip_prefix(PLAYLIST_CARD) {
+        let pid: i64 = pid.parse().unwrap_or(0);
+        let tracks = lib.playlist_tracks(pid);
+        if tracks.is_empty() || !matches!(action, "play" | "shuffle" | "next" | "queue") {
+            return;
+        }
+        return play_or_queue(ui, &tracks, PlayContext::Playlist(pid), action);
+    }
     let tracks = lib.album_tracks(id);
     if tracks.is_empty() {
         return;
     }
     let ctx = PlayContext::Album(id.to_string());
+    if matches!(action, "play" | "shuffle" | "next" | "queue") {
+        return play_or_queue(ui, &tracks, ctx, action);
+    }
     match action {
-        "play" => ctl.play_tracks(infos(&tracks), 0, ctx),
-        "shuffle" => ctl.play_shuffled(infos(&tracks), ctx),
-        "next" => {
-            ctl.enqueue(infos(&tracks), EnqueueAt::Next);
-            ui.toast(t("Will play next"), false);
-        }
-        "queue" => {
-            ctl.enqueue(infos(&tracks), EnqueueAt::End);
-            ui.toast(t("Added to the queue"), false);
-        }
         "artist" => {
             let name = lib.album(id).map(|a| a.artist).unwrap_or_default();
             ui.navigate(Page::Artist, &name, true);
@@ -780,9 +842,14 @@ pub fn wire(ui: &Rc<Ui>) {
     app.on_back(|| with_ui(|ui| ui.back()));
     app.on_forward(|| with_ui(|ui| ui.forward()));
     app.on_album_activate(|id| {
-        with_ui(|ui| match crate::plugins::card_target(&id) {
-            Some((arg, false)) => ui.navigate(Page::Browse, arg, true),
-            _ => ui.navigate(Page::Album, &id, true),
+        with_ui(|ui| {
+            if let Some(pid) = id.strip_prefix(PLAYLIST_CARD) {
+                return ui.navigate(Page::Playlist, pid, true);
+            }
+            match crate::plugins::card_target(&id) {
+                Some((arg, false)) => ui.navigate(Page::Browse, arg, true),
+                _ => ui.navigate(Page::Album, &id, true),
+            }
         })
     });
     app.on_artist_activate(|name| with_ui(|ui| ui.navigate(Page::Artist, &name, true)));

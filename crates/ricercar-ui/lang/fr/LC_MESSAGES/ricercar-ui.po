@@ -1083,6 +1083,26 @@ msgid "Results for “{}”"
 msgstr "Résultats pour « {} »"
 
 msgctxt "SearchPage"
+msgid "All"
+msgstr "Tout"
+
+msgctxt "SearchPage"
+msgid "Artists"
+msgstr "Artistes"
+
+msgctxt "SearchPage"
+msgid "Tracks"
+msgstr "Titres"
+
+msgctxt "SearchPage"
+msgid "Albums"
+msgstr "Albums"
+
+msgctxt "SearchPage"
+msgid "Playlists"
+msgstr "Playlists"
+
+msgctxt "SearchPage"
 msgid "Searching {}…"
 msgstr "Recherche dans {}…"
 
@@ -1095,22 +1115,14 @@ msgid "Nothing in your library matches. Check the spelling, or try fewer words."
 msgstr "Rien ne correspond dans votre bibliothèque. Vérifiez l'orthographe ou essayez moins de mots."
 
 msgctxt "SearchPage"
-msgid "Artists"
-msgstr "Artistes"
-
-msgctxt "SearchPage"
 msgid "{n} album"
 msgid_plural "{n} albums"
 msgstr[0] "{n} album"
 msgstr[1] "{n} albums"
 
 msgctxt "SearchPage"
-msgid "Tracks"
-msgstr "Titres"
-
-msgctxt "SearchPage"
-msgid "Albums"
-msgstr "Albums"
+msgid "Nothing of this kind matches."
+msgstr "Rien de ce type ne correspond."
 
 msgctxt "BrowsePage"
 msgid "Play"

@@ -75,6 +75,7 @@ pub struct PluginsView {
 pub struct LocalResults {
     pub artists: Vec<ArtistCard>,
     pub albums: Vec<AlbumCard>,
+    pub playlists: Vec<AlbumCard>,
     pub tracks: Vec<Track>,
 }
 
@@ -88,6 +89,7 @@ struct SearchPart {
     error: Option<String>,
     artists: Vec<Item>,
     albums: Vec<Item>,
+    playlists: Vec<Item>,
     tracks: Vec<Track>,
 }
 
@@ -852,7 +854,17 @@ fn fill_part(part: &mut SearchPart, items: &[Item]) {
         .collect();
     part.albums = items
         .iter()
-        .filter(|i| !matches!(i.kind, ItemKind::Track | ItemKind::Artist) && i.is_browsable())
+        .filter(|i| {
+            !matches!(
+                i.kind,
+                ItemKind::Track | ItemKind::Artist | ItemKind::Playlist
+            ) && i.is_browsable()
+        })
+        .cloned()
+        .collect();
+    part.playlists = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Playlist)
         .cloned()
         .collect();
     part.tracks = tracks_of(&part.id, items);
@@ -875,6 +887,7 @@ fn show_search(ui: &Rc<Ui>) {
         .map(|a| (a.name.to_lowercase(), a))
         .collect();
     let mut albums = local.albums;
+    let mut playlists = local.playlists;
     let mut sources = vec![local.tracks];
     let (mut pending, mut errors) = (Vec::new(), Vec::new());
     for p in &parts {
@@ -888,6 +901,11 @@ fn show_search(ui: &Rc<Ui>) {
             .map(|a| (p.name.clone(), a.clone()))
             .collect();
         merge_artist_cards(ui, &mut artists, &extra, true);
+        playlists.extend(
+            p.playlists
+                .iter()
+                .map(|i| album_card(ui, &p.id, &p.name, i, true)),
+        );
         albums.extend(
             p.albums
                 .iter()
@@ -899,6 +917,7 @@ fn show_search(ui: &Rc<Ui>) {
     let m = &ui.models;
     set_rows(&m.s_artists, artists.into_iter().map(|(_, c)| c).collect());
     set_rows(&m.s_albums, albums);
+    set_rows(&m.s_playlists, playlists);
     set_rows(&m.s_tracks, track_rows(ui, &tracks, row_opts(0)));
     ui.st.borrow_mut().lists.insert("search".into(), tracks);
     let app = ui.app();

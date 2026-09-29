@@ -176,6 +176,7 @@ pub struct Models {
     pub ge_albums: Rows<AlbumCard>,
     pub fav_albums: Rows<AlbumCard>,
     pub s_albums: Rows<AlbumCard>,
+    pub s_playlists: Rows<AlbumCard>,
     pub artists: Rows<ArtistCard>,
     pub s_artists: Rows<ArtistCard>,
     pub tracks: Rows<TrackRow>,
@@ -192,7 +193,7 @@ pub struct Models {
 }
 
 impl Models {
-    fn album_models(&self) -> [&Rows<AlbumCard>; 11] {
+    fn album_models(&self) -> [&Rows<AlbumCard>; 12] {
         [
             &self.br_cards,
             &self.albums,
@@ -205,6 +206,7 @@ impl Models {
             &self.ge_albums,
             &self.fav_albums,
             &self.s_albums,
+            &self.s_playlists,
         ]
     }
 
@@ -621,6 +623,7 @@ fn bind_models(ui: &Rc<Ui>) {
     app.set_fav_albums(model(&m.fav_albums));
     app.set_fav_tracks(model(&m.fav_tracks));
     app.set_s_albums(model(&m.s_albums));
+    app.set_s_playlists(model(&m.s_playlists));
     app.set_s_artists(model(&m.s_artists));
     app.set_s_tracks(model(&m.s_tracks));
     app.set_artists(model(&m.artists));
@@ -889,3 +892,4 @@ pub fn save_state(ui: &Ui) {
         Err(e) => tracing::warn!("save ui-state.json: {e}"),
     }
 }
+

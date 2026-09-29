@@ -343,6 +343,9 @@ export global App {
     callback search(string);
     in property <[ArtistCard]> s-artists;
     in property <[AlbumCard]> s-albums;
+    in property <[AlbumCard]> s-playlists;
+    // search results shown: 0 all, 1 artists, 2 tracks, 3 albums, 4 playlists
+    in-out property <int> search-kind;
     in property <[TrackRow]> s-tracks;
 
     // ---------------------------------------------------------------- radio
