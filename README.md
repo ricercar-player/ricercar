@@ -114,6 +114,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   artists and tracks join your library pages and search; playback stays
   bit-perfect
 - **Update notices**: a new release or plugin update is shown in the app
+- **English and French** interface, chosen in Settings or from the system
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
 </td>
@@ -491,7 +492,8 @@ output if you prefer conversion over refusal.
 
 Yes. Selecting a `hw:` device takes the card exclusively while ricercar
 plays and releases it on stop. Choose `pipewire` if you want to share the
-card with other apps (not bit-perfect).
+card with other apps (not bit-perfect). Bluetooth headphones and other
+outputs that only exist in PipeWire are listed by name, also shared.
 </details>
 
 <details>

@@ -4042,7 +4042,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-audio"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "alsa",
  "crossbeam-channel",
@@ -4055,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-cli"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde",
  "zbus",
@@ -4063,7 +4063,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-daemon"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ctrlc",
  "ricercar-audio",
@@ -4102,7 +4102,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-mpris"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ricercar-audio",
  "ricercar-core",
@@ -4113,7 +4113,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-online"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "md-5",
  "serde",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-ui"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "image",
@@ -4150,7 +4150,7 @@ dependencies = [
 
 [[package]]
 name = "ricercar-upnp"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "if-addrs",
  "quick-xml 0.42.0",
