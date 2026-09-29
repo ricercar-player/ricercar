@@ -1,10 +1,12 @@
 # Source plugins (design)
 
-> **Status: proposal, not implemented.** This document specifies how
-> ricercar could gain catalogues (streaming services, remote libraries,
-> podcast directories…) without the core ever containing service-specific
-> code or credentials. It is the reference for both the host implementation
-> in this repository and third-party plugin authors.
+> **Status: implemented (protocol 1).** This document specifies how
+> ricercar gains catalogues (streaming services, remote libraries, podcast
+> directories…) without the core ever containing service-specific code or
+> credentials. It is the reference for both the host implementation in this
+> repository and third-party plugin authors. A reference plugin serving
+> generated files from 127.0.0.1 lives in
+> `crates/ricercar-core/tests/fixtures/demo-plugin`.
 
 ## Goals
 
@@ -78,8 +80,9 @@ enabled = true
   then every 30 s) and marks its items unavailable meanwhile. Queue entries
   stay in place and resolve again once the plugin is back.
 - **Shutdown:** the host sends `shutdown`, waits 2 s, then kills the process.
-- **Config changes** (plugin added, removed, toggled) apply after a restart,
-  like the network settings.
+- **Config changes** (plugin added, removed, toggled, from the settings or
+  by editing `config.toml`) apply without a restart, like the network
+  settings.
 
 ## Transport
 
@@ -301,10 +304,16 @@ to a UI message and never shows raw text from the plugin as HTML.
 - `art` URLs and item text are untrusted input. Images go through the cover
   cache's size limits, and text is rendered as plain text.
 
+## Playlists
+
+Plugin tracks can be added to local playlists. They are stored as
+`plugin://<id>/<ref>` with their metadata, so a playlist still shows them
+when the plugin is stopped or removed (they play again once it is back).
+M3U export leaves them out, and the UPnP ContentDirectory does not serve
+them.
+
 ## Open questions
 
-- Should plugin items be addable to local playlists (stored as `plugin://`
-  URIs), or stay browse-only in v1?
 - Offline caching of resolved tracks: out of scope for v1. It depends on each
   service's terms.
 - Several accounts of the same plugin: run the plugin twice with different

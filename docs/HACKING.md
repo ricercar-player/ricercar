@@ -16,6 +16,13 @@ Everything a newcomer needs to implement a feature end to end. Read
 | `ricercar-ui` | Slint desktop app, binary `ricercar` | see below |
 | `ricercar-cli` | Command-line control of a running instance | `main.rs` |
 
+Source plugins ([plugins.md](plugins.md)) live in `ricercar-core/src/plugin/`:
+`rpc.rs` (JSON-RPC lines over stdio), `host.rs` (`PluginHost`: supervision,
+typed calls, `Resolver` for the controller, reporting and remote control)
+and `mod.rs` (items, errors, `plugin://` URIs). The controller resolves
+`plugin://` items in `Bridge::load_current` / `rearm`; `AppContext` owns the
+host; the UI side is `src/plugins.rs` and `ui/plugins.slint`.
+
 Data flow: the UI and daemon call `Controller` methods; the controller drives
 the audio `PlayerHandle` and publishes `CtlEvent`s on a bus. Subscribers are
 the UI (`player.rs::wire`), MPRIS, UPnP eventing and the scrobblers. Nothing
@@ -127,6 +134,24 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
   always start from the same state. `RICERCAR_SNAPSHOT_TOUR=state` is the
   exception: it prints the restored state, changes it and quits; run it twice
   to check that the state survives a restart.
+
+### Plugins
+
+- `cargo build -p ricercar-core --bin ricercar-demo-plugin` builds the
+  reference plugin used by `crates/ricercar-core/tests/plugins.rs`. It serves
+  generated FLAC files from 127.0.0.1 (sign-in code: `DEMO`) and has options
+  to exercise the error paths (see the top of its `main.rs`).
+- `RICERCAR_SNAPSHOT_TOUR=plugins` declares it (it must sit next to the
+  `ricercar` binary) and captures the sign-in dialog, the browse pages, a
+  playing plugin track and the plugin search tab. Headless tours never open
+  a browser.
+- Declare it by hand to try the UI:
+
+  ```toml
+  [[plugins]]
+  id = "demo"
+  command = "/path/to/target/debug/ricercar-demo-plugin"
+  ```
 
 ### Performance
 

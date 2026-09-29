@@ -48,7 +48,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 > ricercar is **inspired by QBZ** but is a clean-room project with no QBZ
 > code. Like QBZ, it contains **no private or unofficial streaming-service
 > API**. Catalogues reach it through standard UPnP / OpenHome, with your own
-> subscription in your own app.
+> subscription in your own app, or through a **source plugin** you install
+> yourself: a separate program the core only talks to through a documented
+> protocol ([docs/plugins.md](docs/plugins.md)). The core ships no service
+> code, keys or plugins.
 
 ## 🎧 Features
 
@@ -105,6 +108,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - **UPnP MediaServer**: browse your library from any DLNA app
 - **MPRIS**: media keys, desktop widgets, `playerctl`
 - **Scrobbling** to ListenBrainz & Last.fm (offline queue)
+- **Source plugins**: catalogues from programs you install and declare
+  (browse, search, sign-in in your browser); playback stays bit-perfect
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
 </td>
@@ -363,6 +368,7 @@ running hands the file to the running instance.
 | `~/.local/share/ricercar/session.json` | queue & position |
 | `~/.local/share/ricercar/ui-state.json` | window size, last page, sorts, DAC capabilities |
 | `~/.local/state/ricercar/ricercar.log` | log (3 × 2 MB, rotated) |
+| `~/.local/share/ricercar/plugins/<id>/` | a plugin's own data (ricercar never reads it) |
 | `~/.cache/ricercar/` | cover thumbnails, lyrics, stream spool |
 </details>
 
@@ -377,7 +383,9 @@ ricercar works fully offline. Its optional online features contact only:
 | Radio Browser | the Radio page | opening the page |
 | ListenBrainz / Last.fm | scrobbling | only with your own credentials |
 
-No telemetry, no account, and never a streaming-service API.
+No telemetry, no account, and never a streaming-service API in ricercar
+itself. Plugins you declare are separate programs: what they contact is up
+to them.
 
 ## 🏗️ Architecture
 
@@ -433,10 +441,16 @@ dbus-run-session -- cargo test -p ricercar-mpris
 <details>
 <summary><b>Is this a a streaming service / Tidal client?</b></summary>
 
-No. ricercar never talks to a streaming service's API. Your phone app, used
-with your own subscription, sends ricercar a plain stream URL over UPnP or
-OpenHome, the way it would to a network streamer. That keeps the project,
-and your account, on safe ground.
+No. ricercar itself never talks to a streaming service's API. Your phone
+app, used with your own subscription, sends ricercar a plain stream URL over
+UPnP or OpenHome, the way it would to a network streamer.
+
+ricercar can also run **source plugins**: separate programs, written by
+third parties and installed by you, that bring a catalogue and hand ricercar
+playable URLs ([docs/plugins.md](docs/plugins.md)). The project does not
+ship, list or promote any plugin, and a plugin runs with your permissions:
+install only plugins you trust, and check that they respect the service's
+terms.
 </details>
 
 <details>
