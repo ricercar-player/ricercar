@@ -313,6 +313,13 @@ fn schema(conn: &Connection) -> rusqlite::Result<()> {
     if !has_info {
         conn.execute_batch("ALTER TABLE playlist_items ADD COLUMN info TEXT")?;
     }
+    // Metadata of plugin:// plays, likewise (the Home page's history).
+    let history_info: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('history') WHERE name = 'info'")?
+        .exists([])?;
+    if !history_info {
+        conn.execute_batch("ALTER TABLE history ADD COLUMN info TEXT")?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
@@ -1070,6 +1077,29 @@ impl Library {
         )
     }
 
+    /// The last tracks played, most recent first, each once: library files
+    /// and plugin tracks (from the metadata saved with the play).
+    pub fn recent_plays(&self, limit: usize) -> Vec<Track> {
+        let rows: Vec<(String, Option<String>)> = self.query(
+            "SELECT h.path, h.info FROM history h
+             JOIN (SELECT path, MAX(id) AS last FROM history GROUP BY path) l ON h.id = l.last
+             ORDER BY h.id DESC LIMIT ?1",
+            [(limit * 2) as i64],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        );
+        rows.into_iter()
+            .filter_map(|(path, info)| match info {
+                Some(json) if crate::plugin::is_plugin_uri(&path) => {
+                    serde_json::from_str::<crate::controller::TrackInfo>(&json)
+                        .ok()
+                        .map(|i| Track::from_info(&i))
+                }
+                _ => self.track(&path),
+            })
+            .take(limit)
+            .collect()
+    }
+
     /// Random tracks (for a "shuffle all" / radio-like mix).
     pub fn random_tracks(&self, limit: usize) -> Vec<Track> {
         self.query(
@@ -1101,6 +1131,20 @@ impl Library {
     }
 
     pub fn record_play(&self, path: &str) {
+        self.record_play_with(path, None);
+    }
+
+    /// Count a play: a library file by path, a plugin track by URI with its
+    /// metadata (it has no row in `tracks`). Other streams are not counted.
+    pub fn record_played(&self, info: &crate::controller::TrackInfo) {
+        if crate::plugin::is_plugin_uri(&info.uri) {
+            self.record_play_with(&info.uri, serde_json::to_string(info).ok());
+        } else if let Some(p) = &info.path {
+            self.record_play(p);
+        }
+    }
+
+    fn record_play_with(&self, path: &str, info: Option<String>) {
         let now = now_unix();
         let conn = self.w();
         let _ = conn.execute(
@@ -1109,8 +1153,8 @@ impl Library {
             params![path, now],
         );
         let _ = conn.execute(
-            "INSERT INTO history (path, played_at) VALUES (?1, ?2)",
-            params![path, now],
+            "INSERT INTO history (path, played_at, info) VALUES (?1, ?2, ?3)",
+            params![path, now, info],
         );
         drop(conn);
         self.touch();
@@ -1582,6 +1626,34 @@ mod tests {
         lib.set_album_favorite(&id, true);
         assert!(lib.album(&id).unwrap().favorite);
         assert_eq!(lib.favorite_albums().len(), 1);
+
+        // Plugin plays join the history with their metadata; each track
+        // shows once, most recent first; other streams are not counted.
+        let plugin = crate::controller::TrackInfo {
+            uri: crate::plugin::plugin_uri("demo", "track/9"),
+            title: "Far".into(),
+            ..Default::default()
+        };
+        lib.record_played(&plugin);
+        lib.record_played(&crate::controller::TrackInfo {
+            uri: "https://radio.example/stream".into(),
+            title: "Radio".into(),
+            ..Default::default()
+        });
+        lib.record_play("/m/a/1.flac");
+        let recent: Vec<(String, bool)> = lib
+            .recent_plays(10)
+            .into_iter()
+            .map(|t| (t.title.clone(), t.is_plugin()))
+            .collect();
+        assert_eq!(
+            recent,
+            [
+                ("One".to_string(), false),
+                ("Far".to_string(), true),
+                ("Two".to_string(), false)
+            ]
+        );
     }
 
     #[test]

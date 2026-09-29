@@ -181,6 +181,7 @@ pub struct Models {
     pub s_artists: Rows<ArtistCard>,
     pub tracks: Rows<TrackRow>,
     pub home_tracks: Rows<TrackRow>,
+    pub home_recent: Rows<TrackRow>,
     pub al_tracks: Rows<TrackRow>,
     pub ar_top: Rows<TrackRow>,
     pub fav_tracks: Rows<TrackRow>,
@@ -210,11 +211,12 @@ impl Models {
         ]
     }
 
-    pub fn track_models(&self) -> [&Rows<TrackRow>; 8] {
+    pub fn track_models(&self) -> [&Rows<TrackRow>; 9] {
         [
             &self.br_tracks,
             &self.tracks,
             &self.home_tracks,
+            &self.home_recent,
             &self.al_tracks,
             &self.ar_top,
             &self.fav_tracks,
@@ -228,6 +230,7 @@ impl Models {
         Some(match list {
             "tracks" => &self.tracks,
             "home-tracks" => &self.home_tracks,
+            "home-recent" => &self.home_recent,
             "album" => &self.al_tracks,
             "artist-top" => &self.ar_top,
             "fav" => &self.fav_tracks,
@@ -615,6 +618,7 @@ fn bind_models(ui: &Rc<Ui>) {
     app.set_home_added(model(&m.home_added));
     app.set_home_top(model(&m.home_top));
     app.set_home_tracks(model(&m.home_tracks));
+    app.set_home_recent(model(&m.home_recent));
     app.set_al_more(model(&m.al_more));
     app.set_al_tracks(model(&m.al_tracks));
     app.set_ar_own(model(&m.ar_own));

@@ -90,6 +90,13 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
                 .map(|a| album_card(ui, a, true))
                 .collect();
             set_rows(&m.home_top, top);
+            // Library files and plugin tracks, with their source badge.
+            let recent = lib.recent_plays(6);
+            set_rows(&m.home_recent, track_rows(ui, &recent, opts(true)));
+            ui.st
+                .borrow_mut()
+                .lists
+                .insert("home-recent".into(), recent);
             let tracks = lib.most_played_tracks(6);
             set_rows(&m.home_tracks, track_rows(ui, &tracks, opts(true)));
             ui.st

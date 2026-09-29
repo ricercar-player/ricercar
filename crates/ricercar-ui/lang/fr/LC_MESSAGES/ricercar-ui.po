@@ -807,6 +807,10 @@ msgid "Pick up where you left off"
 msgstr "Reprendre là où vous en étiez"
 
 msgctxt "HomePage"
+msgid "Recently played"
+msgstr "Écoutés récemment"
+
+msgctxt "HomePage"
 msgid "albums"
 msgstr "albums"
 
@@ -855,8 +859,8 @@ msgid "Looking for audio files"
 msgstr "Recherche des fichiers audio"
 
 msgctxt "HomePage"
-msgid "Recently played"
-msgstr "Écoutés récemment"
+msgid "Albums played recently"
+msgstr "Albums écoutés récemment"
 
 msgctxt "HomePage"
 msgid "Recently added"

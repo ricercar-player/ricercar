@@ -464,9 +464,7 @@ impl Controller {
                                 };
                                 if let Some(info) = played {
                                     counted_serial = play_serial;
-                                    if let Some(p) = &info.path {
-                                        lib.record_play(p);
-                                    }
+                                    lib.record_played(&info);
                                     events.publish(CtlEvent::Played(Box::new(info)));
                                 }
                             }

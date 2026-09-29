@@ -253,6 +253,12 @@ export component HomePage inherits PageScroll {
                 clicked => { App.shuffle-all(); }
             }
         }
+        if App.home-recent.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Recently played"); }
+            TrackTable { rows: App.home-recent; list: "home-recent"; show-cover: true; header: false; }
+        }
         if App.lib-tracks == 0 && !App.scanning: EmptyState {
             icon: Icons.library;
             title: @tr("Your library is empty");
@@ -268,7 +274,7 @@ export component HomePage inherits PageScroll {
         if App.home-played.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 16px;
-            SectionTitle { text: @tr("Recently played"); }
+            SectionTitle { text: @tr("Albums played recently"); }
             AlbumShelf { albums: App.home-played; playing-album: App.album-id; }
         }
         if App.home-added.length > 0: VerticalLayout {
