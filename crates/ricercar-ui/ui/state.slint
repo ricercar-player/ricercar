@@ -154,6 +154,15 @@ export struct PluginNav {
     arg: string,
     // folder | album | playlist | artist | track
     kind: string,
+    // plugin name (playlists in the Playlists list)
+    source: string,
+}
+
+// A Home shelf from a plugin ("New releases" of a service)
+export struct HomeShelf {
+    title: string,
+    source: string,
+    cards: [AlbumCard],
 }
 
 export struct ChainHop {
@@ -263,6 +272,11 @@ export global App {
     in property <[TrackRow]> home-tracks;
     // last tracks played, plugins included
     in property <[TrackRow]> home-recent;
+    in property <[HomeShelf]> home-shelves;
+    // playlists of plugins with `library` (sidebar)
+    in property <[PluginNav]> plugin-playlists;
+    // a plugin's library is in the pages (Home is not "empty" then)
+    in property <bool> plugin-library;
     in property <int> lib-tracks;
     in property <int> lib-albums;
     in property <int> lib-artists;

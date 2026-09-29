@@ -592,8 +592,17 @@ impl PluginHost {
     }
 
     pub fn browse_root(&self, id: &str) -> Result<Vec<Item>, PluginError> {
+        Ok(self.browse_root_full(id)?.0)
+    }
+
+    /// `browse.root` with its optional `home` entries: (sections, home).
+    pub fn browse_root_full(
+        &self,
+        id: &str,
+    ) -> Result<(Vec<Item>, Option<Vec<Item>>), PluginError> {
         let v = self.call(id, "browse.root", json!({}))?;
-        Ok(items_of(v.get("sections")))
+        let home = v.get("home").map(|h| items_of(Some(h)));
+        Ok((items_of(v.get("sections")), home))
     }
 
     /// Children of a browsable item: (items, total, has_more).

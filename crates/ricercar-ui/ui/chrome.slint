@@ -222,7 +222,14 @@ export component Sidebar inherits Rectangle {
                     active: App.page == Page.playlist && App.pl-id == p.id;
                     clicked => { App.navigate(Page.playlist, p.id); }
                 }
-                if App.playlists.length == 0: Text {
+                for p in App.plugin-playlists: NavItem {
+                    icon: Icons.list-music;
+                    text: p.title;
+                    trailing: p.source;
+                    active: App.page == Page.browse && App.br-arg == p.arg;
+                    clicked => { App.navigate(Page.browse, p.arg); }
+                }
+                if App.playlists.length == 0 && App.plugin-playlists.length == 0: Text {
                     text: "   " + @tr("No playlists yet");
                     font-size: Theme.fs-sm;
                     color: Theme.text3;

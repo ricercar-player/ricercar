@@ -221,7 +221,7 @@ Every entry a plugin returns is an **item**:
 
 | Method | Result |
 |---|---|
-| `browse.root` | `{sections: [item]}`. Top-level entries shown under the plugin's name in the sidebar (e.g. "Favourites", "Playlists", "New releases"). |
+| `browse.root` | `{sections: [item], home?: [item]}`. `sections`: top-level entries shown under the plugin's name in the sidebar (e.g. "Favourites", "Playlists", "New releases"). `home` (optional, used with `library`): entries shown as shelves on the host's Home page (e.g. "New releases"); the host shows the first page of each. |
 | `browse.list {ref, offset, limit}` | `{items: [item], total?, has_more}`. Children of a browsable item. Pages of at most 200. |
 | `search {query, kinds?, offset, limit}` | `{groups: [{kind, items, total?, has_more}]}` |
 | `item.get {ref}` | One item, fresh. Used to refresh metadata of restored sessions. |
@@ -234,14 +234,17 @@ except the library lists below.
 
 With the `library` capability, the plugin's music joins the host's own
 **Albums**, **Artists** and **Tracks** pages and its search results, next to
-the local library and marked with the plugin's name. A plugin that only
-declares `browse` keeps its sections in the sidebar.
+the local library and marked with the plugin's name. Its playlists join the
+sidebar's **Playlists** list, its `home` entries become shelves on the Home
+page, and it has no sidebar section of its own. A plugin that only declares
+`browse` keeps its sections in the sidebar.
 
 | Method | Result |
 |---|---|
 | `library.albums {offset, limit}` | `{items: [item], total?, has_more}`: every album of the user's library on the service (kind `album`, browsable: its children are its tracks). |
 | `library.artists {offset, limit}` | Same, kind `artist` (browsable: its children are its albums). |
 | `library.tracks {offset, limit}` | Same, kind `track`. |
+| `library.playlists {offset, limit}` | Optional. Same, kind `playlist` (browsable: its children are its tracks): the user's playlists on the service. A plugin without it answers `-32601`. |
 
 - "The user's library" is what the service considers theirs: all the
   music of a personal server, the saved albums and tracks of a streaming

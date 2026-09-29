@@ -485,6 +485,8 @@ fn main() {
                     {"ref": "albums", "kind": "folder", "title": "Albums", "browsable": true},
                     {"ref": "playlists", "kind": "folder", "title": "Playlists", "browsable": true},
                     {"ref": "favorites", "kind": "folder", "title": "Favourites", "browsable": true}
+                ], "home": [
+                    {"ref": "albums", "kind": "folder", "title": "New releases", "browsable": true}
                 ]})),
                 "browse.list" => match children(&st, &r) {
                     Some(items) => {
@@ -542,10 +544,11 @@ fn main() {
                         }
                     }
                 }
-                "library.albums" | "library.artists" | "library.tracks" => {
+                "library.albums" | "library.artists" | "library.tracks" | "library.playlists" => {
                     let all: Vec<Value> = match method.as_str() {
                         "library.albums" => ALBUMS.iter().map(|a| album_item(&st, a)).collect(),
                         "library.artists" => vec![artist_item(&st)],
+                        "library.playlists" => children(&st, "playlists").unwrap_or_default(),
                         _ => TRACKS.iter().map(|t| track_item(&st, t)).collect(),
                     };
                     let offset = params["offset"].as_u64().unwrap_or(0) as usize;

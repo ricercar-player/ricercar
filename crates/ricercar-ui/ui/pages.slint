@@ -259,7 +259,14 @@ export component HomePage inherits PageScroll {
             SectionTitle { text: @tr("Recently played"); }
             TrackTable { rows: App.home-recent; list: "home-recent"; show-cover: true; header: false; }
         }
-        if App.lib-tracks == 0 && !App.scanning: EmptyState {
+        // Shelves from plugins ("New releases" of a service).
+        for s in App.home-shelves: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: s.title + " · " + s.source; }
+            AlbumShelf { albums: s.cards; playing-album: App.album-id; }
+        }
+        if App.lib-tracks == 0 && !App.scanning && !App.plugin-library: EmptyState {
             icon: Icons.library;
             title: @tr("Your library is empty");
             body: @tr("Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, AAC, MP3 and Ogg Vorbis files and watches them for changes. Streams pushed from a UPnP app on your phone play here too.");

@@ -169,6 +169,12 @@ fn sign_in_browse_search_and_errors() {
 
     let root = h.browse_root("demo").unwrap();
     assert_eq!(root.len(), 3);
+    let (_, home) = h.browse_root_full("demo").unwrap();
+    assert_eq!(home.unwrap()[0].title, "New releases");
+    let playlists = h
+        .library_all("demo", ricercar_core::plugin::LibraryList::Playlists, 100)
+        .unwrap();
+    assert_eq!(playlists[0].kind, ItemKind::Playlist);
     let (albums, total, more) = h.browse_list("demo", "albums", 0, 50).unwrap();
     assert_eq!((albums.len(), total, more), (2, Some(2), false));
     assert_eq!(albums[0].kind, ItemKind::Album);

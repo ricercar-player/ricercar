@@ -348,6 +348,9 @@ impl Ui {
                     for m in self.models.album_models() {
                         m.patch_cover(key, &img);
                     }
+                    for s in &self.plugins.borrow().home_shelves {
+                        s.cards.patch_cover(key, &img);
+                    }
                     self.models.artists.patch_cover(key, &img);
                     self.models.s_artists.patch_cover(key, &img);
                 }

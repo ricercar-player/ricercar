@@ -49,6 +49,8 @@ pub enum LibraryList {
     Albums,
     Artists,
     Tracks,
+    /// Optional: the user's playlists on the service.
+    Playlists,
 }
 
 impl LibraryList {
@@ -57,6 +59,7 @@ impl LibraryList {
             LibraryList::Albums => "library.albums",
             LibraryList::Artists => "library.artists",
             LibraryList::Tracks => "library.tracks",
+            LibraryList::Playlists => "library.playlists",
         }
     }
 }

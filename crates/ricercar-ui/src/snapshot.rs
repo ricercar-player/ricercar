@@ -727,6 +727,16 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            "plugin-home",
+            (
+                600,
+                Box::new(|ui| {
+                    ui.app().set_now_playing_open(false);
+                    ui.navigate(Page::Home, "", true);
+                }),
+            ),
+        ),
+        (
             "plugin-search",
             (
                 1200,

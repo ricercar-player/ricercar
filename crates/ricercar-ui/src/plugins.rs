@@ -68,6 +68,19 @@ pub struct PluginsView {
     loading_libs: std::collections::HashSet<String>,
     /// Cover key (art URL) of the plugin album on the album page.
     pub album_art: Option<String>,
+    /// `home` entries of each plugin's `browse.root`, and the Home shelves
+    /// read from them (plugins with `library` only).
+    home: HashMap<String, Vec<Item>>,
+    pub home_shelves: Vec<HomeShelfRows>,
+    loading_home: std::collections::HashSet<String>,
+}
+
+/// A Home shelf from a plugin: plugin id, title, cards.
+pub struct HomeShelfRows {
+    id: String,
+    title: String,
+    source: String,
+    pub cards: crate::app::Rows<AlbumCard>,
 }
 
 /// Local results of the global search.
@@ -102,6 +115,7 @@ pub struct PluginLib {
     pub albums: Vec<Item>,
     pub artists: Vec<Item>,
     pub tracks: Vec<Item>,
+    pub playlists: Vec<Item>,
 }
 
 /// Which sources the Albums, Artists and Tracks pages show.
@@ -281,6 +295,94 @@ fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
     ui.app().set_plugin_rows(ModelRc::new(VecModel::from(rows)));
 }
 
+/// Home shelves of plugins with `library`: the `home` entries of their
+/// `browse.root`, read once per session (first page of each).
+pub fn load_home_shelves(ui: &Rc<Ui>) {
+    let wanted: Vec<(String, String, Item)> = {
+        let pv = ui.plugins.borrow();
+        pv.libs
+            .iter()
+            .flat_map(|l| {
+                pv.home
+                    .get(&l.id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|i| i.is_browsable())
+                    .map(|i| (l.id.clone(), l.name.clone(), i.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    // Forget the shelves of plugins gone or without library.
+    ui.plugins.borrow_mut().home_shelves.retain(|s| {
+        wanted
+            .iter()
+            .any(|(id, _, i)| *id == s.id && i.title == s.title)
+    });
+    show_home_shelves(ui);
+    for (id, name, entry) in wanted {
+        let key = format!("{id}{SEP}{}", entry.reference);
+        {
+            let pv = ui.plugins.borrow();
+            if pv.loading_home.contains(&key)
+                || pv
+                    .home_shelves
+                    .iter()
+                    .any(|s| s.id == id && s.title == entry.title)
+            {
+                continue;
+            }
+        }
+        ui.plugins.borrow_mut().loading_home.insert(key.clone());
+        let h = host(ui);
+        std::thread::spawn(move || {
+            let r = h.browse_list(&id, &entry.reference, 0, 24);
+            post(move |ui| {
+                ui.plugins.borrow_mut().loading_home.remove(&key);
+                let items = match r {
+                    Ok((items, _, _)) => items,
+                    Err(e) => {
+                        tracing::info!("plugin[{id}] home {}: {e}", entry.title);
+                        return;
+                    }
+                };
+                let cards: Vec<AlbumCard> = items
+                    .iter()
+                    .filter(|i| i.kind != ItemKind::Track && i.is_browsable())
+                    .map(|i| album_card(ui, &id, &name, i, true))
+                    .collect();
+                if cards.is_empty() {
+                    return;
+                }
+                let rows = crate::app::Rows::default();
+                set_rows(&rows, cards);
+                ui.plugins.borrow_mut().home_shelves.push(HomeShelfRows {
+                    id,
+                    title: entry.title,
+                    source: name,
+                    cards: rows,
+                });
+                show_home_shelves(ui);
+            });
+        });
+    }
+}
+
+fn show_home_shelves(ui: &Ui) {
+    let pv = ui.plugins.borrow();
+    let shelves: Vec<crate::HomeShelf> = pv
+        .home_shelves
+        .iter()
+        .map(|s| crate::HomeShelf {
+            title: s.title.clone().into(),
+            source: s.source.clone().into(),
+            cards: crate::app::model(&s.cards),
+        })
+        .collect();
+    ui.app()
+        .set_home_shelves(ModelRc::new(VecModel::from(shelves)));
+}
+
 /// Sidebar: each signed-in plugin that browses, with its `browse.root`.
 fn refresh_sections(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
     let ready: Vec<&PluginStatus> = statuses
@@ -291,6 +393,7 @@ fn refresh_sections(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
         let mut pv = ui.plugins.borrow_mut();
         pv.sections
             .retain(|id, _| ready.iter().any(|s| &s.id == id));
+        pv.home.retain(|id, _| ready.iter().any(|s| &s.id == id));
     }
     for s in &ready {
         let pending = {
@@ -306,13 +409,17 @@ fn refresh_sections(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
             .insert(s.id.clone());
         let (h, id) = (host(ui), s.id.clone());
         std::thread::spawn(move || {
-            let r = h.browse_root(&id);
+            let r = h.browse_root_full(&id);
             post(move |ui| {
                 ui.plugins.borrow_mut().loading_sections.remove(&id);
                 match r {
-                    Ok(items) => {
-                        ui.plugins.borrow_mut().sections.insert(id, items);
+                    Ok((items, home)) => {
+                        let mut pv = ui.plugins.borrow_mut();
+                        pv.sections.insert(id.clone(), items);
+                        pv.home.insert(id, home.unwrap_or_default());
+                        drop(pv);
                         rebuild_nav(ui);
+                        load_home_shelves(ui);
                     }
                     Err(e) => tracing::info!("plugin[{id}] browse.root: {e}"),
                 }
@@ -332,6 +439,8 @@ fn kind_name(k: ItemKind) -> &'static str {
     }
 }
 
+/// Sidebar: plugins without `library` keep a section of their own; the
+/// playlists of those with it join the Playlists list.
 fn rebuild_nav(ui: &Ui) {
     let order: Vec<(String, String)> = host(ui)
         .statuses()
@@ -339,11 +448,33 @@ fn rebuild_nav(ui: &Ui) {
         .map(|s| (s.id, s.name))
         .collect();
     let pv = ui.plugins.borrow();
+    let playlists: Vec<PluginNav> = pv
+        .libs
+        .iter()
+        .flat_map(|l| {
+            l.playlists
+                .iter()
+                .filter(|p| p.is_browsable())
+                .map(|p| PluginNav {
+                    header: false,
+                    title: p.title.clone().into(),
+                    arg: browse_arg(&l.id, &p.reference, &p.title).into(),
+                    kind: "playlist".into(),
+                    source: l.name.clone().into(),
+                })
+        })
+        .collect();
+    ui.app()
+        .set_plugin_playlists(ModelRc::new(VecModel::from(playlists)));
+    ui.app().set_plugin_library(!pv.libs.is_empty());
     let mut rows = Vec::new();
     for (id, name) in order {
         let Some(sections) = pv.sections.get(&id) else {
             continue;
         };
+        if pv.libs.iter().any(|l| l.id == id) {
+            continue;
+        }
         rows.push(PluginNav {
             header: true,
             title: name.into(),
@@ -355,6 +486,7 @@ fn rebuild_nav(ui: &Ui) {
                 title: it.title.clone().into(),
                 arg: browse_arg(&id, &it.reference, &it.title).into(),
                 kind: kind_name(it.kind).into(),
+                source: Default::default(),
             });
         }
     }
@@ -1020,6 +1152,8 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
     if dropped {
         refresh_library_sources(ui);
         reload_library_page(ui);
+        rebuild_nav(ui);
+        load_home_shelves(ui);
     }
     for s in ready {
         let known = {
@@ -1041,6 +1175,11 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                     albums: read(LibraryList::Albums)?,
                     artists: read(LibraryList::Artists)?,
                     tracks: read(LibraryList::Tracks)?,
+                    // Optional in the protocol.
+                    playlists: read(LibraryList::Playlists).unwrap_or_else(|e| {
+                        tracing::debug!("plugin[{id}] library.playlists: {e}");
+                        Vec::new()
+                    }),
                 })
             })();
             post(move |ui| {
@@ -1063,6 +1202,8 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                         drop(pv);
                         refresh_library_sources(ui);
                         reload_library_page(ui);
+                        rebuild_nav(ui);
+                        load_home_shelves(ui);
                     }
                     Err(e) => tracing::warn!("plugin[{id}] library: {e}"),
                 }
