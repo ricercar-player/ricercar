@@ -13,6 +13,8 @@ export global TrackMenu {
     in-out property <int> serial;
     in-out property <string> album-id;
     in-out property <bool> album-plugin;
+    // the track comes from a plugin (no album or artist page, no folder)
+    in-out property <bool> track-plugin;
     in-out property <int> album-serial;
 }
 
@@ -49,9 +51,15 @@ export component TrackLine inherits Rectangle {
     in property <bool> show-plays;
     in property <bool> show-artist: true;
     in property <bool> alternate;
+    // Hover of the whole row. Hovering a button inside the row takes the
+    // hover from `ta`, so the buttons shown on hover count too (otherwise
+    // they vanish under the pointer and come back, flickering).
+    private property <bool> hot: ta.has-hover || pl.has-hover || more.has-hover || cover-hot || fav-hot;
+    private property <bool> cover-hot;
+    private property <bool> fav-hot;
     height: 52px;
     border-radius: Theme.r-md;
-    background: ta.pressed ? Theme.press : ta.has-hover || more.has-hover ? Theme.hover : transparent;
+    background: ta.pressed ? Theme.press : hot ? Theme.hover : transparent;
     animate background { duration: 90ms; }
     accessible-role: list-item;
     accessible-label: item.title + ", " + item.artist;
@@ -61,6 +69,7 @@ export component TrackLine inherits Rectangle {
         pointer-event(e) => {
             if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
                 TrackMenu.list = root.list;
+                TrackMenu.track-plugin = root.item.source != "";
                 TrackMenu.index = root.index;
                 TrackMenu.x = root.absolute-position.x + self.mouse-x;
                 TrackMenu.y = root.absolute-position.y + self.mouse-y;
@@ -74,21 +83,17 @@ export component TrackLine inherits Rectangle {
         spacing: 16px;
         Rectangle {
             width: 28px;
-            if item.playing && !ta.has-hover: NowBars {
+            if item.playing && !hot: NowBars {
                 x: parent.width - self.width;
                 animated: App.playing;
             }
-            if ta.has-hover: Icon {
+            if hot: Icon {
                 x: parent.width - self.width;
                 source: Icons.play-fill;
                 size: 14px;
-                tint: Theme.text;
-                TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { App.track-activate(root.list, root.index); }
-                }
+                tint: pl.has-hover ? Theme.accent : Theme.text;
             }
-            if !item.playing && !ta.has-hover: Text {
+            if !item.playing && !hot: Text {
                 width: 100%;
                 text: item.n;
                 font-size: Theme.fs-md;
@@ -96,13 +101,26 @@ export component TrackLine inherits Rectangle {
                 horizontal-alignment: right;
                 vertical-alignment: center;
             }
+            // The whole number column plays the track, in one click.
+            pl := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { App.track-activate(root.list, root.index); }
+            }
         }
-        if show-cover: Cover {
-            y: (parent.height - self.height) / 2;
+        if show-cover: Rectangle {
             width: 38px;
-            height: 38px;
-            radius: Theme.r-sm;
-            source: item.cover;
+            Cover {
+                y: (parent.height - self.height) / 2;
+                width: 38px;
+                height: 38px;
+                radius: Theme.r-sm;
+                source: item.cover;
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                changed has-hover => { root.cover-hot = self.has-hover; }
+                clicked => { App.track-activate(root.list, root.index); }
+            }
         }
         VerticalLayout {
             horizontal-stretch: 3;
@@ -161,12 +179,13 @@ export component TrackLine inherits Rectangle {
         }
         Rectangle {
             width: 30px;
-            if item.fav || ta.has-hover || more.has-hover: IconButton {
+            if item.fav || hot: IconButton {
                 size: 28px;
                 icon-size: 16px;
                 icon: item.fav ? Icons.heart-fill : Icons.heart;
                 tint: item.fav ? Theme.accent : Theme.text2;
                 tooltip: @tr("Favorite");
+                changed has-hover => { root.fav-hot = self.has-hover; }
                 clicked => { App.track-action(root.list, root.index, "fav"); }
             }
         }
@@ -180,11 +199,12 @@ export component TrackLine inherits Rectangle {
         }
         Rectangle {
             width: 30px;
-            opacity: ta.has-hover || more.has-hover ? 1 : 0;
+            opacity: hot ? 1 : 0;
             more := TouchArea {
                 mouse-cursor: pointer;
                 clicked => {
                     TrackMenu.list = root.list;
+                    TrackMenu.track-plugin = root.item.source != "";
                     TrackMenu.index = root.index;
                     TrackMenu.x = root.absolute-position.x + root.width - 200px;
                     TrackMenu.y = root.absolute-position.y + root.height - 6px;

@@ -12,10 +12,13 @@ component QueueLine inherits Rectangle {
     in property <int> index;
     in property <length> row-h: 58px;
     out property <bool> dragging: grip.pressed;
+    // the remove button takes the hover from `ta` when pointed at
+    private property <bool> btn-hot;
+    private property <bool> hot: ta.has-hover || grip.has-hover || btn-hot;
     callback drop-at(int, int);
     height: row-h;
     border-radius: Theme.r-md;
-    background: item.current ? Theme.accent-soft : ta.has-hover || grip.pressed ? Theme.hover : transparent;
+    background: item.current ? Theme.accent-soft : hot || grip.pressed ? Theme.hover : transparent;
     z: grip.pressed ? 10 : 0;
     // Drop indicator: a bar where the dragged row will land.
     private property <int> drag-steps: grip.pressed ? round((grip.mouse-y - grip.pressed-y) / row-h) : 0;
@@ -34,7 +37,7 @@ component QueueLine inherits Rectangle {
         spacing: 10px;
         Rectangle {
             width: 18px;
-            opacity: ta.has-hover || grip.pressed ? 1 : 0;
+            opacity: hot || grip.pressed ? 1 : 0;
             Icon { source: Icons.grip-vertical; size: 16px; tint: Theme.text3; }
             grip := TouchArea {
                 mouse-cursor: grab;
@@ -65,18 +68,19 @@ component QueueLine inherits Rectangle {
             Text { text: item.title; font-size: Theme.fs-md; font-weight: 500; color: item.current ? Theme.accent : Theme.text; overflow: elide; }
             Text { text: item.artist; font-size: Theme.fs-sm; color: Theme.text2; overflow: elide; }
         }
-        if !ta.has-hover || item.current: Text {
+        if !hot || item.current: Text {
             text: item.dur;
             font-size: Theme.fs-sm;
             color: Theme.text3;
             vertical-alignment: center;
         }
-        if ta.has-hover && !item.current: IconButton {
+        if hot && !item.current: IconButton {
             y: (parent.height - self.height) / 2;
             size: 28px;
             icon-size: 15px;
             icon: Icons.x;
             tooltip: @tr("Remove");
+            changed has-hover => { root.btn-hot = self.has-hover; }
             clicked => { App.queue-remove(root.item.id); }
         }
     }
@@ -445,7 +449,7 @@ export component ContextMenu inherits Rectangle {
     private property <bool> playlists-mode;
     private property <length> menu-w: 236px;
     // Lists from a plugin: no album or artist page, no folder.
-    private property <bool> plugin-list: is-album ? TrackMenu.album-plugin : TrackMenu.list == "browse" || TrackMenu.list == "psearch";
+    private property <bool> plugin-list: is-album ? TrackMenu.album-plugin : TrackMenu.track-plugin;
     TouchArea {
         clicked => { root.dismiss(); }
         pointer-event(e) => {

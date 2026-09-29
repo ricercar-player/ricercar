@@ -19,6 +19,7 @@ export component IconButton inherits Rectangle {
     in property <color> tint: active ? Theme.accent : Theme.text2;
     in property <string> tooltip;
     in property <bool> round: true;
+    out property <bool> has-hover: ta.has-hover;
     callback clicked();
     width: size;
     height: size;

@@ -60,9 +60,12 @@ component StationLine inherits Rectangle {
     in property <StationRow> st;
     in property <int> index;
     in property <string> list;
+    // the cover's play button takes the hover from `ta` when pointed at
+    private property <bool> play-hot;
+    private property <bool> hot: ta.has-hover || play-hot;
     height: 60px;
     border-radius: Theme.r-md;
-    background: ta.has-hover ? Theme.hover : transparent;
+    background: hot ? Theme.hover : transparent;
     accessible-role: list-item;
     accessible-label: st.name;
     accessible-action-default => { App.radio-play(list, index); }
@@ -81,11 +84,12 @@ component StationLine inherits Rectangle {
             radius: Theme.r-sm;
             source: st.cover;
             placeholder: Icons.radio;
-            if ta.has-hover: Rectangle {
+            if hot: Rectangle {
                 background: #00000099;
                 Icon { source: Icons.play-fill; size: 16px; tint: #ffffff; }
                 TouchArea {
                     mouse-cursor: pointer;
+                    changed has-hover => { root.play-hot = self.has-hover; }
                     clicked => { App.radio-play(root.list, root.index); }
                 }
             }
