@@ -665,6 +665,7 @@ pub fn album_card(ui: &Ui, a: &Album, eager: bool) -> AlbumCard {
         hires: a.is_hires(),
         fav: a.favorite,
         plugin: false,
+        source: Default::default(),
     }
 }
 
@@ -685,6 +686,7 @@ pub fn artist_card(ui: &Ui, a: &Artist, eager: bool) -> ArtistCard {
         tracks: a.track_count as i32,
         cover,
         ckey: key.into(),
+        source: Default::default(),
     }
 }
 
@@ -702,6 +704,12 @@ pub struct RowOpts {
 
 pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
     let now = ui.st.borrow().now_path.clone();
+    // Plugin names, looked up once per list (and only when needed).
+    let names = if tracks.iter().any(Track::is_plugin) {
+        crate::plugins::names(ui)
+    } else {
+        Default::default()
+    };
     let multi_disc = o.discs
         && tracks
             .iter()
@@ -782,6 +790,10 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
                 cover,
                 ckey: ckey.into(),
                 plays: t.play_count as i32,
+                source: ricercar_core::plugin::parse_plugin_uri(&t.path)
+                    .and_then(|(id, _)| names.get(&id).cloned())
+                    .unwrap_or_default()
+                    .into(),
             }
         })
         .collect()

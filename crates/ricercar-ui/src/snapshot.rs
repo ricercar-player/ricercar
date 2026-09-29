@@ -675,11 +675,31 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            "library-albums",
+            (1500, Box::new(|ui| ui.navigate(Page::Albums, "", true))),
+        ),
+        (
+            "library-artist",
+            (
+                1200,
+                Box::new(|ui| ui.navigate(Page::Artist, "Demo Ensemble", true)),
+            ),
+        ),
+        (
+            "library-tracks",
+            (1200, Box::new(|ui| ui.navigate(Page::Tracks, "", true))),
+        ),
+        (
             "plugin-album",
             (
                 1500,
                 Box::new(move |ui| {
-                    ui.navigate(Page::Browse, &album("album/2", "Night Studies"), true)
+                    let id = format!(
+                        "{}{}",
+                        crate::plugins::ALBUM_CARD,
+                        album("album/2", "Night Studies")
+                    );
+                    ui.navigate(Page::Album, &id, true)
                 }),
             ),
         ),

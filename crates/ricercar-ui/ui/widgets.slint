@@ -414,6 +414,8 @@ export component AlbumTile inherits Rectangle {
     in property <bool> hires;
     in property <bool> current;
     in property <bool> playing;
+    // plugin it comes from ("" local)
+    in property <string> source;
     in property <length> size: 176px;
     callback open();
     callback play();
@@ -453,6 +455,19 @@ export component AlbumTile inherits Rectangle {
             hb := Badge {
                 text: "HI-RES";
                 tint: #f0cf8a;
+            }
+        }
+        // Where it comes from, for albums of a plugin.
+        if root.source != "": Rectangle {
+            x: parent.width - self.width - 8px;
+            y: 8px;
+            width: sb.width;
+            height: sb.height;
+            border-radius: 4px;
+            background: #000000a0;
+            sb := Badge {
+                text: root.source.to-uppercase();
+                tint: #ffffffcc;
             }
         }
         // The album that is playing wears a small "on air" chip.

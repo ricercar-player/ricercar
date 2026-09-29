@@ -7,6 +7,7 @@ mod dac;
 mod diag;
 mod extras;
 mod images;
+mod merge;
 mod player;
 mod plugins;
 mod profile;

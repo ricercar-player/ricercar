@@ -21,8 +21,17 @@ use crate::{AlbumCard, CatalogRow, Page, PluginNav, PluginRow};
 
 /// Separates the parts of a browse argument / plugin card id.
 const SEP: char = '\u{1f}';
-/// Prefix of the album-card ids of plugin items.
+/// Prefix of the album-card ids of plugin items (browse page)…
 pub const CARD: &str = "plugin\u{1f}";
+/// …and of plugin albums (album page).
+pub const ALBUM_CARD: &str = "plugin-album\u{1f}";
+
+/// The browse argument behind a plugin card id, and whether it is an album.
+pub fn card_target(id: &str) -> Option<(&str, bool)> {
+    id.strip_prefix(ALBUM_CARD)
+        .map(|a| (a, true))
+        .or_else(|| id.strip_prefix(CARD).map(|a| (a, false)))
+}
 /// Items asked per page (the protocol allows 200).
 const PAGE: usize = 100;
 /// Most tracks gathered to play a plugin album or playlist.
@@ -52,6 +61,45 @@ pub struct PluginsView {
     pending_install: Option<catalog::Entry>,
     /// Index to read instead of the hub's (the headless tour).
     pub index_override: Option<String>,
+    /// Library lists of signed-in plugins with `library`, in declaration
+    /// order, and the ones being read.
+    libs: Vec<PluginLib>,
+    loading_libs: std::collections::HashSet<String>,
+    /// Cover key (art URL) of the plugin album on the album page.
+    pub album_art: Option<String>,
+}
+
+/// A plugin's albums, artists and tracks (`library` capability), kept in
+/// memory for the session.
+#[derive(Clone, Default)]
+pub struct PluginLib {
+    pub id: String,
+    pub name: String,
+    pub albums: Vec<Item>,
+    pub artists: Vec<Item>,
+    pub tracks: Vec<Item>,
+}
+
+/// Which sources the Albums, Artists and Tracks pages show.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceFilter {
+    All,
+    Local,
+    Plugin(String),
+}
+
+impl SourceFilter {
+    pub fn local(&self) -> bool {
+        matches!(self, SourceFilter::All | SourceFilter::Local)
+    }
+
+    fn plugin(&self, id: &str) -> bool {
+        match self {
+            SourceFilter::All => true,
+            SourceFilter::Local => false,
+            SourceFilter::Plugin(p) => p == id,
+        }
+    }
 }
 
 pub fn browse_arg(id: &str, reference: &str, title: &str) -> String {
@@ -123,6 +171,7 @@ pub fn poll(ui: &Rc<Ui>) {
     }
     ui.plugins.borrow_mut().rev = Some(rev);
     let statuses = host(ui).statuses();
+    refresh_libraries(ui, &statuses);
     refresh_rows(ui, &statuses);
     refresh_sections(ui, &statuses);
     refresh_search_sources(ui, &statuses);
@@ -442,16 +491,29 @@ fn close_sign_in(ui: &Ui) {
 // ------------------------------------------------------------ browse page
 
 fn card(ui: &Ui, id: &str, it: &Item) -> AlbumCard {
-    let (cover, ckey) = match it.art.clone().filter(|a| a.starts_with("http")) {
-        Some(url) => (ui.cover(&url, Source::Url(url.clone()), None, TILE), url),
+    card_with(ui, id, it, true)
+}
+
+fn card_with(ui: &Ui, id: &str, it: &Item, eager: bool) -> AlbumCard {
+    let (cover, ckey) = match art_url(it) {
+        Some(url) if eager => (ui.cover(&url, Source::Url(url.clone()), None, TILE), url),
+        Some(url) => (
+            ui.cover_lazy(&url, Source::Url(url.clone()), None, TILE),
+            url,
+        ),
         None => (slint::Image::default(), String::new()),
     };
     let hires = it
         .format
         .as_ref()
         .is_some_and(|f| ricercar_core::library::is_hires(f.sample_rate, f.bits));
+    let prefix = if it.kind == ItemKind::Album {
+        ALBUM_CARD
+    } else {
+        CARD
+    };
     AlbumCard {
-        id: format!("{CARD}{}", browse_arg(id, &it.reference, &it.title)).into(),
+        id: format!("{prefix}{}", browse_arg(id, &it.reference, &it.title)).into(),
         title: it.title.clone().into(),
         artist: it
             .subtitle
@@ -465,6 +527,7 @@ fn card(ui: &Ui, id: &str, it: &Item) -> AlbumCard {
         hires,
         fav: false,
         plugin: true,
+        source: Default::default(),
     }
 }
 
@@ -736,6 +799,376 @@ pub fn run_search(ui: &Rc<Ui>, q: &str) {
             }
         });
     });
+}
+
+// ------------------------------------------------------------ libraries
+
+/// Plugin names by id.
+pub fn names(ui: &Ui) -> HashMap<String, String> {
+    host(ui)
+        .statuses()
+        .into_iter()
+        .map(|s| (s.id, s.name))
+        .collect()
+}
+
+/// Read the library lists of newly signed-in plugins; forget those of
+/// plugins signed out or stopped. Pages that show them reload.
+fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
+    let ready: Vec<&PluginStatus> = statuses
+        .iter()
+        .filter(|s| s.signed_in() && s.caps.library)
+        .collect();
+    let dropped = {
+        let mut pv = ui.plugins.borrow_mut();
+        let before = pv.libs.len();
+        pv.libs.retain(|l| ready.iter().any(|s| s.id == l.id));
+        pv.libs.len() != before
+    };
+    if dropped {
+        refresh_library_sources(ui);
+        reload_library_page(ui);
+    }
+    for s in ready {
+        let known = {
+            let pv = ui.plugins.borrow();
+            pv.libs.iter().any(|l| l.id == s.id) || pv.loading_libs.contains(&s.id)
+        };
+        if known {
+            continue;
+        }
+        ui.plugins.borrow_mut().loading_libs.insert(s.id.clone());
+        let (h, id, name) = (host(ui), s.id.clone(), s.name.clone());
+        std::thread::spawn(move || {
+            use ricercar_core::plugin::{LIBRARY_MAX, LibraryList};
+            let read = |l| h.library_all(&id, l, LIBRARY_MAX);
+            let r = (|| {
+                Ok::<_, PluginError>(PluginLib {
+                    id: id.clone(),
+                    name,
+                    albums: read(LibraryList::Albums)?,
+                    artists: read(LibraryList::Artists)?,
+                    tracks: read(LibraryList::Tracks)?,
+                })
+            })();
+            post(move |ui| {
+                ui.plugins.borrow_mut().loading_libs.remove(&id);
+                match r {
+                    Ok(lib) => {
+                        tracing::info!(
+                            "plugin[{id}] library: {} albums, {} artists, {} tracks",
+                            lib.albums.len(),
+                            lib.artists.len(),
+                            lib.tracks.len()
+                        );
+                        let order: Vec<String> =
+                            host(ui).statuses().into_iter().map(|s| s.id).collect();
+                        let mut pv = ui.plugins.borrow_mut();
+                        pv.libs.retain(|l| l.id != id);
+                        pv.libs.push(lib);
+                        pv.libs
+                            .sort_by_key(|l| order.iter().position(|o| *o == l.id));
+                        drop(pv);
+                        refresh_library_sources(ui);
+                        reload_library_page(ui);
+                    }
+                    Err(e) => tracing::warn!("plugin[{id}] library: {e}"),
+                }
+            });
+        });
+    }
+}
+
+fn reload_library_page(ui: &Rc<Ui>) {
+    let page = ui.app().get_page();
+    if matches!(
+        page,
+        Page::Albums | Page::Artists | Page::Tracks | Page::Artist | Page::Search
+    ) {
+        ui.reload_page();
+    }
+}
+
+/// "All", "Library", then each plugin that shares a library; the selection
+/// follows its plugin when the list changes.
+fn refresh_library_sources(ui: &Ui) {
+    let app = ui.app();
+    let current = source_filter(ui);
+    let pv = ui.plugins.borrow();
+    let mut names: Vec<slint::SharedString> = vec![t("All").into(), t("Library").into()];
+    names.extend(
+        pv.libs
+            .iter()
+            .map(|l| slint::SharedString::from(l.name.as_str())),
+    );
+    let selected = match &current {
+        SourceFilter::All => 0,
+        SourceFilter::Local => 1,
+        SourceFilter::Plugin(id) => pv
+            .libs
+            .iter()
+            .position(|l| &l.id == id)
+            .map(|p| p as i32 + 2)
+            .unwrap_or(0),
+    };
+    drop(pv);
+    app.set_library_sources(ModelRc::new(VecModel::from(names)));
+    app.set_library_source(selected);
+}
+
+pub fn source_filter(ui: &Ui) -> SourceFilter {
+    let i = ui.app().get_library_source();
+    let pv = ui.plugins.borrow();
+    match i {
+        1 => SourceFilter::Local,
+        i if i >= 2 => pv
+            .libs
+            .get(i as usize - 2)
+            .map(|l| SourceFilter::Plugin(l.id.clone()))
+            .unwrap_or(SourceFilter::All),
+        _ => SourceFilter::All,
+    }
+}
+
+/// (plugin id, plugin name, item) of the selected plugins' lists.
+fn picked(
+    ui: &Ui,
+    f: &SourceFilter,
+    pick: impl Fn(&PluginLib) -> &Vec<Item>,
+) -> Vec<(String, String, Item)> {
+    ui.plugins
+        .borrow()
+        .libs
+        .iter()
+        .filter(|l| f.plugin(&l.id))
+        .flat_map(|l| {
+            pick(l)
+                .iter()
+                .map(|i| (l.id.clone(), l.name.clone(), i.clone()))
+        })
+        .collect()
+}
+
+pub fn plugin_albums(ui: &Ui, f: &SourceFilter) -> Vec<(String, String, Item)> {
+    picked(ui, f, |l| &l.albums)
+}
+
+pub fn plugin_artists(ui: &Ui, f: &SourceFilter) -> Vec<(String, String, Item)> {
+    picked(ui, f, |l| &l.artists)
+}
+
+/// Plugin tracks as library tracks (plugin:// paths).
+pub fn plugin_tracks(ui: &Ui, f: &SourceFilter) -> Vec<Track> {
+    picked(ui, f, |l| &l.tracks)
+        .into_iter()
+        .filter(|(_, _, i)| i.kind == ItemKind::Track)
+        .map(|(id, _, i)| Track::from_info(&i.to_track_info(&id)))
+        .collect()
+}
+
+/// Album tile of a plugin album, marked with its plugin's name.
+pub fn album_card(ui: &Ui, id: &str, name: &str, it: &Item, eager: bool) -> AlbumCard {
+    let mut c = card_with(ui, id, it, eager);
+    c.source = name.into();
+    if let Some(a) = it.artist.clone().filter(|a| !a.is_empty()) {
+        c.artist = a.into();
+    }
+    if let Some(y) = it.year {
+        c.year = y.to_string().into();
+    }
+    c
+}
+
+pub fn art_url(it: &Item) -> Option<String> {
+    it.art
+        .clone()
+        .filter(|a| a.starts_with("https://") || a.starts_with("http://"))
+}
+
+// ------------------------------------------------------------ album & artist pages
+
+/// A plugin album on the album page: header from its item (the library
+/// list, else item.get), tracks from browse.list.
+pub fn load_album_page(ui: &Rc<Ui>, card_id: &str, arg: &str) {
+    let Some((id, reference, title)) = parse_arg(arg) else {
+        return;
+    };
+    let app = ui.app();
+    let name = name_of(ui, &id);
+    let known = ui
+        .plugins
+        .borrow()
+        .libs
+        .iter()
+        .find(|l| l.id == id)
+        .and_then(|l| l.albums.iter().find(|a| a.reference == reference).cloned());
+    app.set_al_id(card_id.into());
+    app.set_al_plugin(true);
+    app.set_al_title(title.into());
+    app.set_al_artist("".into());
+    app.set_al_year("".into());
+    app.set_al_genre("".into());
+    app.set_al_count(0);
+    app.set_al_duration("".into());
+    app.set_al_quality("".into());
+    app.set_al_hires(false);
+    app.set_al_dac_unsupported(false);
+    app.set_al_fav(false);
+    app.set_al_path(name.into());
+    app.set_al_cover(slint::Image::default());
+    ui.plugins.borrow_mut().album_art = None;
+    set_rows(&ui.models.al_tracks, Vec::new());
+    set_rows(&ui.models.al_more, Vec::new());
+    ui.st.borrow_mut().lists.insert("album".into(), Vec::new());
+    if let Some(item) = &known {
+        album_header(ui, item);
+    }
+    let serial = {
+        let mut pv = ui.plugins.borrow_mut();
+        pv.browse_serial += 1;
+        pv.browse_serial
+    };
+    let h = host(ui);
+    let card_id = card_id.to_string();
+    std::thread::spawn(move || {
+        let head = if known.is_none() {
+            h.item_get(&id, &reference).ok()
+        } else {
+            None
+        };
+        let mut items = Vec::new();
+        let mut err = None;
+        loop {
+            match h.browse_list(&id, &reference, items.len(), 200) {
+                Ok((page, _, more)) => {
+                    let n = page.len();
+                    items.extend(page);
+                    if !more || n == 0 || items.len() >= 2000 {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+            }
+        }
+        post(move |ui| {
+            if ui.plugins.borrow().browse_serial != serial
+                || ui.app().get_al_id() != card_id.as_str()
+            {
+                return;
+            }
+            if let Some(h) = &head {
+                album_header(ui, h);
+            }
+            if let Some(e) = err {
+                ui.toast(error_text(&name_of(ui, &id), &e), true);
+            }
+            let tracks = tracks_of(&id, &items);
+            let app = ui.app();
+            app.set_al_count(tracks.len() as i32);
+            let total: u64 = tracks.iter().map(|t| t.duration_ms).sum();
+            if total > 0 {
+                app.set_al_duration(crate::text::long_duration(total).into());
+            }
+            app.set_al_dac_unsupported(crate::extras::active_caps(ui).is_some_and(|c| {
+                tracks
+                    .iter()
+                    .filter_map(|t| t.sample_rate)
+                    .any(|r| !c.supports_rate(r))
+            }));
+            let o = RowOpts {
+                cover: false,
+                eager: true,
+                track_numbers: true,
+                discs: true,
+                album_artist: app.get_al_artist().to_string().into(),
+                start: 0,
+            };
+            set_rows(&ui.models.al_tracks, track_rows(ui, &tracks, o));
+            ui.st.borrow_mut().lists.insert("album".into(), tracks);
+        });
+    });
+}
+
+fn album_header(ui: &Ui, it: &Item) {
+    let app = ui.app();
+    if let Some(a) = it.artist.clone().or(it.album_artist.clone()) {
+        app.set_al_artist(a.into());
+    }
+    app.set_al_year(it.year.map(|y| y.to_string()).unwrap_or_default().into());
+    app.set_al_genre(it.genre.clone().unwrap_or_default().into());
+    if let Some(f) = &it.format {
+        let codec = f.codec.clone().map(|c| c.to_uppercase());
+        let q = crate::text::quality(f.sample_rate, f.bits, codec.as_deref(), None);
+        app.set_al_quality(
+            match (codec, q.is_empty()) {
+                (Some(c), false) => format!("{c} {q}"),
+                (Some(c), true) => c,
+                (None, _) => q,
+            }
+            .into(),
+        );
+        app.set_al_hires(ricercar_core::library::is_hires(f.sample_rate, f.bits));
+    }
+    if let Some(url) = art_url(it) {
+        app.set_al_cover(ui.cover(&url, Source::Url(url.clone()), None, crate::app::LARGE));
+        ui.plugins.borrow_mut().album_art = Some(url);
+    }
+}
+
+/// On an artist page, the albums plugins have under the same name.
+pub fn add_artist_albums(ui: &Rc<Ui>, name: &str) {
+    let refs: Vec<(String, String, String)> = ui
+        .plugins
+        .borrow()
+        .libs
+        .iter()
+        .flat_map(|l| {
+            l.artists
+                .iter()
+                .filter(|a| {
+                    a.title.eq_ignore_ascii_case(name)
+                        || a.title.to_lowercase() == name.to_lowercase()
+                })
+                .map(|a| (l.id.clone(), l.name.clone(), a.reference.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for (id, pname, reference) in refs {
+        let (h, name) = (host(ui), name.to_string());
+        std::thread::spawn(move || {
+            let r = h.browse_list(&id, &reference, 0, 200);
+            post(move |ui| {
+                if ui.app().get_ar_name() != name.as_str() {
+                    return;
+                }
+                let Ok((items, _, _)) = r else { return };
+                let cards: Vec<AlbumCard> = items
+                    .iter()
+                    .filter(|i| i.kind == ItemKind::Album)
+                    .map(|i| album_card(ui, &id, &pname, i, true))
+                    .collect();
+                if cards.is_empty() {
+                    return;
+                }
+                let app = ui.app();
+                app.set_ar_albums(app.get_ar_albums() + cards.len() as i32);
+                if app.get_ar_cover().size().width == 0
+                    && let Some(url) = items.iter().find_map(art_url)
+                {
+                    app.set_ar_cover(ui.cover(
+                        &url,
+                        Source::Url(url.clone()),
+                        None,
+                        crate::app::LARGE,
+                    ));
+                }
+                ui.models.ar_own.extend(cards);
+            });
+        });
+    }
 }
 
 // ------------------------------------------------------------ catalogue
@@ -1048,6 +1481,7 @@ pub fn wire(ui: &Rc<Ui>) {
             ui.app().set_install_open(false);
         })
     });
+    app.on_library_source_changed(|| with_ui(|ui| ui.reload_page()));
     app.on_search_source_changed(|| {
         with_ui(|ui| {
             let q = ui.app().get_search_text().to_string();

@@ -126,6 +126,7 @@ pub fn t(en: &'static str) -> &'static str {
         "Sign-in expired" => "Connexion expirée",
         "Signed out" => "Déconnecté",
         "Library" => "Bibliothèque",
+        "All" => "Tout",
         "The plugin gave an unusable address." => "Le plugin a fourni une adresse inutilisable.",
         "Not signed in yet. Check the code and try again." => {
             "Pas encore connecté. Vérifiez le code et réessayez."

@@ -13,6 +13,8 @@ export struct AlbumCard {
     fav: bool,
     // an album, playlist… of a plugin (opens its browse page)
     plugin: bool,
+    // name of the plugin it comes from ("" for the local library)
+    source: string,
 }
 
 export struct TrackRow {
@@ -32,6 +34,8 @@ export struct TrackRow {
     cover: image,
     ckey: string,
     plays: int,
+    // plugin name ("" for the local library)
+    source: string,
 }
 
 export struct ArtistCard {
@@ -40,6 +44,8 @@ export struct ArtistCard {
     tracks: int,
     cover: image,
     ckey: string,
+    // plugins it also comes from, "Jellyfin · a streaming service" ("" local only)
+    source: string,
 }
 
 export struct GenreCard {
@@ -272,6 +278,13 @@ export global App {
     callback albums-sort-changed();
     in property <[ArtistCard]> artists;
     in property <[TrackRow]> tracks;
+    // Albums / Artists / Tracks: "All", "Library", then each plugin that
+    // shares a library; shown when there is at least one.
+    in property <[string]> library-sources;
+    // local + plugin tracks on the Tracks page
+    in property <int> tracks-total;
+    in-out property <int> library-source;
+    callback library-source-changed();
     // Virtualized lists report the rows on screen so covers load lazily.
     callback visible(string, int, int);
     in-out property <int> track-sort;
@@ -288,6 +301,8 @@ export global App {
     in property <string> al-duration;
     in property <string> al-quality;
     in property <bool> al-hires;
+    // the album comes from a plugin
+    in property <bool> al-plugin;
     // a rate of this album is refused by the active output
     in property <bool> al-dac-unsupported;
     in property <bool> al-fav;

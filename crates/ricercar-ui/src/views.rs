@@ -99,13 +99,7 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
         }
         Page::Albums => load_albums(ui),
         Page::Album => load_album(ui, arg),
-        Page::Artists => {
-            let artists = lib.artists();
-            let rows: Vec<_> = artists.iter().map(|a| artist_card(ui, a, false)).collect();
-            set_rows(&m.artists, rows);
-            ui.st.borrow_mut().artists = artists;
-            visible(ui, "artists", 0, 40);
-        }
+        Page::Artists => load_artists(ui),
         Page::Artist => load_artist(ui, arg),
         Page::Tracks => load_tracks(ui),
         Page::Genres => {
@@ -150,19 +144,146 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
     }
 }
 
+/// Albums of the local library and of the plugins that share theirs, in
+/// one sorted grid (plugin albums wear their plugin's name).
 pub fn load_albums(ui: &Rc<Ui>) {
     let app = ui.app();
     let hires_only = app.get_albums_hires_only();
-    let albums: Vec<_> = ui
-        .ctx
-        .lib
-        .albums(album_sort(app.get_album_sort()))
-        .into_iter()
-        .filter(|a| !hires_only || a.is_hires())
-        .collect();
-    let rows: Vec<_> = albums.iter().map(|a| album_card(ui, a, false)).collect();
+    let sort = album_sort(app.get_album_sort());
+    let f = crate::plugins::source_filter(ui);
+    let albums: Vec<_> = if f.local() {
+        ui.ctx
+            .lib
+            .albums(sort)
+            .into_iter()
+            .filter(|a| !hires_only || a.is_hires())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut extra = crate::plugins::plugin_albums(ui, &f);
+    extra.retain(|(_, _, it)| {
+        !hires_only
+            || it
+                .format
+                .as_ref()
+                .is_some_and(|f| ricercar_core::library::is_hires(f.sample_rate, f.bits))
+    });
+    let rows: Vec<_> = if extra.is_empty() {
+        albums.iter().map(|a| album_card(ui, a, false)).collect()
+    } else {
+        use crate::merge::album_key;
+        extra.sort_by_cached_key(|(_, _, it)| {
+            album_key(
+                sort,
+                &it.title,
+                it.artist.as_deref().unwrap_or(""),
+                it.year,
+                0,
+            )
+        });
+        enum Entry {
+            Local(ricercar_core::Album),
+            Plugin(String, String, ricercar_core::plugin::Item),
+        }
+        let key = |e: &Entry| match e {
+            Entry::Local(a) => album_key(sort, &a.title, &a.artist, a.year, a.added_at),
+            Entry::Plugin(_, _, it) => album_key(
+                sort,
+                &it.title,
+                it.artist.as_deref().unwrap_or(""),
+                it.year,
+                0,
+            ),
+        };
+        crate::merge::merge_sorted(
+            albums.into_iter().map(Entry::Local).collect(),
+            extra
+                .into_iter()
+                .map(|(id, name, it)| Entry::Plugin(id, name, it))
+                .collect(),
+            key,
+        )
+        .iter()
+        .map(|e| match e {
+            Entry::Local(a) => album_card(ui, a, false),
+            Entry::Plugin(id, name, it) => crate::plugins::album_card(ui, id, name, it, false),
+        })
+        .collect()
+    };
     set_rows(&ui.models.albums, rows);
     visible(ui, "albums", 0, 36);
+}
+
+/// Artists of the local library and of the plugins, one entry per name
+/// (case-insensitive); the artist page gathers their albums.
+fn load_artists(ui: &Rc<Ui>) {
+    let f = crate::plugins::source_filter(ui);
+    let local = if f.local() {
+        ui.ctx.lib.artists()
+    } else {
+        Vec::new()
+    };
+    let extra = crate::plugins::plugin_artists(ui, &f);
+    let mut rows: Vec<(String, crate::ArtistCard)> = local
+        .iter()
+        .map(|a| (a.name.to_lowercase(), artist_card(ui, a, false)))
+        .collect();
+    if !extra.is_empty() {
+        let mut index: std::collections::HashMap<String, usize> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, (k, _))| (k.clone(), i))
+            .collect();
+        for (_, name, it) in &extra {
+            let k = it.title.to_lowercase();
+            match index.get(&k) {
+                Some(&i) => {
+                    let card = &mut rows[i].1;
+                    if !card.source.split(" · ").any(|s| s == name) {
+                        card.source = if card.source.is_empty() {
+                            name.clone().into()
+                        } else {
+                            format!("{} · {name}", card.source).into()
+                        };
+                    }
+                }
+                None => {
+                    let (cover, ckey) = match crate::plugins::art_url(it) {
+                        Some(url) => (
+                            ui.cover_lazy(
+                                &url,
+                                crate::images::Source::Url(url.clone()),
+                                None,
+                                TILE,
+                            ),
+                            url,
+                        ),
+                        None => (slint::Image::default(), String::new()),
+                    };
+                    index.insert(k.clone(), rows.len());
+                    rows.push((
+                        k,
+                        crate::ArtistCard {
+                            name: it.title.clone().into(),
+                            albums: 0,
+                            tracks: 0,
+                            cover,
+                            ckey: ckey.into(),
+                            source: name.clone().into(),
+                        },
+                    ));
+                }
+            }
+        }
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    set_rows(
+        &ui.models.artists,
+        rows.into_iter().map(|(_, c)| c).collect(),
+    );
+    ui.st.borrow_mut().artists = local;
+    visible(ui, "artists", 0, 40);
 }
 
 /// Rows built per event-loop turn on the Tracks page.
@@ -187,9 +308,25 @@ pub fn load_tracks(ui: &Rc<Ui>) {
         st.tracks_serial
     };
     let lib = ui.ctx.lib.clone();
-    let first = lib.tracks_range(sort, 0, TRACKS_CHUNK);
+    let f = crate::plugins::source_filter(ui);
+    let mut extra = crate::plugins::plugin_tracks(ui, &f);
+    let key = move |t: &Track| crate::merge::track_key(t, sort);
+    extra.sort_by_cached_key(key);
+    let local_total = if f.local() { lib.count() as usize } else { 0 };
+    ui.app()
+        .set_tracks_total((local_total + extra.len()) as i32);
+    let first_local = if f.local() {
+        lib.tracks_range(sort, 0, TRACKS_CHUNK)
+    } else {
+        Vec::new()
+    };
+    let local_done = first_local.len() < TRACKS_CHUNK;
+    // Plugin tracks merge in; the first page only needs the first local page.
+    let mut first = crate::merge::merge_sorted(first_local.clone(), extra.clone(), key);
+    let complete = local_done && first.len() <= TRACKS_CHUNK;
+    first.truncate(TRACKS_CHUNK);
     set_rows(&ui.models.tracks, track_rows(ui, &first, tracks_opts(0)));
-    let complete = first.len() < TRACKS_CHUNK;
+    let shown = first.len();
     ui.st.borrow_mut().lists.insert("tracks".into(), first);
     visible(ui, "tracks", 0, 30);
     if complete {
@@ -197,7 +334,12 @@ pub fn load_tracks(ui: &Rc<Ui>) {
     }
     let started = std::time::Instant::now();
     std::thread::spawn(move || {
-        let rest = lib.tracks_range(sort, TRACKS_CHUNK, usize::MAX);
+        let mut local = first_local;
+        if !local_done {
+            local.extend(lib.tracks_range(sort, TRACKS_CHUNK, usize::MAX));
+        }
+        let mut all = crate::merge::merge_sorted(local, extra, key);
+        let rest = all.split_off(shown.min(all.len()));
         crate::app::post(move |ui| append_tracks(ui, serial, rest, started));
     });
 }
@@ -222,6 +364,10 @@ fn append_tracks(ui: &Rc<Ui>, serial: u64, mut rest: Vec<Track>, started: std::t
 }
 
 fn load_album(ui: &Rc<Ui>, id: &str) {
+    if let Some((arg, true)) = crate::plugins::card_target(id) {
+        return crate::plugins::load_album_page(ui, id, arg);
+    }
+    ui.app().set_al_plugin(false);
     let lib = &ui.ctx.lib;
     let Some(a) = lib.album(id) else { return };
     let app = ui.app();
@@ -315,6 +461,7 @@ fn load_artist(ui: &Rc<Ui>, name: &str) {
     set_rows(&ui.models.ar_own, own_rows);
     let app_rows: Vec<_> = appears.iter().map(|a| album_card(ui, a, true)).collect();
     set_rows(&ui.models.ar_appears, app_rows);
+    crate::plugins::add_artist_albums(ui, name);
 }
 
 fn load_playlist(ui: &Rc<Ui>, id: i64) {
@@ -425,8 +572,13 @@ pub fn refill_page_covers(ui: &Ui) {
     let app = ui.app();
     let loader = ui.loader.borrow();
     let large = crate::app::LARGE;
+    // A plugin album's cover is keyed by its art URL.
+    let al_key = match ui.plugins.borrow().album_art.clone() {
+        Some(url) if app.get_al_plugin() => url,
+        _ => app.get_al_id().to_string(),
+    };
     if app.get_al_cover().size().width == 0
-        && let Some(i) = loader.peek(&app.get_al_id(), large)
+        && let Some(i) = loader.peek(&al_key, large)
     {
         app.set_al_cover(i);
     }
@@ -594,7 +746,7 @@ pub fn show_in_folder(path: &str) {
 }
 
 pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
-    if let Some(arg) = id.strip_prefix(crate::plugins::CARD) {
+    if let Some((arg, _)) = crate::plugins::card_target(id) {
         return crate::plugins::card_action(ui, arg, action);
     }
     let lib = ui.ctx.lib.clone();
@@ -675,9 +827,9 @@ pub fn wire(ui: &Rc<Ui>) {
     app.on_back(|| with_ui(|ui| ui.back()));
     app.on_forward(|| with_ui(|ui| ui.forward()));
     app.on_album_activate(|id| {
-        with_ui(|ui| match id.strip_prefix(crate::plugins::CARD) {
-            Some(arg) => ui.navigate(Page::Browse, arg, true),
-            None => ui.navigate(Page::Album, &id, true),
+        with_ui(|ui| match crate::plugins::card_target(&id) {
+            Some((arg, false)) => ui.navigate(Page::Browse, arg, true),
+            _ => ui.navigate(Page::Album, &id, true),
         })
     });
     app.on_artist_activate(|name| with_ui(|ui| ui.navigate(Page::Artist, &name, true)));

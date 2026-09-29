@@ -117,11 +117,16 @@ export component TrackLine inherits Rectangle {
                 color: item.playing ? Theme.accent : Theme.text;
                 overflow: elide;
             }
-            if show-artist && item.artist != "": Text {
-                text: item.artist;
-                font-size: Theme.fs-sm;
-                color: Theme.text2;
-                overflow: elide;
+            if show-artist && (item.artist != "" || item.source != ""): HorizontalLayout {
+                spacing: 6px;
+                if item.source != "": Badge { text: item.source.to-uppercase(); tint: Theme.text3; }
+                Text {
+                    text: item.artist;
+                    font-size: Theme.fs-sm;
+                    color: Theme.text2;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
             }
         }
         if show-album: Text {
@@ -271,6 +276,7 @@ export component AlbumShelf inherits Flickable {
             title: a.title;
             subtitle: a.artist;
             hires: a.hires;
+            source: a.source;
             current: a.id == root.playing-album && App.has-track;
             playing: App.playing;
             open => { App.album-activate(a.id); }
@@ -326,6 +332,7 @@ export component AlbumGrid inherits Rectangle {
                     title: a.title;
                     subtitle: a.year == "" ? a.artist : a.artist + " · " + a.year;
                     hires: a.hires;
+                    source: a.source;
                     current: a.id == root.playing-album && App.has-track;
                     playing: App.playing;
                     open => { App.album-activate(a.id); }
@@ -370,6 +377,7 @@ export component AlbumFlow inherits Rectangle {
                 title: a.title;
                 subtitle: a.year == "" ? a.artist : a.year;
                 hires: a.hires;
+                source: a.source;
                 current: a.id == root.playing-album && App.has-track;
                 playing: App.playing;
                 open => { App.album-activate(a.id); }
