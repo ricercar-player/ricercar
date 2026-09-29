@@ -1181,42 +1181,17 @@ fn open_plugin_album(ui: &Rc<Ui>, id: &str, it: &Item) {
     ui.navigate(Page::Album, &arg, true);
 }
 
-/// The artist of a playing plugin track: the artist page when the plugin
-/// shares its library (it lists the plugin's albums there), else the
-/// plugin's own artist page found by its search.
+/// The artist of a playing plugin track: the artist page, which finds the
+/// artist in the plugins' libraries or searches (`add_artist_albums`).
 pub fn open_track_artist(ui: &Rc<Ui>, info: &TrackInfo) {
-    let Some((id, _)) = ricercar_core::plugin::parse_plugin_uri(&info.uri) else {
-        return;
-    };
-    let Some(name) = info
+    if let Some(name) = info
         .artist
         .clone()
         .or(info.album_artist.clone())
         .filter(|a| !a.is_empty())
-    else {
-        return;
-    };
-    if ui.plugins.borrow().libs.iter().any(|l| l.id == id) {
-        return ui.navigate(Page::Artist, &name, true);
+    {
+        ui.navigate(Page::Artist, &name, true);
     }
-    let h = host(ui);
-    std::thread::spawn(move || {
-        let found = h.search(&id, &name, 0, 20).ok().and_then(|groups| {
-            groups.into_iter().flat_map(|g| g.1).find(|i| {
-                i.kind == ItemKind::Artist
-                    && i.is_browsable()
-                    && i.title.trim().eq_ignore_ascii_case(name.trim())
-            })
-        });
-        post(move |ui| match found {
-            Some(it) => ui.navigate(
-                Page::Browse,
-                &browse_arg(&id, &it.reference, &it.title),
-                true,
-            ),
-            None => ui.navigate(Page::Artist, &name, true),
-        });
-    });
 }
 
 // ------------------------------------------------------------ libraries
@@ -1575,39 +1550,65 @@ pub fn add_artist_albums(ui: &Rc<Ui>, name: &str) {
             }
         }
     }
+    // Plugins that did not list this artist: ask their search.
+    let searched: Vec<(String, String)> = host(ui)
+        .statuses()
+        .into_iter()
+        .filter(|s| s.signed_in() && s.caps.search && !refs.iter().any(|(i, _, _)| *i == s.id))
+        .map(|s| (s.id, s.name))
+        .collect();
     for (id, pname, reference) in refs {
-        let (h, name) = (host(ui), name.to_string());
-        std::thread::spawn(move || {
-            let r = h.browse_list(&id, &reference, 0, 200);
-            post(move |ui| {
-                if ui.app().get_ar_name() != name.as_str() {
-                    return;
-                }
-                let Ok((items, _, _)) = r else { return };
-                let cards: Vec<AlbumCard> = items
-                    .iter()
-                    .filter(|i| i.kind == ItemKind::Album)
-                    .map(|i| album_card(ui, &id, &pname, i, true))
-                    .collect();
-                if cards.is_empty() {
-                    return;
-                }
-                let app = ui.app();
-                app.set_ar_albums(app.get_ar_albums() + cards.len() as i32);
-                if app.get_ar_cover().size().width == 0
-                    && let Some(url) = items.iter().find_map(art_url)
-                {
-                    app.set_ar_cover(ui.cover(
-                        &url,
-                        Source::Url(url.clone()),
-                        None,
-                        crate::app::LARGE,
-                    ));
-                }
-                ui.models.ar_own.extend(cards);
-            });
-        });
+        artist_albums(ui, id, pname, name.to_string(), Some(reference));
     }
+    for (id, pname) in searched {
+        artist_albums(ui, id, pname, name.to_string(), None);
+    }
+}
+
+/// Add a plugin artist's albums to the artist page; without a ref, find
+/// the artist first with the plugin's search (same name, any case).
+fn artist_albums(ui: &Ui, id: String, pname: String, name: String, reference: Option<String>) {
+    let h = host(ui);
+    std::thread::spawn(move || {
+        let reference = reference.or_else(|| {
+            let wanted = name.trim().to_lowercase();
+            h.search(&id, &name, 0, 20).ok().and_then(|groups| {
+                groups
+                    .into_iter()
+                    .flat_map(|g| g.1)
+                    .find(|i| {
+                        i.kind == ItemKind::Artist
+                            && i.is_browsable()
+                            && i.title.trim().to_lowercase() == wanted
+                    })
+                    .map(|i| i.reference)
+            })
+        });
+        let Some(reference) = reference else { return };
+        let r = h.browse_list(&id, &reference, 0, 200);
+        post(move |ui| {
+            if ui.app().get_ar_name() != name.as_str() {
+                return;
+            }
+            let Ok((items, _, _)) = r else { return };
+            let cards: Vec<AlbumCard> = items
+                .iter()
+                .filter(|i| i.kind == ItemKind::Album)
+                .map(|i| album_card(ui, &id, &pname, i, true))
+                .collect();
+            if cards.is_empty() {
+                return;
+            }
+            let app = ui.app();
+            app.set_ar_albums(app.get_ar_albums() + cards.len() as i32);
+            if app.get_ar_cover().size().width == 0
+                && let Some(url) = items.iter().find_map(art_url)
+            {
+                app.set_ar_cover(ui.cover(&url, Source::Url(url.clone()), None, crate::app::LARGE));
+            }
+            ui.models.ar_own.extend(cards);
+        });
+    });
 }
 
 // ------------------------------------------------------------ catalogue
