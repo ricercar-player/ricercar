@@ -110,8 +110,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - **Scrobbling** to ListenBrainz & Last.fm (offline queue)
 - **Source plugins**: catalogues from third-party programs, installed from
   the [community hub](https://github.com/ricercar-player/ricercar-plugins) or
-  declared by hand (browse, search, sign-in in your browser); playback stays
+  declared by hand (browse, search, sign-in in your browser); their albums,
+  artists and tracks join your library pages and search; playback stays
   bit-perfect
+- **Update notices**: a new release or plugin update is shown in the app
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
 </td>
@@ -163,11 +165,11 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 </tr>
 <tr>
 <td><img src="docs/screenshots/plugins.jpg" alt="Plugins"></td>
-<td><img src="docs/screenshots/plugin-browse.jpg" alt="A plugin's album"></td>
+<td><img src="docs/screenshots/plugin-search.jpg" alt="Search across the library and a plugin"></td>
 </tr>
 <tr>
 <td align="center"><sub><b>Plugins</b>: installed, and the community catalogue</sub></td>
-<td align="center"><sub><b>Plugin lists</b>: browse and play a plugin's catalogue (demo plugin)</sub></td>
+<td align="center"><sub><b>Plugins in your library</b>: one search, source badges (demo plugin)</sub></td>
 </tr>
 </table>
 
