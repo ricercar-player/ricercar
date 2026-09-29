@@ -14,6 +14,9 @@ pub enum AudioError {
     UnsupportedSource(String),
     #[error("decode error: {0}")]
     Decode(String),
+    /// The server answered with an error status.
+    #[error("http fetch {uri}: status {status}")]
+    HttpStatus { uri: String, status: u16 },
     #[error(
         "device '{0}' does not support the track format (bit-perfect policy refuses resampling)"
     )]

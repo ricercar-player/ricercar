@@ -52,7 +52,7 @@ fn wait_finished(sub: &ricercar_audio::Subscriber, secs: u64) -> bool {
             Ok(EngineEvent::Status {
                 status: TransportStatus::Stopped,
             }) => return true,
-            Ok(EngineEvent::Error { message }) => panic!("engine error: {message}"),
+            Ok(EngineEvent::Error { message, .. }) => panic!("engine error: {message}"),
             _ => {}
         }
     }
@@ -200,7 +200,7 @@ fn device_without_lossless_container_refuses() {
     let sub = h.subscribe();
     h.load(fixture_uri("tone_24_96.flac"));
     let msg = wait_for(&sub, 10, |e| match e {
-        EngineEvent::Error { message } => Some(message.clone()),
+        EngineEvent::Error { message, .. } => Some(message.clone()),
         _ => None,
     })
     .expect("24-bit on a 16-bit-only device must be refused");
@@ -500,7 +500,7 @@ fn unplugged_device_stops_cleanly() {
     let mut reason = None;
     let stopped = wait_for(&sub, 10, |e| {
         match e {
-            EngineEvent::Error { message } => error = Some(message.clone()),
+            EngineEvent::Error { message, .. } => error = Some(message.clone()),
             EngineEvent::TrackEnded { reason: r, .. } => reason = Some(*r),
             EngineEvent::Status {
                 status: TransportStatus::Stopped,
@@ -531,7 +531,7 @@ fn alsa_null_plugin_pause_resume() {
     h.load(fixture_uri("tone_24_96.flac"));
     let started = wait_for(&sub, 5, |e| match e {
         EngineEvent::TrackStarted { .. } => Some(Ok(())),
-        EngineEvent::Error { message } => Some(Err(message.clone())),
+        EngineEvent::Error { message, .. } => Some(Err(message.clone())),
         _ => None,
     });
     match started {

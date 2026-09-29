@@ -16,6 +16,8 @@ enum Mode {
     Unsized,
     /// Internet radio: ICY metadata every `metaint` bytes.
     Icy { metaint: usize },
+    /// The server refuses: `410 Gone` (an expired signed URL).
+    Gone,
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -76,6 +78,11 @@ fn serve(name: &str, mode: Mode) -> (String, Arc<Mutex<Vec<String>>>) {
                         .to_string(),
                     body.clone(),
                 ),
+                Mode::Gone => (
+                    "HTTP/1.1 410 Gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_string(),
+                    Vec::new(),
+                ),
                 Mode::Icy { metaint } => (
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nicy-name: Test FM\r\nicy-metaint: {metaint}\r\nConnection: close\r\n\r\n"
@@ -116,7 +123,7 @@ fn wait_stopped(sub: &Subscriber, mut on: impl FnMut(&EngineEvent)) -> bool {
             Ok(EngineEvent::Status {
                 status: TransportStatus::Stopped,
             }) => return true,
-            Ok(EngineEvent::Error { message }) => panic!("engine error: {message}"),
+            Ok(EngineEvent::Error { message, .. }) => panic!("engine error: {message}"),
             Ok(ev) => on(&ev),
             Err(_) => {}
         }
@@ -219,4 +226,25 @@ fn icy_metadata_is_stripped_and_published() {
         "{titles:?}"
     );
     assert!(reqs.lock().unwrap()[0].contains("icy-metadata: 1"));
+}
+
+#[test]
+fn http_error_status_is_reported() {
+    let (uri, _) = serve("tone_16_441.flac", Mode::Gone);
+    let (h, _out) = file_player("gone");
+    let sub = h.subscribe();
+    h.load(&uri);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut got = None;
+    while Instant::now() < deadline && got.is_none() {
+        if let Ok(EngineEvent::Error {
+            uri: u,
+            http_status,
+            ..
+        }) = sub.0.recv_timeout(Duration::from_millis(200))
+        {
+            got = Some((u, http_status));
+        }
+    }
+    assert_eq!(got, Some((Some(uri), Some(410))));
 }

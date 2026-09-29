@@ -1,0 +1,311 @@
+# Source plugins (design)
+
+> **Status: proposal, not implemented.** This document specifies how
+> ricercar could gain catalogues (streaming services, remote libraries,
+> podcast directories…) without the core ever containing service-specific
+> code or credentials. It is the reference for both the host implementation
+> in this repository and third-party plugin authors.
+
+## Goals
+
+- **Add sources, not code.** A plugin brings a catalogue (browse, search,
+  favourites) and turns its items into something the engine can play. The
+  core stays generic: no service names, endpoints, keys or tokens in this
+  repository.
+- **Keep the signal path honest.** A plugin never delivers PCM. It hands the
+  host a URL (or a local path); `ricercar-audio` fetches, decodes and plays it
+  exactly like any HTTP stream. Output stays bit-perfect when the item allows
+  it, and the signal path keeps showing each hop.
+- **Isolation.** A plugin is a separate process, written in any language. It
+  can crash, hang or be slow without taking the player down.
+- **Explicit user choice.** ricercar never downloads, suggests or bundles
+  plugins. The user installs an executable and declares it in the config.
+
+### Non-goals (v1)
+
+- DSP or output plugins (anything touching samples).
+- Plugin-defined UI widgets. The host renders every page from generic item
+  lists.
+- In-process plugins (dynamic libraries, WASM).
+- Sandboxing (see [Security](#security)).
+
+## Overview
+
+```
+┌──────────── ricercar ─────────────┐        ┌──────── plugin process ────────┐
+│ UI ─ Controller ─ PlayerHandle    │ stdio  │ auth, catalogue, resolve       │
+│          │                        │◄──────►│ (talks to its service)         │
+│    PluginHost (ricercar-core)     │JSON-RPC│                                │
+└──────────┼────────────────────────┘        └────────────────────────────────┘
+           │ resolved URL
+           ▼
+   ricercar-audio ──► HTTP fetch ──► decode ──► hw: device
+```
+
+A queue item from a plugin carries a **plugin URI**,
+`plugin://<plugin-id>/<ref>`. Just before the engine needs the item, the host
+asks the plugin to *resolve* it into a playable URL.
+
+## Declaring a plugin
+
+Plugins are declared in `config.toml`, one table per plugin:
+
+```toml
+[[plugins]]
+id = "example"                 # [a-z0-9-]+, unique; used in plugin:// URIs
+command = "/usr/local/bin/example-plugin"
+args = ["--serve"]
+enabled = true
+```
+
+- The host passes nothing secret on the command line and does not expand
+  environment variables.
+- Each plugin gets its own directories, created by the host and sent in
+  `initialize`:
+  - `$XDG_DATA_HOME/ricercar/plugins/<id>/`: credentials and state, owned by
+    the plugin;
+  - `$XDG_CACHE_HOME/ricercar/plugins/<id>/`: disposable data.
+- The host never reads either directory.
+
+## Lifecycle
+
+- `ricercar-daemon` (the `AppContext`, shared by the daemon and the desktop
+  app) spawns every enabled plugin at startup, one process each.
+  `ricercar-cli` does not.
+- `stdin`/`stdout` carry the protocol. Each `stderr` line goes to the ricercar
+  log, prefixed with `plugin[<id>]`.
+- **Crash or exit:** the host restarts the plugin with backoff (1 s, 2 s, 5 s,
+  then every 30 s) and marks its items unavailable meanwhile. Queue entries
+  stay in place and resolve again once the plugin is back.
+- **Shutdown:** the host sends `shutdown`, waits 2 s, then kills the process.
+- **Config changes** (plugin added, removed, toggled) apply after a restart,
+  like the network settings.
+
+## Transport
+
+- JSON-RPC 2.0, one JSON object per line (UTF-8, `\n`-terminated) in each
+  direction.
+- Both sides may send requests; ids are unique per sender.
+- **Host → plugin timeouts:**
+  - 10 s by default;
+  - 30 s for `auth.complete`;
+  - `track.resolve` is expected to answer within 5 s, and the UI shows a
+    loading state after 300 ms.
+- Unknown methods answer `-32601`. Unknown fields are ignored, so fields can
+  be added without bumping the protocol version.
+
+## Handshake
+
+```jsonc
+// host → plugin
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+  "protocol": 1,
+  "host": {"name":"ricercar","version":"0.5.0"},
+  "data_dir": "/home/u/.local/share/ricercar/plugins/example",
+  "cache_dir": "/home/u/.cache/ricercar/plugins/example",
+  "locale": "fr-FR",
+  "output": {                       // what the current DAC accepts natively
+    "device": "hw:3,0", "bit_perfect": true,
+    "max_rate": 192000, "max_bits": 24, "rates": [44100,48000,88200,96000,176400,192000]
+  }
+}}
+// plugin → host
+{"jsonrpc":"2.0","id":1,"result":{
+  "protocol": 1,
+  "plugin": {"id":"example","name":"Example Music","version":"1.2.0"},
+  "capabilities": {
+    "auth": true, "browse": true, "search": true, "resolve": true,
+    "favorites": true, "reporting": false, "remote_control": false
+  }
+}}
+```
+
+- A plugin whose `protocol` differs from the host's is disabled with a clear
+  message.
+- `output` is sent again with `output.changed` when the user switches device.
+  Plugins use it to pick a stream format the DAC plays natively, since the
+  engine refuses formats it would have to convert.
+
+## Authentication
+
+Credentials never pass through the host UI as passwords. The flow is
+browser-based, and the host only relays what the user pastes.
+
+| Method | Direction | Purpose |
+|---|---|---|
+| `auth.status` | host → plugin | `{state: "signed_out" \| "signed_in" \| "expired", account?: {display_name, detail?}}` |
+| `auth.begin` | host → plugin | `{url, instructions?, expects_input: bool}`. The host opens `url` in the system browser, and also shows it as text and a QR code for signing in on another device. |
+| `auth.complete` | host → plugin | `{input}`: the address or code the user pasted. Returns the new `auth.status`. |
+| `auth.sign_out` | host → plugin | Forget stored credentials. |
+| `auth.changed` | plugin → host (notification) | State changed on the plugin's own initiative (token expired, refreshed, completed through the plugin's own loopback listener). |
+
+- With `expects_input: false`, the plugin completes the sign-in itself (for
+  example through a loopback redirect) and sends `auth.changed`.
+- The host shows a paste field either way. It is harmless, and helps when the
+  browser runs on another machine.
+
+## Items
+
+Every entry a plugin returns is an **item**:
+
+```jsonc
+{
+  "ref": "track/8812",            // opaque to the host, stable, ≤ 1 KiB
+  "kind": "track",                // track | album | artist | playlist | folder
+  "title": "…",
+  "subtitle": "…",                // free text for lists (e.g. "Album · 2019")
+  "artist": "…", "album": "…", "album_artist": "…",
+  "track_no": 3, "disc_no": 1, "year": 2019, "genre": "…",
+  "duration_ms": 245000,
+  "art": "https://…/cover.jpg",   // http(s) image, fetched by the host's cover cache
+  "format": {"sample_rate": 96000, "bits": 24, "codec": "flac"},  // best available, informative
+  "playable": true,               // tracks: false when region/subscription forbids it
+  "browsable": false              // albums, artists, playlists, folders: true
+}
+```
+
+- In the queue and in saved sessions, a track is stored as
+  `plugin://<id>/<percent-encoded ref>`, together with the metadata above
+  mapped onto `TrackInfo`.
+- The resolved URL is **never** persisted. It is short-lived.
+
+## Browsing and search
+
+| Method | Result |
+|---|---|
+| `browse.root` | `{sections: [item]}`. Top-level entries shown under the plugin's name in the sidebar (e.g. "Favourites", "Playlists", "New releases"). |
+| `browse.list {ref, offset, limit}` | `{items: [item], total?, has_more}`. Children of a browsable item. Pages of at most 200. |
+| `search {query, kinds?, offset, limit}` | `{groups: [{kind, items, total?, has_more}]}` |
+| `item.get {ref}` | One item, fresh. Used to refresh metadata of restored sessions. |
+| `favorites.set {ref, on}` | Only with the `favorites` capability. |
+
+The host caches nothing beyond the current page and the cover images.
+
+## Resolving
+
+```jsonc
+// host → plugin
+{"method":"track.resolve","params":{"ref":"track/8812","purpose":"play"}}   // or "preload"
+// plugin → host
+{"result":{
+  "url": "https://cdn.example/…/8812.flac",
+  "expires_at": 1790670000,       // unix seconds, optional
+  "duration_ms": 245000,
+  "format": {"sample_rate": 96000, "bits": 24, "channels": 2, "codec": "flac"},
+  "replaygain": {"track_gain": -7.2, "track_peak": 0.98},   // optional
+  "live": false
+}}
+```
+
+**Rules for plugins:**
+- `url` is `http(s)://` or `file://`. HTTP responses must carry
+  `Content-Length`, so the engine's spooled source can seek.
+- `format` describes what the URL delivers. Pick the best format within
+  `output`, and return `unavailable` if none fits.
+
+**When the host resolves:**
+- on load (`purpose: "play"`);
+- when arming the gapless successor (`purpose: "preload"`), as soon as the
+  current track starts;
+- again when an armed URL has `expires_at` in the past;
+- once more, and only once, when the engine gets HTTP 401/403/404/410 on a
+  resolved URL.
+
+**While resolving:**
+- It happens off the controller lock and off the UI thread. The item shows a
+  loading state.
+- If the user skipped to another item meanwhile, the result is dropped.
+
+## Playback reporting (optional)
+
+With the `reporting` capability, the host sends these notifications:
+- `playback.started {ref}`
+- `playback.progress {ref, pos_ms}` (every 30 s)
+- `playback.ended {ref, listened_ms, reason}`
+
+Some services require them for royalty accounting. Scrobbling stays a host
+feature and works for plugin tracks from their metadata.
+
+## Remote control (optional)
+
+With the `remote_control` capability, a plugin can drive the player. This is
+for plugins that expose ricercar to an external control protocol.
+
+**Plugin → host requests** (all go through `Controller`):
+- `player.play {items, start}`: replaces the queue; `items` are plugin items;
+- `player.enqueue {items, at}`;
+- `player.pause`, `player.resume`, `player.stop`;
+- `player.seek {ms}`;
+- `player.next`, `player.previous`;
+- `player.set_volume {percent}`, `player.set_mute {on}`.
+
+**Host → plugin notifications:**
+- `player.state {status, item_ref?, pos_ms, dur_ms, volume, muted}`, sent on
+  every `CtlEvent` and every 1 s while playing;
+- `player.taken_over`, sent when the user or another control point replaces a
+  queue the plugin had set.
+
+The queue set this way uses a new `Origin` value, `Plugin(id)`, and the UI
+shows "Playing from <plugin name>".
+
+## Errors
+
+Plugins answer with JSON-RPC errors using these codes. The host maps each code
+to a UI message and never shows raw text from the plugin as HTML.
+
+| Code | Name | Host behaviour |
+|---|---|---|
+| -32001 | `auth_required` | Mark the plugin signed out and offer to sign in. |
+| -32002 | `not_found` | Grey the item out. |
+| -32003 | `unavailable` | "Not available (region, subscription or format)". Skip to the next track when playing. |
+| -32004 | `rate_limited` | `data.retry_after` in seconds. Back off. |
+| -32005 | `network` | Retry once, then show an offline state. |
+
+## Changes in ricercar
+
+| Crate | Change |
+|---|---|
+| `ricercar-core` | New `plugin` module: config `[[plugins]]`, process supervision, JSON-RPC over stdio, `PluginHost` API. `TrackInfo::from_uri` understands `plugin://`. `Origin::Plugin(id)`. |
+| `ricercar-core` / `Controller` | Resolution step in `load_current` and `rearm`, done asynchronously: load the item once its URL is known, and drop the result if the current item changed meanwhile. **`on_track_started` matches items by URI**, so keep a map `item id → resolved URL` for the loading and armed items and match against it. Session save/restore keeps `plugin://` URIs. ReplayGain from `resolve` feeds `opts_for`. |
+| `ricercar-audio` | Surface the HTTP status of failed fetches in `EngineEvent::Error` (or a typed variant), so the controller can re-resolve on 401/403/404/410. |
+| `ricercar-daemon` | Start and stop the `PluginHost` in `AppContext`. Send `output.changed` on device switch. Plugin status in the diagnostic report. |
+| `ricercar-ui` | Sidebar section per signed-in plugin, from `browse.root`. Generic browse page (grid for albums and playlists, track table for tracks). A plugin tab in search results. Sign-in dialog (open browser, QR code, paste field). A settings row per plugin (status, sign in/out, enable). "Source: <plugin>" hop in the signal path. Every new string goes through `@tr()`. |
+| `ricercar-online` / scrobble | Plugin tracks scrobble from their metadata (`path` is `None`). |
+| `ricercar-upnp` | No change. ContentDirectory still serves the local library only. Plugin tracks in the queue are shown with their metadata. |
+| Docs | README: "Features", "Is this a … client?" FAQ and the promise wording (the core ships no service API; third-party plugins may add catalogues). HACKING.md: plugin host map. |
+
+### Tests
+
+- **Plugin fixture** (`crates/ricercar-core/tests/fixtures/demo-plugin`): a
+  small reference plugin, in shell or Rust, that serves a few generated FLAC
+  files through a local HTTP server. It implements every method, including
+  the error paths.
+- **Tests on the `null` sink:**
+  - handshake;
+  - crash and restart;
+  - resolve, then play;
+  - gapless preload;
+  - URL expiry and re-resolve;
+  - `auth_required` handling;
+  - session restore with `plugin://` items.
+- A snapshot scenario for the browse page and the sign-in dialog.
+
+## Security
+
+- A plugin runs with the user's privileges, and v1 has no sandbox. Only
+  install plugins you trust, and the docs must say so plainly. A later
+  version could launch plugins under `bubblewrap` with network access and
+  their two directories only.
+- Credentials live in the plugin's data directory and are the plugin's
+  responsibility. The host never asks for, stores or logs them.
+- `art` URLs and item text are untrusted input. Images go through the cover
+  cache's size limits, and text is rendered as plain text.
+
+## Open questions
+
+- Should plugin items be addable to local playlists (stored as `plugin://`
+  URIs), or stay browse-only in v1?
+- Offline caching of resolved tracks: out of scope for v1. It depends on each
+  service's terms.
+- Several accounts of the same plugin: run the plugin twice with different
+  `id`s. That is enough for v1.

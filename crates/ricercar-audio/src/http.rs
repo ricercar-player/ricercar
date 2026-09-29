@@ -41,7 +41,13 @@ pub fn open(uri: &str) -> Result<HttpSource> {
         .get(uri)
         .set("Icy-MetaData", "1")
         .call()
-        .map_err(|e| AudioError::UnsupportedSource(format!("http fetch {uri}: {e}")))?;
+        .map_err(|e| match e {
+            ureq::Error::Status(status, _) => AudioError::HttpStatus {
+                uri: uri.to_string(),
+                status,
+            },
+            e => AudioError::UnsupportedSource(format!("http fetch {uri}: {e}")),
+        })?;
 
     let metaint = resp
         .header("icy-metaint")

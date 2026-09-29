@@ -443,7 +443,7 @@ impl Controller {
                                 }
                             }
                             Some(EngineEvent::Status { status }) => bridge.on_status(status),
-                            Some(EngineEvent::Error { message }) => bridge.on_error(message),
+                            Some(EngineEvent::Error { message, .. }) => bridge.on_error(message),
                             Some(EngineEvent::StreamTitle { title }) => {
                                 bridge.lock_state().stream_title = Some(title.clone());
                                 events.publish(CtlEvent::StreamTitle(title));

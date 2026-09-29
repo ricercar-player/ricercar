@@ -83,6 +83,10 @@ pub enum EngineEvent {
     },
     Error {
         message: String,
+        /// The source that failed to open, when the error is about one.
+        uri: Option<String>,
+        /// HTTP status of a failed fetch (401, 403, 404, 410…).
+        http_status: Option<u16>,
     },
 }
 
@@ -433,7 +437,11 @@ impl Engine {
 
     fn error(&self, message: String) {
         tracing::warn!("{message}");
-        self.hub.publish(EngineEvent::Error { message });
+        self.hub.publish(EngineEvent::Error {
+            message,
+            uri: None,
+            http_status: None,
+        });
     }
 
     fn end_current(&mut self, reason: EndReason) {
@@ -486,7 +494,17 @@ impl Engine {
         let mut src = match TrackSource::open(uri) {
             Ok(t) => t,
             Err(e) => {
-                self.error(format!("{uri}: {e}"));
+                let message = format!("{uri}: {e}");
+                tracing::warn!("{message}");
+                let http_status = match &e {
+                    AudioError::HttpStatus { status, .. } => Some(*status),
+                    _ => None,
+                };
+                self.hub.publish(EngineEvent::Error {
+                    message,
+                    uri: Some(uri.to_string()),
+                    http_status,
+                });
                 return None;
             }
         };
