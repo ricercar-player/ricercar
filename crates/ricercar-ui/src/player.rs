@@ -343,15 +343,26 @@ fn on_track_changed(ui: &Rc<Ui>, st: &CtlState, info: Option<&TrackInfo>) {
             .into(),
     );
     app.set_live(info.live);
+    let plugin = ui.ctx.ctl.plugin_name(&info.uri);
     app.set_origin(
-        match (st.origin, info.live) {
-            (_, true) => t("Internet radio"),
-            (Origin::Remote, _) => t("UPnP"),
-            _ => "",
+        match (&st.origin, info.live, &plugin) {
+            (_, true, _) => t("Internet radio").to_string(),
+            (_, _, Some(name)) => name.clone(),
+            (Origin::Remote, _, _) => t("UPnP").to_string(),
+            _ => String::new(),
         }
         .into(),
     );
-    app.set_context_label(context_label(ui, &st.context).into());
+    let context = match &st.origin {
+        Origin::Plugin(id) => ui
+            .ctx
+            .ctl
+            .plugin_name(&format!("plugin://{id}/x"))
+            .map(|n| format!("{} {n}", t("Playing from")))
+            .unwrap_or_default(),
+        _ => context_label(ui, &st.context),
+    };
+    app.set_context_label(context.into());
     let fav = info
         .path
         .as_ref()

@@ -1,6 +1,7 @@
 //! Playback controller: owns the queue, drives the audio engine, mirrors its
 //! state for every front-end (UI, MPRIS, UPnP) and publishes change events.
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::ReplayGain;
 use crate::library::{Library, Track};
 use crate::meta;
+use crate::plugin::{Purpose, Resolved, Resolver, is_plugin_uri};
 
 /// Metadata about a playable item (library track, pushed stream, radio).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -143,12 +145,14 @@ impl Repeat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
     /// Queue owned by us (local library playback).
     Local,
     /// Driven by a remote UPnP control point.
     Remote,
+    /// Set by a plugin with the `remote_control` capability (its id).
+    Plugin(String),
 }
 
 /// Where the current queue came from (UI "playing from", ReplayGain auto).
@@ -199,6 +203,8 @@ pub struct CtlState {
     pub stream_title: Option<String>,
     /// Bumped on every queue mutation.
     pub queue_rev: u64,
+    /// Plugin item whose URL is being resolved before it can load.
+    pub resolving: Option<u64>,
 }
 
 impl CtlState {
@@ -270,6 +276,12 @@ struct Pending {
     seek_on_start: Option<(u64, u64)>,
     failures: u32,
     replaygain: ReplayGain,
+    /// Plugin items resolved for the loading, playing or armed item.
+    resolved: HashMap<u64, Resolved>,
+    /// Successors being resolved ahead of time.
+    preloading: HashSet<u64>,
+    /// Items whose refused URL was already resolved again.
+    retried: HashSet<u64>,
 }
 
 pub struct Controller {
@@ -285,6 +297,7 @@ pub struct Controller {
     /// Restored session waiting for the first "play".
     resume_at: Mutex<Option<u64>>,
     rg_preamp: Mutex<f32>,
+    resolver: Arc<RwLock<Option<Arc<dyn Resolver>>>>,
 }
 
 fn chain_stub(device: &str) -> ChainInfo {
@@ -335,6 +348,7 @@ impl Controller {
                 muted: false,
                 stream_title: None,
                 queue_rev: 0,
+                resolving: None,
             })),
             pending: Arc::new(Mutex::new(Pending::default())),
             events: Arc::new(EventHub::default()),
@@ -344,6 +358,7 @@ impl Controller {
             session_path: Arc::new(Mutex::new(None)),
             resume_at: Mutex::new(None),
             rg_preamp: Mutex::new(0.0),
+            resolver: Arc::new(RwLock::new(None)),
         };
         ctl.spawn_bridge();
         ctl
@@ -379,10 +394,10 @@ impl Controller {
         let alive = self.alive.clone();
         let player = self.player.clone();
         let state = self.state.clone();
-        let pending = self.pending.clone();
         let events = self.events.clone();
         let lib = self.lib.clone();
         let session_path = self.session_path.clone();
+        let bridge = self.bridge();
         std::thread::Builder::new()
             .name("ricercar-ctl".into())
             .spawn(move || {
@@ -400,12 +415,7 @@ impl Controller {
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
                             Err(mpsc::RecvTimeoutError::Timeout) => None,
                         };
-                        let bridge = Bridge {
-                            player: &player,
-                            state: &state,
-                            pending: &pending,
-                            events: &events,
-                        };
+
                         match ev {
                             Some(EngineEvent::TrackStarted { uri, format }) => {
                                 play_serial += 1;
@@ -443,7 +453,11 @@ impl Controller {
                                 }
                             }
                             Some(EngineEvent::Status { status }) => bridge.on_status(status),
-                            Some(EngineEvent::Error { message, .. }) => bridge.on_error(message),
+                            Some(EngineEvent::Error {
+                                message,
+                                uri,
+                                http_status,
+                            }) => bridge.on_error(message, uri, http_status),
                             Some(EngineEvent::StreamTitle { title }) => {
                                 bridge.lock_state().stream_title = Some(title.clone());
                                 events.publish(CtlEvent::StreamTitle(title));
@@ -470,13 +484,24 @@ impl Controller {
             .expect("spawn bridge");
     }
 
-    fn bridge(&self) -> Bridge<'_> {
+    fn bridge(&self) -> Bridge {
         Bridge {
-            player: &self.player,
-            state: &self.state,
-            pending: &self.pending,
-            events: &self.events,
+            player: self.player.clone(),
+            state: self.state.clone(),
+            pending: self.pending.clone(),
+            events: self.events.clone(),
+            resolver: self.resolver.clone(),
         }
+    }
+
+    /// Where `plugin://` items get their URLs (the plugin host).
+    pub fn set_resolver(&self, r: Arc<dyn Resolver>) {
+        *self.resolver.write().unwrap() = Some(r);
+    }
+
+    /// Display name of the plugin behind a `plugin://` URI.
+    pub fn plugin_name(&self, uri: &str) -> Option<String> {
+        self.resolver.read().unwrap().as_ref()?.plugin_name(uri)
     }
 
     /// The audio chain as the engine actually configured it (container,
@@ -553,6 +578,30 @@ impl Controller {
         *self.resume_at.lock().unwrap() = None;
         self.events.publish(CtlEvent::QueueChanged);
         self.bridge().load_current();
+    }
+
+    /// A plugin with the `remote_control` capability replaces the queue.
+    pub fn play_from_plugin(&self, plugin_id: &str, infos: Vec<TrackInfo>, start: usize) {
+        self.play_tracks(infos, start, PlayContext::None);
+        self.lock().origin = Origin::Plugin(plugin_id.to_string());
+        self.events.publish(CtlEvent::QueueChanged);
+    }
+
+    /// Fresh metadata for a queue item (the URI stays).
+    pub fn update_item_info(&self, id: u64, mut info: TrackInfo) {
+        {
+            let mut st = self.lock();
+            let Some(q) = st.queue.iter_mut().find(|q| q.id == id) else {
+                return;
+            };
+            info.uri = q.info.uri.clone();
+            if q.info == info {
+                return;
+            }
+            q.info = info;
+            st.queue_rev += 1;
+        }
+        self.events.publish(CtlEvent::QueueChanged);
     }
 
     /// Replace the queue with a shuffled copy and play it.
@@ -1032,15 +1081,21 @@ fn save_session_to(state: &Mutex<CtlState>, path: &std::path::Path) {
     }
 }
 
-/// Borrowed view used by both the controller and its bridge thread.
-struct Bridge<'a> {
-    player: &'a Mutex<PlayerHandle>,
-    state: &'a Mutex<CtlState>,
-    pending: &'a Mutex<Pending>,
-    events: &'a EventHub,
+/// Engine-side half of the controller, shared by the controller, its bridge
+/// thread and the threads resolving plugin items.
+#[derive(Clone)]
+struct Bridge {
+    player: Arc<Mutex<PlayerHandle>>,
+    state: Arc<Mutex<CtlState>>,
+    pending: Arc<Mutex<Pending>>,
+    events: Arc<EventHub>,
+    resolver: Arc<RwLock<Option<Arc<dyn Resolver>>>>,
 }
 
-impl Bridge<'_> {
+/// HTTP statuses after which a resolved URL is resolved once more.
+const RERESOLVE_ON: [u16; 4] = [401, 403, 404, 410];
+
+impl Bridge {
     /// ReplayGain for an item; album gain only when the album plays in order.
     fn opts_for(&self, info: &TrackInfo, mode: ReplayGain) -> TrackOpts {
         let album_ctx = matches!(self.lock_state().context, PlayContext::Album(_));
@@ -1065,8 +1120,41 @@ impl Bridge<'_> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn lock_pending(&self) -> MutexGuard<'_, Pending> {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn player(&self) -> MutexGuard<'_, PlayerHandle> {
         self.player.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn resolver(&self) -> Option<Arc<dyn Resolver>> {
+        self.resolver.read().unwrap().clone()
+    }
+
+    /// ReplayGain values given by a plugin complete the item's own.
+    fn with_resolved(info: &TrackInfo, r: &Resolved) -> TrackInfo {
+        let mut info = info.clone();
+        if let Some(rg) = &r.replaygain {
+            info.rg_track_gain = rg.track_gain.or(info.rg_track_gain);
+            info.rg_track_peak = rg.track_peak.or(info.rg_track_peak);
+            info.rg_album_gain = rg.album_gain.or(info.rg_album_gain);
+            info.rg_album_peak = rg.album_peak.or(info.rg_album_peak);
+        }
+        info
+    }
+
+    /// What the engine gets for an item: its URI, or for a plugin item the
+    /// URL it resolved to (when known and not expired).
+    fn engine_uri(&self, id: u64, info: &TrackInfo) -> Option<String> {
+        if !is_plugin_uri(&info.uri) {
+            return Some(info.uri.clone());
+        }
+        let p = self.lock_pending();
+        p.resolved
+            .get(&id)
+            .filter(|r| !r.expired(crate::library::now_unix()))
+            .map(|r| r.url.clone())
     }
 
     fn load_current(&self) {
@@ -1074,18 +1162,75 @@ impl Bridge<'_> {
             let mut st = self.lock_state();
             st.pos_ms = 0;
             st.stream_title = None;
+            st.resolving = None;
             st.dur_ms = st.current_item().map(|q| q.info.duration_ms).unwrap_or(0);
             st.current_item().cloned()
         };
         let Some(item) = item else { return };
+        if is_plugin_uri(&item.info.uri) {
+            {
+                let mut p = self.lock_pending();
+                p.armed = None;
+                p.loading = Some(item.id);
+            }
+            self.lock_state().resolving = Some(item.id);
+            self.events.publish(CtlEvent::TrackChanged);
+            let b = self.clone();
+            std::thread::Builder::new()
+                .name("ricercar-resolve".into())
+                .spawn(move || b.resolve_and_load(item, Purpose::Play))
+                .expect("spawn resolve");
+            return;
+        }
         let opts = {
-            let mut p = self.pending.lock().unwrap();
+            let mut p = self.lock_pending();
             p.armed = None;
             p.loading = Some(item.id);
             self.opts_for(&item.info, p.replaygain)
         };
         self.player().load_with(&item.info.uri, opts);
         self.events.publish(CtlEvent::TrackChanged);
+    }
+
+    /// Resolve a plugin item off the controller lock, then load it unless
+    /// the user moved on meanwhile.
+    fn resolve_and_load(&self, item: QueueItem, purpose: Purpose) {
+        let r = match self.resolver() {
+            Some(res) => res.resolve(&item.info.uri, purpose),
+            None => Err(crate::plugin::PluginError::NotRunning),
+        };
+        let still_wanted = {
+            let st = self.lock_state();
+            st.current_item().map(|q| q.id) == Some(item.id)
+        } && self.lock_pending().loading == Some(item.id);
+        if !still_wanted {
+            return;
+        }
+        self.lock_state().resolving = None;
+        match r {
+            Ok(res) => {
+                let info = Self::with_resolved(&item.info, &res);
+                if item.info.duration_ms == 0
+                    && let Some(d) = res.duration_ms
+                {
+                    self.lock_state().dur_ms = d;
+                }
+                let opts = {
+                    let mut p = self.lock_pending();
+                    p.resolved.insert(item.id, res.clone());
+                    self.opts_for(&info, p.replaygain)
+                };
+                self.player().load_with(&res.url, opts);
+                self.events.publish(CtlEvent::TrackChanged);
+            }
+            Err(e) => {
+                let name = self
+                    .resolver()
+                    .and_then(|r| r.plugin_name(&item.info.uri))
+                    .unwrap_or_default();
+                self.on_error(format!("{}: {name}: {e}", item.info.title), None, None);
+            }
+        }
     }
 
     /// Hand the engine the item that should follow the current one.
@@ -1105,16 +1250,41 @@ impl Bridge<'_> {
                         Repeat::All => st.queue.get(i + 1).or(st.queue.first()),
                         Repeat::Off => st.queue.get(i + 1),
                     };
-                    next.map(|q| (q.id, q.info.uri.clone(), q.info.clone()))
+                    next.cloned()
                 })
             }
         };
-        let mut p = self.pending.lock().unwrap();
+        // A plugin successor needs its URL first: resolve it (once at a time)
+        // and come back here when it is known.
+        let want = match want {
+            Some(q) => match self.engine_uri(q.id, &q.info) {
+                Some(uri) => Some((q.id, uri, q.info)),
+                None => {
+                    let start = self.lock_pending().preloading.insert(q.id);
+                    if start {
+                        let b = self.clone();
+                        std::thread::Builder::new()
+                            .name("ricercar-preload".into())
+                            .spawn(move || b.preload(q))
+                            .expect("spawn preload");
+                    }
+                    return;
+                }
+            },
+            None => None,
+        };
+        let mut p = self.lock_pending();
         if p.armed.as_ref().map(|a| (a.0, &a.1)) != want.as_ref().map(|w| (w.0, &w.1)) {
             // Never hand an empty successor to an idle engine: it would be a no-op anyway.
             if want.is_some() || p.armed.is_some() {
                 let (uri, opts) = match &want {
-                    Some((_, uri, info)) => (uri.clone(), self.opts_for(info, p.replaygain)),
+                    Some((id, uri, info)) => {
+                        let info = match p.resolved.get(id) {
+                            Some(r) => Self::with_resolved(info, r),
+                            None => info.clone(),
+                        };
+                        (uri.clone(), self.opts_for(&info, p.replaygain))
+                    }
                     None => (String::new(), TrackOpts::default()),
                 };
                 self.player().enqueue_next_with(uri, opts);
@@ -1123,12 +1293,51 @@ impl Bridge<'_> {
         }
     }
 
+    /// Resolve the gapless successor ahead of time; an URL that comes back
+    /// already expired is asked for once more.
+    fn preload(&self, item: QueueItem) {
+        let Some(res) = self.resolver() else {
+            self.lock_pending().preloading.remove(&item.id);
+            return;
+        };
+        let mut r = res.resolve(&item.info.uri, Purpose::Preload);
+        if matches!(&r, Ok(x) if x.expired(crate::library::now_unix())) {
+            r = res.resolve(&item.info.uri, Purpose::Preload);
+        }
+        let ok = {
+            let mut p = self.lock_pending();
+            p.preloading.remove(&item.id);
+            match r {
+                Ok(x) if !x.expired(crate::library::now_unix()) => {
+                    p.resolved.insert(item.id, x);
+                    true
+                }
+                Ok(_) => false,
+                Err(e) => {
+                    tracing::info!("preload {}: {e}", item.info.uri);
+                    false
+                }
+            }
+        };
+        // Loaded on its own turn instead (with the error handling of a load).
+        if ok {
+            self.rearm();
+        }
+    }
+
+    /// Queue item the engine is playing when it reports `uri`.
     fn on_track_started(&self, uri: &str, format: Option<ricercar_audio::PcmFormat>) {
-        let (armed, seek) = {
-            let mut p = self.pending.lock().unwrap();
+        let (armed, seek, by_url) = {
+            let mut p = self.lock_pending();
             p.loading = None;
             p.failures = 0;
-            (p.armed.take(), p.seek_on_start.take())
+            let by_url: Vec<u64> = p
+                .resolved
+                .iter()
+                .filter(|(_, r)| r.url == uri)
+                .map(|(id, _)| *id)
+                .collect();
+            (p.armed.take(), p.seek_on_start.take(), by_url)
         };
         let started_id = {
             let mut st = self.lock_state();
@@ -1137,8 +1346,16 @@ impl Bridge<'_> {
                 .and_then(|(id, _)| st.queue.iter().position(|q| q.id == id));
             let idx = by_armed.or_else(|| {
                 st.current
-                    .filter(|&i| st.queue.get(i).is_some_and(|q| q.info.uri == uri))
-                    .or_else(|| st.queue.iter().position(|q| q.info.uri == uri))
+                    .filter(|&i| {
+                        st.queue
+                            .get(i)
+                            .is_some_and(|q| q.info.uri == uri || by_url.contains(&q.id))
+                    })
+                    .or_else(|| {
+                        st.queue
+                            .iter()
+                            .position(|q| q.info.uri == uri || by_url.contains(&q.id))
+                    })
             });
             if idx.is_some() {
                 st.current = idx;
@@ -1148,9 +1365,16 @@ impl Bridge<'_> {
             }
             st.pos_ms = 0;
             st.stream_title = None;
+            st.resolving = None;
             st.dur_ms = st.current_item().map(|q| q.info.duration_ms).unwrap_or(0);
             st.current_item().map(|q| q.id)
         };
+        // Resolved URLs are short-lived: keep only the playing one.
+        {
+            let mut p = self.lock_pending();
+            p.resolved.retain(|id, _| Some(*id) == started_id);
+            p.retried.retain(|id| Some(*id) == started_id);
+        }
         if let (Some((id, pos)), Some(sid)) = (seek, started_id)
             && id == sid
             && pos > 0
@@ -1173,7 +1397,7 @@ impl Bridge<'_> {
             }
         }
         if status == TransportStatus::Stopped {
-            self.pending.lock().unwrap().armed = None;
+            self.lock_pending().armed = None;
         }
         self.events.publish(CtlEvent::StatusChanged(status));
         if status != TransportStatus::Stopped {
@@ -1181,13 +1405,63 @@ impl Bridge<'_> {
         }
     }
 
-    fn on_error(&self, message: String) {
+    /// A resolved URL the server refused (expired, revoked…) is resolved
+    /// again, once. Returns true when that is under way.
+    fn retry_refused(&self, uri: Option<&str>, status: Option<u16>) -> bool {
+        let (Some(uri), Some(status)) = (uri, status) else {
+            return false;
+        };
+        if !RERESOLVE_ON.contains(&status) {
+            return false;
+        }
+        let target = {
+            let mut p = self.lock_pending();
+            let Some(id) = p
+                .resolved
+                .iter()
+                .find(|(_, r)| r.url == uri)
+                .map(|(id, _)| *id)
+            else {
+                return false;
+            };
+            if !p.retried.insert(id) {
+                return false;
+            }
+            p.resolved.remove(&id);
+            if p.armed.as_ref().is_some_and(|a| a.0 == id) {
+                p.armed = None;
+            }
+            id
+        };
+        let item = self
+            .lock_state()
+            .queue
+            .iter()
+            .find(|q| q.id == target)
+            .cloned();
+        let Some(item) = item else { return false };
+        tracing::info!("{uri}: HTTP {status}, resolving again");
+        let is_loading = self.lock_pending().loading == Some(item.id);
+        let b = self.clone();
+        if is_loading {
+            self.lock_state().resolving = Some(item.id);
+            std::thread::spawn(move || b.resolve_and_load(item, Purpose::Play));
+        } else {
+            std::thread::spawn(move || b.rearm());
+        }
+        true
+    }
+
+    fn on_error(&self, message: String, uri: Option<String>, http_status: Option<u16>) {
+        if self.retry_refused(uri.as_deref(), http_status) {
+            return;
+        }
         tracing::warn!("engine: {message}");
         self.events.publish(CtlEvent::Error(message));
         // A track that fails to open is skipped (bounded, to avoid spinning
         // through a queue of unreachable URLs).
         let skip = {
-            let mut p = self.pending.lock().unwrap();
+            let mut p = self.lock_pending();
             match p.loading.take() {
                 Some(_) if p.failures < 5 => {
                     p.failures += 1;

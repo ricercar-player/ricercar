@@ -5,6 +5,7 @@ pub mod controller;
 pub mod covers;
 pub mod library;
 pub mod meta;
+pub mod plugin;
 pub mod profile;
 #[doc(hidden)]
 pub mod synth;

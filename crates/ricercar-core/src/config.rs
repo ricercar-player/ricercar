@@ -154,6 +154,33 @@ impl Default for OnlineConfig {
     }
 }
 
+/// A source plugin: an executable speaking JSON-RPC on stdio
+/// (docs/plugins.md). Declared by the user, never downloaded by ricercar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginConfig {
+    /// `[a-z0-9-]+`, unique; used in `plugin://<id>/…` URIs.
+    pub id: String,
+    pub command: PathBuf,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl PluginConfig {
+    pub fn valid_id(id: &str) -> bool {
+        !id.is_empty()
+            && id.len() <= 64
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -163,6 +190,8 @@ pub struct Config {
     pub ui: UiConfig,
     pub scrobble: ScrobbleConfig,
     pub online: OnlineConfig,
+    /// `[[plugins]]` tables.
+    pub plugins: Vec<PluginConfig>,
 }
 
 impl Config {
@@ -242,5 +271,24 @@ mod tests {
         assert_eq!(c.audio.replaygain, ReplayGain::Album);
         assert_eq!(c.audio.device, "default");
         assert_eq!(c.network.name, "ricercar");
+    }
+
+    #[test]
+    fn plugin_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            "[[plugins]]\nid = \"demo\"\ncommand = \"/usr/bin/demo\"\nargs = [\"--serve\"]\n\n[[plugins]]\nid = \"two\"\ncommand = \"two\"\nenabled = false\n",
+        )
+        .unwrap();
+        let c = Config::load(&p);
+        assert_eq!(c.plugins.len(), 2);
+        assert!(c.plugins[0].enabled && !c.plugins[1].enabled);
+        assert_eq!(c.plugins[0].args, ["--serve"]);
+        c.save(&p).unwrap();
+        assert_eq!(Config::load(&p), c);
+        assert!(PluginConfig::valid_id("my-plugin-2"));
+        assert!(!PluginConfig::valid_id("My plugin") && !PluginConfig::valid_id(""));
     }
 }

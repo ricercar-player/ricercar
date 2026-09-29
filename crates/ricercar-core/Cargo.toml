@@ -20,5 +20,12 @@ tracing.workspace = true
 ureq = "2.12"
 walkdir = "2.5.0"
 
+# Reference plugin used by the plugin tests and the screenshot tour.
+[[bin]]
+name = "ricercar-demo-plugin"
+path = "tests/fixtures/demo-plugin/main.rs"
+test = false
+doc = false
+
 [dev-dependencies]
 tempfile = "3.27.0"
