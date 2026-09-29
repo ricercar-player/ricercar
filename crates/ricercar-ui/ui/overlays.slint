@@ -29,7 +29,7 @@ component QueueLine inherits Rectangle {
     }
     ta := TouchArea {
         mouse-cursor: pointer;
-        double-clicked => { App.queue-play(root.item.id); }
+        clicked => { App.queue-play(root.item.id); }
     }
     HorizontalLayout {
         padding-left: 6px;

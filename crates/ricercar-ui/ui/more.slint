@@ -71,7 +71,7 @@ component StationLine inherits Rectangle {
     accessible-action-default => { App.radio-play(list, index); }
     ta := TouchArea {
         mouse-cursor: pointer;
-        double-clicked => { App.radio-play(root.list, root.index); }
+        clicked => { App.radio-play(root.list, root.index); }
     }
     HorizontalLayout {
         padding-left: 12px;

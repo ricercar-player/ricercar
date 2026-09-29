@@ -65,7 +65,7 @@ export component TrackLine inherits Rectangle {
     accessible-label: item.title + ", " + item.artist;
     accessible-action-default => { App.track-activate(list, index); }
     ta := TouchArea {
-        double-clicked => { App.track-activate(root.list, root.index); }
+        clicked => { App.track-activate(root.list, root.index); }
         pointer-event(e) => {
             if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
                 TrackMenu.list = root.list;
