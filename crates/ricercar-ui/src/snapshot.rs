@@ -64,9 +64,10 @@ impl Platform for Headless {
             if self.window.has_active_animations() {
                 self.window.request_redraw();
             }
-            let mut scratch = vec![Rgb8Pixel::default(); (W * H) as usize];
+            let size = self.window.size();
+            let mut scratch = vec![Rgb8Pixel::default(); (size.width * size.height) as usize];
             if self.window.draw_if_needed(|r| {
-                r.render(&mut scratch, W as usize);
+                r.render(&mut scratch, size.width as usize);
             }) {
                 crate::profile::frame_rendered();
             }
@@ -116,11 +117,44 @@ fn capture(dir: &std::path::Path, name: &str) {
 
 type Step = (u64, Box<dyn Fn(&Rc<Ui>)>);
 
+/// `RICERCAR_SNAPSHOT_TOUR`: the default screenshot tour, `perf` or `state`.
+pub fn tour() -> String {
+    std::env::var("RICERCAR_SNAPSHOT_TOUR").unwrap_or_default()
+}
+
+/// `RICERCAR_SNAPSHOT_TOUR=state`: print the interface state restored at
+/// startup, then leave the app 1600×1000 on the Artists page with sorts and
+/// the queue drawer changed. Run twice: the second run must print that state.
+fn state_tour() {
+    slint::Timer::single_shot(Duration::from_millis(500), || {
+        with_ui(|ui| {
+            let st = crate::app::current_state(ui);
+            eprintln!(
+                "state: restored {}",
+                serde_json::to_string(&st).unwrap_or_default()
+            );
+            let app = ui.app();
+            app.set_album_sort(1);
+            app.set_track_sort(2);
+            app.set_queue_open(true);
+            ui.window
+                .window()
+                .set_size(slint::LogicalSize::new(1600.0, 1000.0));
+            ui.navigate(Page::Artists, "", true);
+        });
+        slint::Timer::single_shot(Duration::from_millis(500), || {
+            let _ = slint::quit_event_loop();
+        });
+    });
+}
+
 /// Scripted tour: each step runs after its delay, then the view is captured.
 pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
-    if std::env::var("RICERCAR_SNAPSHOT_TOUR").as_deref() == Ok("perf") {
-        return perf_tour(dir);
+    match tour().as_str() {
+        "perf" => return perf_tour(dir),
+        "state" => return state_tour(),
+        _ => {}
     }
     let _ = ui;
     let album = |title: &'static str| {

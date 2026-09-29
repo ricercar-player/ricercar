@@ -25,6 +25,9 @@ tracing-subscriber.workspace = true
 ureq = "2.12"
 zbus = "5.19.0"
 
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [build-dependencies]
 slint-build = "1.18.1"
 

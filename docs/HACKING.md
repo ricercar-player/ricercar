@@ -123,6 +123,10 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
 - The docs images live in `docs/screenshots/`, plus `docs/assets/banner.jpg`,
   which is derived from `home.png`. Refresh them when a visible feature
   changes.
+- The tours ignore `ui-state.json` (window size, last page, sorts) so they
+  always start from the same state. `RICERCAR_SNAPSHOT_TOUR=state` is the
+  exception: it prints the restored state, changes it and quits; run it twice
+  to check that the state survives a restart.
 
 ### Performance
 

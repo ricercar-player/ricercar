@@ -91,7 +91,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Queue drawer with drag-to-reorder, context menus everywhere
 - Dark & light themes, 7 accents, English & French
 - Keyboard shortcuts, notifications, tray icon
-- Remembers your queue and position
+- Remembers your queue and position, and reopens as you left it (window
+  size, page, sorts)
 
 </td>
 <td valign="top">
@@ -357,6 +358,7 @@ running hands the file to the running instance.
 | `~/.config/ricercar/config.toml` | settings |
 | `~/.local/share/ricercar/library.db` | library index, stats, playlists |
 | `~/.local/share/ricercar/session.json` | queue & position |
+| `~/.local/share/ricercar/ui-state.json` | window size, last page, sorts |
 | `~/.cache/ricercar/` | cover thumbnails, lyrics, stream spool |
 </details>
 

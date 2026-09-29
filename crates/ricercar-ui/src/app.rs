@@ -11,6 +11,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::images::{Loader, Lookup, Source};
 use crate::text::t;
+use crate::ui_state::{UiState, WindowState};
 use crate::{AlbumCard, App, ArtistCard, MainWindow, Page, TrackRow};
 
 thread_local! {
@@ -267,6 +268,8 @@ pub struct Ui {
     pub player: RefCell<crate::player::PlayerView>,
     pub tray: RefCell<Option<ksni::blocking::Handle<crate::tray::Tray>>>,
     pub visible: std::cell::Cell<bool>,
+    /// Interface state as last saved to ui-state.json.
+    pub saved_state: RefCell<UiState>,
 }
 
 impl Ui {
@@ -507,6 +510,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         player: RefCell::new(crate::player::PlayerView::default()),
         tray: RefCell::new(None),
         visible: std::cell::Cell::new(true),
+        saved_state: RefCell::new(UiState::default()),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
 
@@ -514,8 +518,16 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     crate::views::wire(&ui);
     crate::player::wire(&ui);
     crate::extras::wire(&ui);
-    ui.navigate(Page::Home, "", true);
     let snapshot_mode = snapshot.is_some();
+    // The screenshot and perf tours start from a known state; the state
+    // tour checks that it survives a restart.
+    let keep_state = !snapshot_mode || crate::snapshot::tour() == "state";
+    let (page, arg) = if !keep_state {
+        (Page::Home, String::new())
+    } else {
+        restore_state(&ui)
+    };
+    ui.navigate(page, &arg, true);
     if let Some(dir) = snapshot {
         crate::snapshot::start(&ui, dir);
     }
@@ -528,6 +540,18 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         || with_ui(|ui| ui.refill_covers()),
     );
     ui.timers.borrow_mut().push(t);
+
+    if keep_state {
+        // No resize event in Slint: look for changes every 2 s, so a crash
+        // or a kill loses at most that much.
+        let t = slint::Timer::default();
+        t.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(2),
+            || with_ui(|ui| save_state(ui)),
+        );
+        ui.timers.borrow_mut().push(t);
+    }
 
     let tray_enabled = !snapshot_mode && ctx.config.read().unwrap().ui.tray;
     if tray_enabled {
@@ -560,6 +584,9 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     }
     window.show()?;
     slint::run_event_loop_until_quit()?;
+    if keep_state {
+        save_state(&ui);
+    }
     let _ = window.hide();
     ctx.shutdown();
     UI.with(|u| *u.borrow_mut() = None);
@@ -733,4 +760,91 @@ pub fn set_rows<T: Row>(m: &Rows<T>, rows: Vec<T>) {
 
 pub fn unknown_artist() -> &'static str {
     t("Unknown artist")
+}
+
+// ------------------------------------------------------------ window state
+
+/// X11 reports and accepts window positions; Wayland does neither.
+pub fn is_x11() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_some()
+}
+
+/// Apply the saved interface state (before the window is shown) and return
+/// the page to open.
+fn restore_state(ui: &Rc<Ui>) -> (Page, String) {
+    let st = UiState::load(&crate::ui_state::default_path());
+    let app = ui.app();
+    app.set_album_sort(st.album_sort);
+    app.set_track_sort(st.track_sort);
+    app.set_albums_hires_only(st.albums_hires_only);
+    app.set_queue_open(st.queue_open);
+    let win = ui.window.window();
+    if let Some(w) = &st.window {
+        if let Some((width, height)) = crate::ui_state::usable_size(w) {
+            win.set_size(slint::LogicalSize::new(width, height));
+        }
+        if let (Some(x), Some(y), true) = (w.x, w.y, is_x11()) {
+            win.set_position(slint::PhysicalPosition::new(x, y));
+        }
+        if w.maximized {
+            win.set_maximized(true);
+        }
+    }
+    let lib = &ui.ctx.lib;
+    let start = crate::ui_state::start_page(
+        &st,
+        |id| lib.album(id).is_some(),
+        |id| lib.playlist(id).is_some(),
+    );
+    *ui.saved_state.borrow_mut() = st;
+    start
+}
+
+pub fn current_state(ui: &Ui) -> UiState {
+    let app = ui.app();
+    let win = ui.window.window();
+    let saved = ui.saved_state.borrow().clone();
+    let maximized = win.is_maximized();
+    let size = win.size().to_logical(win.scale_factor());
+    // A maximized window keeps the size it will return to.
+    let (width, height) = match (&saved.window, maximized) {
+        (Some(w), true) => (w.width, w.height),
+        _ => (size.width, size.height),
+    };
+    let pos = is_x11().then(|| win.position());
+    let (page, arg) = {
+        let st = ui.st.borrow();
+        st.history
+            .get(st.hist_pos)
+            .cloned()
+            .unwrap_or((Page::Home, String::new()))
+    };
+    UiState {
+        window: (width > 0.0 && height > 0.0).then_some(WindowState {
+            width,
+            height,
+            maximized,
+            x: pos.map(|p| p.x),
+            y: pos.map(|p| p.y),
+        }),
+        page: crate::ui_state::page_name(page).into(),
+        page_arg: arg,
+        album_sort: app.get_album_sort(),
+        track_sort: app.get_track_sort(),
+        albums_hires_only: app.get_albums_hires_only(),
+        queue_open: app.get_queue_open(),
+        recent_searches: saved.recent_searches,
+    }
+}
+
+/// Write ui-state.json when something changed.
+pub fn save_state(ui: &Ui) {
+    let st = current_state(ui);
+    if st == *ui.saved_state.borrow() {
+        return;
+    }
+    match st.save(&crate::ui_state::default_path()) {
+        Ok(()) => *ui.saved_state.borrow_mut() = st,
+        Err(e) => tracing::warn!("save ui-state.json: {e}"),
+    }
 }

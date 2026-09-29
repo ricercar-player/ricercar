@@ -10,6 +10,7 @@ mod profile;
 mod snapshot;
 mod text;
 mod tray;
+mod ui_state;
 mod views;
 
 pub use app::run;
