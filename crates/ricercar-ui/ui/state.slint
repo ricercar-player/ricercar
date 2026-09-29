@@ -82,6 +82,11 @@ export struct StationRow {
     fav: bool,
 }
 
+export struct CapChip {
+    label: string,
+    ok: bool,
+}
+
 export struct DeviceRow {
     name: string,
     desc: string,
@@ -89,6 +94,16 @@ export struct DeviceRow {
     // a system mixer sits in the path (default / pipewire / pulse)
     shared: bool,
     selected: bool,
+    // capabilities panel (hw: devices)
+    expanded: bool,
+    caps-known: bool,
+    rates: [CapChip],
+    formats: [CapChip],
+    channels: string,
+    // probing, in use, error…
+    caps-status: string,
+    // library albums this device cannot play natively, one per line
+    lib-note: string,
 }
 
 export struct ChainHop {
@@ -229,6 +244,8 @@ export global App {
     in property <string> al-duration;
     in property <string> al-quality;
     in property <bool> al-hires;
+    // a rate of this album is refused by the active output
+    in property <bool> al-dac-unsupported;
     in property <bool> al-fav;
     in property <image> al-cover;
     in property <string> al-path;
@@ -286,6 +303,7 @@ export global App {
     in property <[DeviceRow]> devices;
     callback select-device(string);
     callback refresh-devices();
+    callback toggle-device-caps(string);
     in-out property <int> replaygain; // 0 off, 1 track, 2 album, 3 auto
     in-out property <float> preamp;
     callback settings-changed();

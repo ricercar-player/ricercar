@@ -1,9 +1,58 @@
 import { ScrollView, Slider } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { App, StationRow } from "state.slint";
+import { App, StationRow, DeviceRow, CapChip } from "state.slint";
 import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Toggle, TextField, Badge } from "widgets.slint";
 import { PageScroll } from "pages.slint";
+
+// ------------------------------------------------------------------ settings: DAC
+
+component CapChipView inherits Rectangle {
+    in property <CapChip> chip;
+    height: 24px;
+    width: t.preferred-width + 20px;
+    border-radius: 12px;
+    background: chip.ok ? Theme.hover : transparent;
+    border-width: chip.ok ? 0 : 1px;
+    border-color: Theme.line;
+    accessible-role: text;
+    accessible-label: chip.label + (chip.ok ? "" : " ✕");
+    t := Text {
+        text: chip.label;
+        font-size: Theme.fs-xs;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        color: chip.ok ? Theme.text : Theme.text3;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+component CapLine inherits HorizontalLayout {
+    in property <string> label;
+    in property <[CapChip]> chips;
+    spacing: 6px;
+    Text { width: 110px; text: label; font-size: Theme.fs-sm; color: Theme.text3; vertical-alignment: center; }
+    for c in chips: CapChipView { chip: c; }
+}
+
+/// What a hw: device accepts, under its row in the settings.
+component DeviceCaps inherits VerticalLayout {
+    in property <DeviceRow> dev;
+    padding-left: 48px;
+    padding-right: 16px;
+    padding-bottom: 14px;
+    spacing: 8px;
+    if dev.caps-status != "": Text { text: dev.caps-status; font-size: Theme.fs-sm; color: Theme.text3; wrap: word-wrap; }
+    if dev.caps-known: CapLine { label: @tr("Sample rates"); chips: dev.rates; }
+    if dev.caps-known: CapLine { label: @tr("Containers"); chips: dev.formats; }
+    if dev.caps-known: HorizontalLayout {
+        spacing: 6px;
+        Text { width: 110px; text: @tr("Channels"); font-size: Theme.fs-sm; color: Theme.text3; }
+        Text { text: dev.channels; font-size: Theme.fs-sm; color: Theme.text; }
+    }
+    if dev.lib-note != "": Text { text: dev.lib-note; font-size: Theme.fs-sm; color: Theme.warn; wrap: word-wrap; }
+}
 
 // ------------------------------------------------------------------ radio
 
@@ -244,8 +293,15 @@ export component SettingsPage inherits PageScroll {
                         }
                         if d.hardware: Badge { y: (parent.height - self.height) / 2; text: @tr("BIT-PERFECT"); tint: Theme.good; }
                         if d.shared: Badge { y: (parent.height - self.height) / 2; text: @tr("SHARED"); tint: Theme.warn; }
+                        if d.hardware: IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: d.expanded ? Icons.chevron-up : Icons.chevron-down;
+                            tooltip: d.expanded ? @tr("Hide capabilities") : @tr("Show capabilities");
+                            clicked => { App.toggle-device-caps(d.name); }
+                        }
                     }
                 }
+                if d.expanded: DeviceCaps { dev: d; }
             }
             Divider { }
             Row {

@@ -190,5 +190,11 @@
 "Most played": "Les plus écoutés",
 "Discography": "Discographie",
 "Also appears on": "Apparaît aussi sur",
-"Format": "Format"
+"Format": "Format",
+"NOT SUPPORTED BY THE DAC": "NON SUPPORTÉ PAR LE DAC",
+"Show capabilities": "Afficher les capacités",
+"Hide capabilities": "Masquer les capacités",
+"Sample rates": "Fréquences",
+"Containers": "Conteneurs",
+"Channels": "Canaux"
 }

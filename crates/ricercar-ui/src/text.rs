@@ -98,6 +98,14 @@ pub fn t(en: &'static str) -> &'static str {
         "Network sharing is off" => "Le partage réseau est désactivé",
         "Starting…" => "Démarrage…",
         "Network unavailable" => "Réseau indisponible",
+        "Reading capabilities…" => "Lecture des capacités…",
+        "In use: capabilities from the last check." => {
+            "En cours d'utilisation : capacités du dernier relevé."
+        }
+        "In use: capabilities are read once playback stops." => {
+            "En cours d'utilisation : capacités relevées à l'arrêt de la lecture."
+        }
+        "Could not read the device" => "Impossible d'interroger le périphérique",
         "Folder added; indexing…" => "Dossier ajouté ; indexation…",
         "Folder removed" => "Dossier retiré",
         "Output device" => "Sortie audio",
@@ -169,6 +177,43 @@ pub fn greeting() -> &'static str {
     }
 }
 
+/// kHz with the decimal separator of the language ("352,8" in French).
+fn khz_local(rate: u32) -> String {
+    let k = khz(rate);
+    if fr() { k.replace('.', ",") } else { k }
+}
+
+/// "12 albums at 352.8 kHz can't be played natively on this DAC".
+pub fn unsupported_albums(n: u32, rate: u32) -> String {
+    let k = khz_local(rate);
+    match (fr(), n == 1) {
+        (false, true) => format!("1 album at {k} kHz can't be played natively on this DAC"),
+        (false, false) => format!("{n} albums at {k} kHz can't be played natively on this DAC"),
+        (true, true) => format!("1 album à {k} kHz ne pourra pas être lu nativement sur ce DAC"),
+        (true, false) => {
+            format!("{n} albums à {k} kHz ne pourront pas être lus nativement sur ce DAC")
+        }
+    }
+}
+
+/// "The DAC refuses 352.8 kHz (accepts: 44.1–192 kHz)".
+pub fn dac_refuses(rate: u32, accepts: Option<&str>) -> String {
+    let k = khz_local(rate);
+    let accepts = accepts.map(|a| {
+        if fr() {
+            a.replace('.', ",")
+        } else {
+            a.to_string()
+        }
+    });
+    match (fr(), accepts) {
+        (false, Some(a)) => format!("The DAC refuses {k} kHz (accepts: {a})"),
+        (false, None) => format!("The DAC refuses {k} kHz"),
+        (true, Some(a)) => format!("Le DAC refuse {k} kHz (accepte : {a})"),
+        (true, None) => format!("Le DAC refuse {k} kHz"),
+    }
+}
+
 pub fn count(n: usize, one: &'static str, many: &'static str) -> String {
     format!("{n} {}", if n == 1 { t(one) } else { t(many) })
 }
@@ -190,5 +235,13 @@ mod tests {
             "16/44.1"
         );
         assert_eq!(quality(Some(44_100), None, Some("MP3"), Some(320)), "320k");
+        assert_eq!(
+            unsupported_albums(12, 352_800),
+            "12 albums at 352.8 kHz can't be played natively on this DAC"
+        );
+        assert_eq!(
+            dac_refuses(352_800, Some("44.1–192 kHz")),
+            "The DAC refuses 352.8 kHz (accepts: 44.1–192 kHz)"
+        );
     }
 }

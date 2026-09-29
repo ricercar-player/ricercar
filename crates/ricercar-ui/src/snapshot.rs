@@ -288,7 +288,28 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
         ),
         (
             "settings",
-            (1200, Box::new(|ui| ui.navigate(Page::Settings, "", true))),
+            (
+                1200,
+                Box::new(|ui| {
+                    // Tours never open real hardware: show example
+                    // capabilities on the first hw: device.
+                    let hw = ricercar_audio::device::list_devices()
+                        .into_iter()
+                        .find(|d| d.kind == ricercar_audio::DeviceKind::Hardware);
+                    if let Some(d) = hw {
+                        let caps = crate::dac::CachedCaps {
+                            rates: vec![44_100, 48_000, 88_200, 96_000],
+                            formats: vec!["S16_LE".into(), "S24_3LE".into(), "S32_LE".into()],
+                            channels_min: 2,
+                            channels_max: 2,
+                            probed_at: 0,
+                        };
+                        crate::extras::store_caps(ui, &d.name, caps);
+                        ui.extras.borrow_mut().expanded.insert(d.name);
+                    }
+                    ui.navigate(Page::Settings, "", true);
+                }),
+            ),
         ),
         (
             "album-light",

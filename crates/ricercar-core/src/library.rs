@@ -159,6 +159,14 @@ pub struct LibraryStats {
     pub hires_tracks: u32,
 }
 
+/// How much of the library comes at one sample rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateCount {
+    pub rate: u32,
+    pub albums: u32,
+    pub tracks: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScanReport {
     pub added: usize,
@@ -728,6 +736,24 @@ impl Library {
                 },
             )
             .unwrap_or_default()
+    }
+
+    /// Albums and tracks per sample rate, lowest rate first (tracks with an
+    /// unknown rate are left out). An album with several rates counts once
+    /// per rate.
+    pub fn rate_histogram(&self) -> Vec<RateCount> {
+        self.query(
+            "SELECT sample_rate, COUNT(DISTINCT album_id), COUNT(*) FROM tracks
+             WHERE sample_rate > 0 GROUP BY sample_rate ORDER BY sample_rate",
+            [],
+            |r| {
+                Ok(RateCount {
+                    rate: r.get(0)?,
+                    albums: r.get(1)?,
+                    tracks: r.get(2)?,
+                })
+            },
+        )
     }
 
     // ------------------------------------------------------------ albums
@@ -1388,6 +1414,14 @@ mod tests {
         let tracks = lib.album_tracks(&kob.id);
         assert_eq!(tracks[0].title, "So What");
         assert_eq!(lib.stats().albums, 3);
+        assert_eq!(
+            lib.rate_histogram(),
+            [RateCount {
+                rate: 96_000,
+                albums: 3,
+                tracks: 5
+            }]
+        );
     }
 
     #[test]

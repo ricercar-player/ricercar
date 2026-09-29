@@ -172,6 +172,18 @@ msgctxt "TrackLine"
 msgid "Favorite"
 msgstr "Favori"
 
+msgctxt "DeviceCaps"
+msgid "Sample rates"
+msgstr "Fréquences"
+
+msgctxt "DeviceCaps"
+msgid "Containers"
+msgstr "Conteneurs"
+
+msgctxt "DeviceCaps"
+msgid "Channels"
+msgstr "Canaux"
+
 msgctxt "StationLine"
 msgid "Favorite"
 msgstr "Favori"
@@ -211,6 +223,14 @@ msgstr "BIT-PERFECT"
 msgctxt "SettingsPage"
 msgid "SHARED"
 msgstr "PARTAGÉ"
+
+msgctxt "SettingsPage"
+msgid "Hide capabilities"
+msgstr "Masquer les capacités"
+
+msgctxt "SettingsPage"
+msgid "Show capabilities"
+msgstr "Afficher les capacités"
 
 msgctxt "SettingsPage"
 msgid "Rescan devices"
@@ -779,6 +799,10 @@ msgid "{n} track"
 msgid_plural "{n} tracks"
 msgstr[0] "{n} titre"
 msgstr[1] "{n} titres"
+
+msgctxt "AlbumPage"
+msgid "NOT SUPPORTED BY THE DAC"
+msgstr "NON SUPPORTÉ PAR LE DAC"
 
 msgctxt "AlbumPage"
 msgid "More by {}"

@@ -170,7 +170,7 @@ fn tick_inner(ui: &Rc<Ui>) {
     for ev in events {
         match ev {
             CtlEvent::QueueChanged => queue_changed = true,
-            CtlEvent::Error(msg) => ui.toast(short_error(&msg), true),
+            CtlEvent::Error(msg) => ui.toast(error_text(ui, &msg), true),
             CtlEvent::Played(_) if app.get_page() == Page::Home => {
                 ui.st.borrow_mut().lib_rev = 0;
             }
@@ -273,6 +273,19 @@ fn tick_inner(ui: &Rc<Ui>) {
         if scanning || app.get_page() == Page::Settings {
             crate::extras::refresh_library_rows(ui);
         }
+    }
+}
+
+/// A refused rate is told with what the DAC accepts, when known.
+fn error_text(ui: &Ui, msg: &str) -> String {
+    match crate::dac::refused_rate(msg) {
+        Some(rate) => {
+            let accepts = crate::extras::active_caps(ui)
+                .map(|c| crate::dac::rates_summary(&c.rates))
+                .filter(|s| !s.is_empty());
+            crate::text::dac_refuses(rate, accepts.as_deref())
+        }
+        None => short_error(msg),
     }
 }
 

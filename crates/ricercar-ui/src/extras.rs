@@ -30,6 +30,12 @@ pub struct Extras {
     stations: Option<Rc<VecModel<StationRow>>>,
     /// Network status revision shown in the settings.
     network_rev: Option<u64>,
+    /// Devices whose capabilities panel is open, being probed, or failed.
+    pub expanded: std::collections::HashSet<String>,
+    probing: std::collections::HashSet<String>,
+    probe_errors: std::collections::HashMap<String, String>,
+    /// Library sample rates by library revision.
+    histogram: Option<(u64, Vec<ricercar_core::RateCount>)>,
     fav_model: Option<Rc<VecModel<StationRow>>>,
 }
 
@@ -322,6 +328,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     let cfg = ui.ctx.config.read().unwrap().clone();
     let app = ui.app();
     refresh_devices(ui);
+    probe_devices(ui);
     app.set_replaygain(match cfg.audio.replaygain {
         ReplayGain::Off => 0,
         ReplayGain::Track => 1,
@@ -406,21 +413,90 @@ pub fn refresh_library_rows(ui: &Ui) {
     ui.app().set_roots(ModelRc::new(VecModel::from(roots)));
 }
 
-fn refresh_devices(ui: &Ui) {
+fn chips(v: Vec<(String, bool)>) -> ModelRc<crate::CapChip> {
+    let rows: Vec<crate::CapChip> = v
+        .into_iter()
+        .map(|(label, ok)| crate::CapChip {
+            label: label.into(),
+            ok,
+        })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
+}
+
+/// The output our engine holds open right now (never probed).
+fn device_in_use(ui: &Ui, name: &str) -> bool {
+    ui.ctx.ctl.device_name() == name && ui.ctx.ctl.engine_chain().format.is_some()
+}
+
+/// Library sample rates, cached per library revision.
+fn rate_histogram(ui: &Ui) -> Vec<ricercar_core::RateCount> {
+    let rev = ui.ctx.lib.revision();
+    let cached = ui.extras.borrow().histogram.clone();
+    match cached {
+        Some((r, h)) if r == rev => h,
+        _ => {
+            let h = ui.ctx.lib.rate_histogram();
+            ui.extras.borrow_mut().histogram = Some((rev, h.clone()));
+            h
+        }
+    }
+}
+
+pub fn refresh_devices(ui: &Ui) {
     let current = ui.ctx.ctl.device_name();
+    let cache = ui.saved_state.borrow().dac_caps.clone();
+    let hist = rate_histogram(ui);
     let mut rows: Vec<DeviceRow> = ricercar_audio::device::list_devices()
         .into_iter()
         .filter(|d| d.kind != ricercar_audio::DeviceKind::Null)
-        .map(|d| DeviceRow {
-            hardware: d.kind == ricercar_audio::DeviceKind::Hardware,
-            shared: d.kind == ricercar_audio::DeviceKind::Virtual,
-            selected: d.name == current,
-            desc: d
-                .description
-                .trim_end_matches(" (not bit-perfect)")
-                .to_string()
-                .into(),
-            name: d.name.into(),
+        .map(|d| {
+            let hardware = d.kind == ricercar_audio::DeviceKind::Hardware;
+            let caps = cache.get(&d.name).filter(|_| hardware);
+            let ex = ui.extras.borrow();
+            let status = if ex.probing.contains(&d.name) {
+                t("Reading capabilities…").to_string()
+            } else if let Some(e) = ex.probe_errors.get(&d.name) {
+                format!("{}: {e}", t("Could not read the device"))
+            } else if hardware && device_in_use(ui, &d.name) {
+                if caps.is_some() {
+                    t("In use: capabilities from the last check.").into()
+                } else {
+                    t("In use: capabilities are read once playback stops.").into()
+                }
+            } else {
+                String::new()
+            };
+            let lib_note = caps
+                .map(|c| {
+                    crate::dac::unsupported(&hist, c)
+                        .into_iter()
+                        .map(|(rate, n)| crate::text::unsupported_albums(n, rate))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            DeviceRow {
+                hardware,
+                shared: d.kind == ricercar_audio::DeviceKind::Virtual,
+                selected: d.name == current,
+                desc: d
+                    .description
+                    .trim_end_matches(" (not bit-perfect)")
+                    .to_string()
+                    .into(),
+                expanded: hardware && ex.expanded.contains(&d.name),
+                caps_known: caps.is_some(),
+                rates: chips(caps.map(crate::dac::rate_chips).unwrap_or_default()),
+                formats: chips(caps.map(crate::dac::container_chips).unwrap_or_default()),
+                channels: caps
+                    .map(crate::dac::channels_label)
+                    .unwrap_or_default()
+                    .into(),
+                caps_status: status.into(),
+                lib_note: lib_note.into(),
+                name: d.name.into(),
+            }
         })
         .collect();
     if !rows.iter().any(|r| r.selected) {
@@ -438,12 +514,98 @@ fn refresh_devices(ui: &Ui) {
                 current
             }
             .into(),
-            hardware: false,
-            shared: false,
             selected: true,
+            ..Default::default()
         });
     }
     ui.app().set_devices(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Read what every hw: device accepts, off the UI thread. The device we
+/// play on is skipped (its cached capabilities stay), and the headless tours
+/// never open real hardware.
+pub fn probe_devices(ui: &Rc<Ui>) {
+    if std::env::var_os("RICERCAR_SNAPSHOT").is_some() {
+        return;
+    }
+    let names: Vec<String> = ricercar_audio::device::list_devices()
+        .into_iter()
+        .filter(|d| d.kind == ricercar_audio::DeviceKind::Hardware)
+        .map(|d| d.name)
+        .filter(|n| !device_in_use(ui, n) && !ui.extras.borrow().probing.contains(n))
+        .collect();
+    if names.is_empty() {
+        return;
+    }
+    {
+        let mut ex = ui.extras.borrow_mut();
+        for n in &names {
+            ex.probing.insert(n.clone());
+            ex.probe_errors.remove(n);
+        }
+    }
+    refresh_devices(ui);
+    std::thread::Builder::new()
+        .name("ricercar-dac-probe".into())
+        .spawn(move || {
+            for name in names {
+                let r = ricercar_audio::probe_device(&name);
+                post(move |ui| {
+                    ui.extras.borrow_mut().probing.remove(&name);
+                    match r {
+                        Ok(caps) => {
+                            let c = crate::dac::CachedCaps::from_caps(
+                                &caps,
+                                ricercar_core::library::now_unix(),
+                            );
+                            store_caps(ui, &name, c);
+                        }
+                        Err(e) => {
+                            tracing::info!("probe {name}: {e}");
+                            ui.extras
+                                .borrow_mut()
+                                .probe_errors
+                                .insert(name, short_alsa(&e));
+                        }
+                    }
+                    refresh_devices(ui);
+                });
+            }
+        })
+        .expect("spawn probe");
+}
+
+/// "alsa error on device 'hw:1,0': ALSA function 'snd_pcm_open' failed with
+/// error 'EBUSY: Device or resource busy'" → "Device or resource busy".
+fn short_alsa(e: &ricercar_audio::AudioError) -> String {
+    let s = e.to_string();
+    s.rsplit(": ")
+        .next()
+        .unwrap_or(&s)
+        .trim_end_matches('\'')
+        .to_string()
+}
+
+/// Remember a device's capabilities (ui-state.json).
+pub fn store_caps(ui: &Ui, name: &str, caps: crate::dac::CachedCaps) {
+    ui.saved_state
+        .borrow_mut()
+        .dac_caps
+        .insert(name.to_string(), caps);
+    let st = ui.saved_state.borrow().clone();
+    if std::env::var_os("RICERCAR_SNAPSHOT").is_none()
+        && let Err(e) = st.save(&crate::ui_state::default_path())
+    {
+        tracing::warn!("save ui-state.json: {e}");
+    }
+}
+
+/// Capabilities of the active output, when it is a probed hw: device.
+pub fn active_caps(ui: &Ui) -> Option<crate::dac::CachedCaps> {
+    let name = ui.ctx.ctl.device_name();
+    (ricercar_audio::device::classify(&name) == ricercar_audio::DeviceKind::Hardware)
+        .then(|| ui.saved_state.borrow().dac_caps.get(&name).cloned())
+        .flatten()
 }
 
 /// Apply look & feel from the config to the Theme global.
@@ -597,7 +759,24 @@ pub fn wire(ui: &Rc<Ui>) {
             ui.toast(format!("{}: {name}", t("Output device")), false);
         })
     });
-    app.on_refresh_devices(|| with_ui(|ui| refresh_devices(ui)));
+    app.on_refresh_devices(|| {
+        with_ui(|ui| {
+            refresh_devices(ui);
+            probe_devices(ui);
+        })
+    });
+    app.on_toggle_device_caps(|name| {
+        with_ui(|ui| {
+            let name = name.to_string();
+            {
+                let mut ex = ui.extras.borrow_mut();
+                if !ex.expanded.remove(&name) {
+                    ex.expanded.insert(name);
+                }
+            }
+            refresh_devices(ui);
+        })
+    });
     app.on_add_root(|| {
         std::thread::spawn(|| {
             if let Some(dir) = rfd::FileDialog::new().pick_folder() {

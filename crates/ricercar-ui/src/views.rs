@@ -241,6 +241,12 @@ fn load_album(ui: &Rc<Ui>, id: &str) {
         .into(),
     );
     app.set_al_hires(a.is_hires());
+    app.set_al_dac_unsupported(crate::extras::active_caps(ui).is_some_and(|c| {
+        tracks
+            .iter()
+            .filter_map(|t| t.sample_rate)
+            .any(|r| !c.supports_rate(r))
+    }));
     app.set_al_fav(a.favorite);
     let roots = ui.ctx.config.read().unwrap().library.roots.clone();
     let shown = roots

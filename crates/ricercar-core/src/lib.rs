@@ -15,5 +15,5 @@ pub use controller::{
     Controller, CtlEvent, CtlState, EnqueueAt, Origin, PlayContext, QueueItem, Repeat, TrackInfo,
 };
 pub use library::{
-    Album, AlbumSort, Artist, Genre, Library, Playlist, SearchResults, Track, TrackSort,
+    Album, AlbumSort, Artist, Genre, Library, Playlist, RateCount, SearchResults, Track, TrackSort,
 };

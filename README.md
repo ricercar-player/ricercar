@@ -60,6 +60,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Bit-perfect `hw:` output, exclusive access
 - Native sample-rate switching per track
 - Lossless container negotiation (S16 · S24_3LE · S24 · S32) for picky USB DACs
+- DAC capabilities in Settings: accepted rates and containers, and which
+  albums of your library it cannot play natively
 - Gapless, sample-exact within a rate
 - FLAC · ALAC · WAV · AIFF · AAC · MP3 · Ogg Vorbis
 - Hardware pause, device hot-switch, clean stop on unplug

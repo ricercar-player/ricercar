@@ -451,6 +451,10 @@ export component AlbumPage inherits PageScroll {
                         padding-left: 10px;
                         Badge { y: (parent.height - self.height) / 2; text: "HI-RES"; tint: Theme.hires; }
                     }
+                    if App.al-dac-unsupported: HorizontalLayout {
+                        padding-left: 8px;
+                        Badge { y: (parent.height - self.height) / 2; text: @tr("NOT SUPPORTED BY THE DAC"); tint: Theme.warn; }
+                    }
                 }
                 if App.al-quality != "": Text {
                     text: App.al-quality + (App.al-genre != "" ? " · " + App.al-genre : "");

@@ -834,6 +834,7 @@ pub fn current_state(ui: &Ui) -> UiState {
         albums_hires_only: app.get_albums_hires_only(),
         queue_open: app.get_queue_open(),
         recent_searches: saved.recent_searches,
+        dac_caps: saved.dac_caps,
     }
 }
 

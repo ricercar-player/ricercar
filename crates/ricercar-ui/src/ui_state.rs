@@ -31,6 +31,8 @@ pub struct UiState {
     pub queue_open: bool,
     /// Most recent first.
     pub recent_searches: Vec<String>,
+    /// Last known capabilities of each hw: device.
+    pub dac_caps: crate::dac::CapsCache,
 }
 
 impl Default for UiState {
@@ -44,6 +46,7 @@ impl Default for UiState {
             albums_hires_only: false,
             queue_open: false,
             recent_searches: Vec::new(),
+            dac_caps: Default::default(),
         }
     }
 }
