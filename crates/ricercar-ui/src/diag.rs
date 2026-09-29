@@ -88,7 +88,7 @@ fn signal_path(ui: &Ui) -> String {
 /// Build the whole report (UI thread).
 pub fn report(ui: &Ui) -> String {
     let cfg = ui.ctx.config.read().unwrap().clone();
-    let log = logging::recent_lines(LOG_LINES).join("\n");
+    let log = diag::mask_emails(&logging::recent_lines(LOG_LINES).join("\n"));
     render(&[
         Section {
             title: "System",

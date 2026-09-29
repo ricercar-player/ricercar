@@ -24,6 +24,42 @@ pub fn masked_config(cfg: &Config) -> String {
 }
 
 /// `PRETTY_NAME` from an os-release file.
+/// Mask e-mail addresses (plugins may log the account they signed in
+/// with) before log lines go into a report meant to be shared.
+pub fn mask_emails(text: &str) -> String {
+    let is_local = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
+    let is_domain = |c: char| c.is_ascii_alphanumeric() || ".-".contains(c);
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '@' {
+            let mut start = out.len();
+            for (pos, c) in out.char_indices().rev() {
+                if !is_local(c) {
+                    break;
+                }
+                start = pos;
+            }
+            let mut end = i + 1;
+            while end < chars.len() && is_domain(chars[end]) {
+                end += 1;
+            }
+            let domain: String = chars[i + 1..end].iter().collect();
+            let domain = domain.trim_end_matches(['.', '-']);
+            if start < out.len() && domain.contains('.') {
+                out.truncate(start);
+                out.push_str("<email>");
+                i += 1 + domain.chars().count();
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 pub fn parse_os_release(text: &str) -> Option<String> {
     text.lines()
         .find_map(|l| l.strip_prefix("PRETTY_NAME="))
@@ -103,6 +139,20 @@ impl AppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emails_are_masked() {
+        assert_eq!(
+            mask_emails("initialized, account: jane.doe+x@mail.example.org. ok"),
+            "initialized, account: <email>. ok"
+        );
+        assert_eq!(
+            mask_emails("user@host and @handle"),
+            "user@host and @handle"
+        );
+        assert_eq!(mask_emails("a@b.c, d@e.fr"), "<email>, <email>");
+        assert_eq!(mask_emails("déjà vu"), "déjà vu");
+    }
 
     #[test]
     fn secrets_are_masked() {
