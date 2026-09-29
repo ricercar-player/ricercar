@@ -74,7 +74,7 @@ impl UiState {
     }
 }
 
-const PAGES: [(Page, &str); 13] = [
+const PAGES: [(Page, &str); 14] = [
     (Page::Home, "home"),
     (Page::Albums, "albums"),
     (Page::Album, "album"),
@@ -88,6 +88,7 @@ const PAGES: [(Page, &str); 13] = [
     (Page::Radio, "radio"),
     (Page::Search, "search"),
     (Page::Settings, "settings"),
+    (Page::Browse, "browse"),
 ];
 
 pub fn page_name(p: Page) -> &'static str {
@@ -103,7 +104,8 @@ pub fn page_from_name(n: &str) -> Option<Page> {
 }
 
 /// The page to open at startup. The search page depends on text that is not
-/// kept, and an album or playlist may have gone since: fall back to Home.
+/// kept, a plugin page on a plugin that is still starting, and an album or
+/// playlist may have gone since: fall back to Home.
 pub fn start_page(
     st: &UiState,
     album_exists: impl Fn(&str) -> bool,
@@ -112,7 +114,7 @@ pub fn start_page(
     let page = st.page();
     let arg = st.page_arg.clone();
     let ok = match page {
-        Page::Search => false,
+        Page::Search | Page::Browse => false,
         Page::Album => album_exists(&arg),
         Page::Playlist => arg.parse().is_ok_and(&playlist_exists),
         Page::Artist | Page::Genre => !arg.is_empty(),

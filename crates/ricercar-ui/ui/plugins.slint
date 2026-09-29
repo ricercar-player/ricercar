@@ -1,0 +1,155 @@
+// Source plugins (docs/plugins.md): the generic browse page and the
+// sign-in dialog. Everything a plugin sends is shown as plain text.
+
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App } from "state.slint";
+import { Button, TextField } from "widgets.slint";
+import { BrowseContent } from "lists.slint";
+import { PageScroll } from "pages.slint";
+
+/// A list from a plugin (sidebar section, album, playlist, folder).
+export component BrowsePage inherits PageScroll {
+    title: App.br-title;
+    fade-at: 40px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 12px;
+        Text {
+            text: App.br-title;
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if App.br-sub != "": Text {
+            text: App.br-sub;
+            font-size: Theme.fs-md;
+            color: Theme.text2;
+            overflow: elide;
+        }
+        if App.br-tracks.length > 0: HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            Button { text: @tr("Play"); icon: Icons.play-fill; primary: true; clicked => { App.br-play(false); } }
+            Button { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { App.br-play(true); } }
+        }
+        BrowseContent {
+            cards: App.br-cards;
+            tracks: App.br-tracks;
+            list: "browse";
+            loading: App.br-loading;
+            more: App.br-more;
+            error: App.br-error;
+            auth: App.br-auth;
+            load-more => { App.br-load-more(); }
+            sign-in => { App.br-sign-in(); }
+        }
+    }
+}
+
+/// Browser-based sign-in: the plugin gives an address, the user signs in
+/// there (or on another device through the QR code) and may paste back
+/// the address or code the service shows. No password goes through here.
+export component SignInDialog inherits Rectangle {
+    background: Theme.scrim;
+    TouchArea { clicked => { App.signin-cancel(); } }
+    public function focus-input() {
+        field.focus-field();
+    }
+    Rectangle {
+        width: 460px;
+        height: lay.preferred-height;
+        border-radius: Theme.r-lg;
+        background: Theme.overlay;
+        border-width: 1px;
+        border-color: Theme.line;
+        drop-shadow-blur: 40px;
+        drop-shadow-offset-y: 16px;
+        drop-shadow-color: #000000b3;
+        TouchArea { }
+        lay := VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+            Text { text: App.signin-title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; }
+            if App.signin-url == "": Text {
+                text: @tr("Asking the plugin for a sign-in address…");
+                font-size: Theme.fs-md;
+                color: Theme.text2;
+                wrap: word-wrap;
+            }
+            if App.signin-url != "": HorizontalLayout {
+                spacing: 16px;
+                Rectangle {
+                    width: 152px;
+                    height: 152px;
+                    border-radius: Theme.r-md;
+                    background: #ffffff;
+                    Image {
+                        width: 136px;
+                        height: 136px;
+                        source: App.signin-qr;
+                        image-rendering: pixelated;
+                        accessible-role: image;
+                        accessible-label: @tr("QR code of the sign-in address");
+                    }
+                }
+                VerticalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: App.signin-instructions != "" ? App.signin-instructions : @tr("Sign in in your browser. On another device, scan the code.");
+                        font-size: Theme.fs-md;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: App.signin-url;
+                        font-size: Theme.fs-sm;
+                        color: Theme.text2;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { text: @tr("Open in browser"); icon: Icons.log-in; clicked => { App.signin-open-browser(); } }
+                    }
+                }
+            }
+            if !App.signin-expects-input && App.signin-url != "": Text {
+                text: @tr("This closes by itself once you are signed in. If the browser runs elsewhere, paste the address it ends on.");
+                font-size: Theme.fs-sm;
+                color: Theme.text3;
+                wrap: word-wrap;
+            }
+            field := TextField {
+                placeholder: @tr("Paste the address or code");
+                text <=> App.signin-input;
+                accepted(t) => { if t != "" { App.signin-complete(t); } }
+                escape => { App.signin-cancel(); }
+            }
+            if App.signin-status != "": Text {
+                text: App.signin-status;
+                font-size: Theme.fs-sm;
+                color: Theme.bad;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 10px;
+                padding-top: 6px;
+                Button { text: @tr("Cancel"); clicked => { App.signin-cancel(); } }
+                Button {
+                    text: App.signin-busy ? @tr("Checking…") : @tr("Sign in");
+                    primary: true;
+                    enabled: App.signin-input != "" && !App.signin-busy;
+                    clicked => { App.signin-complete(App.signin-input); }
+                }
+            }
+        }
+    }
+}

@@ -8,6 +8,7 @@ mod diag;
 mod extras;
 mod images;
 mod player;
+mod plugins;
 mod profile;
 mod snapshot;
 mod text;

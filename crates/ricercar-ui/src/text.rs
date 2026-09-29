@@ -107,6 +107,34 @@ pub fn t(en: &'static str) -> &'static str {
         }
         "Could not read the device" => "Impossible d'interroger le périphérique",
         "Diagnostic report copied" => "Rapport de diagnostic copié",
+        "Sign in to" => "Se connecter à",
+        "Signed in to" => "Connecté à",
+        "Not found" => "Introuvable",
+        "Not available (region, subscription or format)" => {
+            "Non disponible (région, abonnement ou format)"
+        }
+        "Too many requests, try again later" => "Trop de requêtes, réessayez plus tard",
+        "Offline: the service could not be reached" => "Hors ligne : le service est injoignable",
+        "not running" => "ne tourne pas",
+        "no answer" => "pas de réponse",
+        "Off" => "Désactivé",
+        "Restarting in" => "Redémarrage dans",
+        "Stopped" => "Arrêté",
+        "Ready" => "Prêt",
+        "Signed in" => "Connecté",
+        "Signed in as" => "Connecté en tant que",
+        "Sign-in expired" => "Connexion expirée",
+        "Signed out" => "Déconnecté",
+        "Library" => "Bibliothèque",
+        "The plugin gave an unusable address." => "Le plugin a fourni une adresse inutilisable.",
+        "Not signed in yet. Check the code and try again." => {
+            "Pas encore connecté. Vérifiez le code et réessayez."
+        }
+        "Nothing playable here" => "Rien de lisible ici",
+        "This plugin has no favourites" => "Ce plugin ne gère pas les favoris",
+        "No results" => "Aucun résultat",
+        "plugin" => "plugin",
+        "Stream" => "Flux",
         "Report saved to" => "Rapport enregistré dans",
         "Folder added; indexing…" => "Dossier ajouté ; indexation…",
         "Folder removed" => "Dossier retiré",

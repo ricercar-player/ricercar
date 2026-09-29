@@ -139,6 +139,30 @@ export component Sidebar inherits Rectangle {
             active: App.page == Page.radio;
             clicked => { App.navigate(Page.radio, ""); }
         }
+        // Sections of each signed-in plugin, under its name.
+        for n in App.plugin-nav: VerticalLayout {
+            spacing: 2px;
+            if n.header: HorizontalLayout {
+                padding-left: 12px;
+                padding-top: 16px;
+                height: 46px;
+                Text {
+                    text: n.title;
+                    font-size: Theme.fs-xs;
+                    font-weight: 700;
+                    letter-spacing: 0.6px;
+                    color: Theme.text3;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            if !n.header: NavItem {
+                icon: n.kind == "playlist" ? Icons.list-music : n.kind == "album" ? Icons.disc-3 : n.kind == "artist" ? Icons.users-round : n.kind == "track" ? Icons.music : Icons.library;
+                text: n.title;
+                active: App.page == Page.browse && App.br-arg == n.arg;
+                clicked => { App.navigate(Page.browse, n.arg); }
+            }
+        }
         Rectangle { height: 18px; }
         HorizontalLayout {
             padding-left: 12px;
@@ -459,7 +483,7 @@ export component PlayerBar inherits Rectangle {
                 }
             }
             // The signal path, always in view: source → processing → format → device.
-            if App.has-track && App.chain-short.length > 0: HorizontalLayout {
+            if App.has-track && (App.chain-short.length > 0 || App.resolving): HorizontalLayout {
                 alignment: center;
                 chain := Rectangle {
                     height: 20px;
@@ -476,7 +500,13 @@ export component PlayerBar inherits Rectangle {
                             border-radius: 3.5px;
                             background: !App.chain-known ? Theme.text3 : App.bitperfect ? Theme.good : Theme.warn;
                         }
-                        for hop[i] in App.chain-short: HorizontalLayout {
+                        if App.resolving: Text {
+                            text: @tr("Loading…");
+                            font-size: Theme.fs-xs;
+                            color: Theme.text2;
+                            vertical-alignment: center;
+                        }
+                        for hop[i] in App.resolving ? [] : App.chain-short: HorizontalLayout {
                             spacing: 6px;
                             if i > 0: Icon {
                                 y: (parent.height - self.height) / 2;

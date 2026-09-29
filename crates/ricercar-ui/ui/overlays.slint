@@ -439,6 +439,8 @@ export component ContextMenu inherits Rectangle {
     callback new-playlist-for(bool);
     private property <bool> playlists-mode;
     private property <length> menu-w: 236px;
+    // Lists from a plugin: no album or artist page, no folder.
+    private property <bool> plugin-list: is-album ? TrackMenu.album-plugin : TrackMenu.list == "browse" || TrackMenu.list == "psearch";
     TouchArea {
         clicked => { root.dismiss(); }
         pointer-event(e) => {
@@ -468,10 +470,10 @@ export component ContextMenu inherits Rectangle {
                 MenuLine { text: @tr("Add to queue"); icon: Icons.list-end; clicked => { act("queue"); } }
                 MenuLine { text: @tr("Add to playlist"); icon: Icons.list-music; submenu: true; clicked => { root.playlists-mode = true; } }
                 Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
-                if !is-album: MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
-                MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
+                if !is-album && !plugin-list: MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
+                if !plugin-list: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
                 MenuLine { text: @tr("Favorite / unfavorite"); icon: Icons.heart; clicked => { act("fav"); } }
-                MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
+                if !plugin-list: MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
                 if !is-album && TrackMenu.list == "playlist": MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
             }
             if playlists-mode: VerticalLayout {

@@ -154,6 +154,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
     match tour().as_str() {
         "perf" => return perf_tour(dir),
         "state" => return state_tour(),
+        "plugins" => return plugins_tour(dir),
         _ => {}
     }
     let _ = ui;
@@ -587,5 +588,123 @@ fn perf_search(ui: &Rc<Ui>) {
                 s.len()
             ),
         );
+    }
+}
+
+// ------------------------------------------------------------------ plugins tour
+
+/// `RICERCAR_SNAPSHOT_TOUR=plugins`: declares the reference plugin
+/// (`ricercar-demo-plugin`, next to this binary; build it with
+/// `cargo build -p ricercar-core --bin ricercar-demo-plugin`), then captures
+/// the sign-in dialog, the browse pages, a playing plugin track and the
+/// plugin search tab.
+fn plugins_tour(dir: std::path::PathBuf) {
+    let bin = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join("ricercar-demo-plugin")));
+    let Some(bin) = bin.filter(|b| b.exists()) else {
+        eprintln!("snapshot: ricercar-demo-plugin not found next to ricercar; build it first");
+        let _ = slint::quit_event_loop();
+        return;
+    };
+    with_ui(|ui| {
+        ui.ctx.update_config(|c| {
+            c.plugins = vec![ricercar_core::config::PluginConfig {
+                id: "demo".into(),
+                command: bin.clone(),
+                args: Vec::new(),
+                enabled: true,
+            }];
+        })
+    });
+    let album = |r: &str, t: &str| crate::plugins::browse_arg("demo", r, t);
+    let steps: Vec<(&str, Step)> = vec![
+        (
+            "plugin-sign-in",
+            (
+                2500,
+                Box::new(|ui| {
+                    // A run on the same XDG dirs may still be signed in.
+                    let _ = ui.ctx.plugins.auth_sign_out("demo");
+                    crate::plugins::begin_sign_in(ui, "demo");
+                    ui.app().set_signin_input("DEMO".into());
+                }),
+            ),
+        ),
+        (
+            "plugin-browse",
+            (
+                1200,
+                Box::new(move |ui| {
+                    crate::plugins::complete_sign_in(ui, "DEMO");
+                    ui.navigate(Page::Browse, &album("albums", "Albums"), true);
+                }),
+            ),
+        ),
+        (
+            "plugin-album",
+            (
+                1500,
+                Box::new(move |ui| {
+                    ui.navigate(Page::Browse, &album("album/2", "Night Studies"), true)
+                }),
+            ),
+        ),
+        (
+            "plugin-signal-path",
+            (
+                1500,
+                Box::new(|ui| {
+                    let tracks = ui
+                        .st
+                        .borrow()
+                        .lists
+                        .get("browse")
+                        .cloned()
+                        .unwrap_or_default();
+                    let infos: Vec<ricercar_core::TrackInfo> =
+                        tracks.iter().map(ricercar_core::TrackInfo::from).collect();
+                    let ctl = ui.ctx.ctl.clone();
+                    ctl.play_tracks(infos, 0, ricercar_core::PlayContext::None);
+                    slint::Timer::single_shot(Duration::from_millis(400), move || ctl.pause());
+                    let app = ui.app();
+                    app.set_np_tab(2);
+                    app.set_now_playing_open(true);
+                }),
+            ),
+        ),
+        (
+            "plugin-search",
+            (
+                1200,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_now_playing_open(false);
+                    app.set_search_text("blue".into());
+                    ui.navigate(Page::Search, "", true);
+                    app.set_search_source(1);
+                    crate::views::run_search(ui, "blue");
+                }),
+            ),
+        ),
+    ];
+    let mut delay = 0u64;
+    let dir = Rc::new(dir);
+    let n = steps.len();
+    for (i, (name, (wait, f))) in steps.into_iter().enumerate() {
+        delay += wait;
+        let dir = dir.clone();
+        let f = Rc::new(f);
+        slint::Timer::single_shot(Duration::from_millis(delay), move || with_ui(|ui| f(ui)));
+        delay += 1600;
+        let name = name.to_string();
+        slint::Timer::single_shot(Duration::from_millis(delay), move || {
+            with_ui(|ui| ui.refill_covers());
+            capture(&dir, &name);
+            if i + 1 == n {
+                with_ui(|ui| ui.ctx.plugins.shutdown());
+                let _ = slint::quit_event_loop();
+            }
+        });
     }
 }

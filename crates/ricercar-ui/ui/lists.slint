@@ -2,7 +2,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, TrackRow, AlbumCard } from "state.slint";
-import { Icon, IconButton, Cover, NowBars, AlbumTile, Badge } from "widgets.slint";
+import { Icon, IconButton, Cover, NowBars, AlbumTile, Badge, Button, EmptyState } from "widgets.slint";
 
 /// Shared by every track table: opens the context menu at window coordinates.
 export global TrackMenu {
@@ -12,6 +12,7 @@ export global TrackMenu {
     in-out property <length> y;
     in-out property <int> serial;
     in-out property <string> album-id;
+    in-out property <bool> album-plugin;
     in-out property <int> album-serial;
 }
 
@@ -278,6 +279,7 @@ export component AlbumShelf inherits Flickable {
             }
             menu(mx, my) => {
                 TrackMenu.album-id = a.id;
+                TrackMenu.album-plugin = a.plugin;
                 TrackMenu.x = self.absolute-position.x + mx;
                 TrackMenu.y = self.absolute-position.y + my;
                 TrackMenu.album-serial += 1;
@@ -332,6 +334,7 @@ export component AlbumGrid inherits Rectangle {
                     }
                     menu(mx, my) => {
                         TrackMenu.album-id = a.id;
+                TrackMenu.album-plugin = a.plugin;
                         TrackMenu.x = self.absolute-position.x + mx;
                         TrackMenu.y = self.absolute-position.y + my;
                         TrackMenu.album-serial += 1;
@@ -375,11 +378,59 @@ export component AlbumFlow inherits Rectangle {
                 }
                 menu(mx, my) => {
                     TrackMenu.album-id = a.id;
+                TrackMenu.album-plugin = a.plugin;
                     TrackMenu.x = self.absolute-position.x + mx;
                     TrackMenu.y = self.absolute-position.y + my;
                     TrackMenu.album-serial += 1;
                 }
             }
+        }
+    }
+}
+
+/// Items of a plugin list: browsable ones as tiles, tracks as a table.
+export component BrowseContent inherits VerticalLayout {
+    in property <[AlbumCard]> cards;
+    in property <[TrackRow]> tracks;
+    in property <string> list;
+    in property <bool> loading;
+    in property <bool> more;
+    in property <string> error;
+    in property <bool> auth;
+    callback load-more();
+    callback sign-in();
+    spacing: 12px;
+    if loading && cards.length == 0 && tracks.length == 0: Text {
+        text: @tr("Loading…");
+        font-size: Theme.fs-md;
+        color: Theme.text3;
+    }
+    if error != "": EmptyState {
+        icon: auth ? Icons.log-in : Icons.circle-alert;
+        title: auth ? @tr("Sign in to see this") : @tr("Could not load this list");
+        body: root.error;
+        action: auth ? @tr("Sign in") : "";
+        act => { root.sign-in(); }
+    }
+    if !loading && error == "" && cards.length == 0 && tracks.length == 0: EmptyState {
+        icon: Icons.library;
+        title: @tr("Nothing here");
+        body: @tr("This list is empty.");
+    }
+    if cards.length > 0: AlbumFlow { albums: root.cards; playing-album: ""; }
+    if tracks.length > 0: TrackTable {
+        rows: root.tracks;
+        list: root.list;
+        show-cover: true;
+        show-plays: false;
+    }
+    if more: HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        Button {
+            text: loading ? @tr("Loading…") : @tr("Show more");
+            enabled: !loading;
+            clicked => { root.load-more(); }
         }
     }
 }

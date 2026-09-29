@@ -186,11 +186,18 @@ pub struct Models {
     pub pl_tracks: Rows<TrackRow>,
     pub s_tracks: Rows<TrackRow>,
     pub queue: Rows<crate::QueueRow>,
+    /// Plugin browse page and plugin search tab.
+    pub br_cards: Rows<AlbumCard>,
+    pub br_tracks: Rows<TrackRow>,
+    pub ps_cards: Rows<AlbumCard>,
+    pub ps_tracks: Rows<TrackRow>,
 }
 
 impl Models {
-    fn album_models(&self) -> [&Rows<AlbumCard>; 10] {
+    fn album_models(&self) -> [&Rows<AlbumCard>; 12] {
         [
+            &self.br_cards,
+            &self.ps_cards,
             &self.albums,
             &self.home_played,
             &self.home_added,
@@ -204,8 +211,10 @@ impl Models {
         ]
     }
 
-    pub fn track_models(&self) -> [&Rows<TrackRow>; 7] {
+    pub fn track_models(&self) -> [&Rows<TrackRow>; 9] {
         [
+            &self.br_tracks,
+            &self.ps_tracks,
             &self.tracks,
             &self.home_tracks,
             &self.al_tracks,
@@ -226,6 +235,8 @@ impl Models {
             "fav" => &self.fav_tracks,
             "playlist" => &self.pl_tracks,
             "search" => &self.s_tracks,
+            "browse" => &self.br_tracks,
+            "psearch" => &self.ps_tracks,
             _ => return None,
         })
     }
@@ -270,6 +281,7 @@ pub struct Ui {
     pub visible: std::cell::Cell<bool>,
     /// Interface state as last saved to ui-state.json.
     pub saved_state: RefCell<UiState>,
+    pub plugins: RefCell<crate::plugins::PluginsView>,
 }
 
 impl Ui {
@@ -511,6 +523,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         tray: RefCell::new(None),
         visible: std::cell::Cell::new(true),
         saved_state: RefCell::new(UiState::default()),
+        plugins: RefCell::new(crate::plugins::PluginsView::default()),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
 
@@ -518,6 +531,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     crate::views::wire(&ui);
     crate::player::wire(&ui);
     crate::extras::wire(&ui);
+    crate::plugins::wire(&ui);
     let snapshot_mode = snapshot.is_some();
     // The screenshot and perf tours start from a known state; the state
     // tour checks that it survives a restart.
@@ -616,6 +630,10 @@ fn bind_models(ui: &Rc<Ui>) {
     app.set_tracks(model(&m.tracks));
     app.set_pl_tracks(model(&m.pl_tracks));
     app.set_queue(model(&m.queue));
+    app.set_br_cards(model(&m.br_cards));
+    app.set_br_tracks(model(&m.br_tracks));
+    app.set_ps_cards(model(&m.ps_cards));
+    app.set_ps_tracks(model(&m.ps_tracks));
     app.set_version(env!("CARGO_PKG_VERSION").into());
     app.set_greeting(crate::text::greeting().into());
 }
@@ -646,6 +664,7 @@ pub fn album_card(ui: &Ui, a: &Album, eager: bool) -> AlbumCard {
         ckey: a.id.clone().into(),
         hires: a.is_hires(),
         fav: a.favorite,
+        plugin: false,
     }
 }
 
@@ -701,7 +720,21 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
             } else {
                 String::new()
             };
-            let (cover, ckey) = if o.cover {
+            let (cover, ckey) = if o.cover && t.is_plugin() {
+                // Plugin tracks: their art URL, through the cover cache.
+                match t.art.clone().filter(|a| a.starts_with("http")) {
+                    Some(url) => {
+                        let src = Source::Url(url.clone());
+                        let img = if o.eager {
+                            ui.cover(&url, src, None, THUMB)
+                        } else {
+                            ui.cover_lazy(&url, src, None, THUMB)
+                        };
+                        (img, url)
+                    }
+                    None => (slint::Image::default(), String::new()),
+                }
+            } else if o.cover {
                 let src = Source::Track {
                     key: t.album_id.clone(),
                     path: t.path.clone().into(),

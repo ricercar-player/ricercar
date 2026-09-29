@@ -405,6 +405,35 @@ export component SettingsPage inherits PageScroll {
         }
 
         Group {
+            title: @tr("Plugins");
+            subtitle: @tr("Plugins add catalogues from other sources. Each one is a separate program running with your permissions: install only plugins you trust. They are declared in config.toml.");
+            if App.plugin-rows.length == 0: Row {
+                label: @tr("No plugins declared");
+                hint: @tr("Add a [[plugins]] table to config.toml; it applies without a restart.");
+            }
+            for p[i] in App.plugin-rows: VerticalLayout {
+                if i > 0: Divider { }
+                Row {
+                    label: p.name;
+                    hint: p.detail + " · " + p.status;
+                    if p.enabled && p.auth && !p.signed-in && p.state == 0: Button {
+                        text: @tr("Sign in");
+                        primary: true;
+                        clicked => { App.plugin-sign-in(p.id); }
+                    }
+                    if p.enabled && p.signed-in: Button {
+                        text: @tr("Sign out");
+                        clicked => { App.plugin-sign-out(p.id); }
+                    }
+                    Toggle {
+                        checked: p.enabled;
+                        toggled(on) => { App.plugin-toggle(p.id, on); }
+                    }
+                }
+            }
+        }
+
+        Group {
             title: @tr("Scrobbling");
             subtitle: @tr("A track counts as played after half its length or four minutes.");
             Row {

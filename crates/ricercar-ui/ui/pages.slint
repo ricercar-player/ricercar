@@ -2,8 +2,8 @@ import { ScrollView, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, AlbumCard, TrackRow } from "state.slint";
-import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile } from "widgets.slint";
-import { TrackTable, TrackListView, AlbumShelf, AlbumGrid, AlbumFlow, TrackMenu } from "lists.slint";
+import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile, EmptyState } from "widgets.slint";
+import { TrackTable, TrackListView, AlbumShelf, AlbumGrid, AlbumFlow, TrackMenu, BrowseContent } from "lists.slint";
 
 /// Top bar with history arrows and a title that appears once scrolled.
 export component TopBar inherits Rectangle {
@@ -74,24 +74,6 @@ component Stat inherits VerticalLayout {
     Text { text: label; font-size: Theme.fs-sm; color: Theme.text2; }
 }
 
-component EmptyState inherits VerticalLayout {
-    in property <image> icon;
-    in property <string> title;
-    in property <string> body;
-    in property <string> action;
-    callback act();
-    alignment: center;
-    spacing: 10px;
-    padding: 48px;
-    HorizontalLayout { alignment: center; Icon { source: icon; size: 44px; tint: Theme.text3; } }
-    Text { text: title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
-    Text { text: body; font-size: Theme.fs-md; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
-    if action != "": HorizontalLayout {
-        alignment: center;
-        padding-top: 8px;
-        Button { text: action; primary: true; clicked => { root.act(); } }
-    }
-}
 
 /// Primary actions of a collection page: text buttons, hi-fi style.
 component ActionBar inherits HorizontalLayout {
@@ -481,6 +463,7 @@ export component AlbumPage inherits PageScroll {
         queue => { App.album-action(App.al-id, "queue"); }
         more(x, y) => {
             TrackMenu.album-id = App.al-id;
+            TrackMenu.album-plugin = false;
             TrackMenu.x = x;
             TrackMenu.y = y;
             TrackMenu.album-serial += 1;
@@ -901,12 +884,28 @@ export component SearchPage inherits PageScroll {
             color: Theme.text;
             overflow: elide;
         }
-        if App.search-text != "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0: EmptyState {
+        // Library, then each signed-in plugin that searches.
+        if App.search-sources.length > 1: HorizontalLayout {
+            alignment: start;
+            Segmented {
+                options: App.search-sources;
+                selected <=> App.search-source;
+                changed => { App.search-source-changed(); }
+            }
+        }
+        if App.search-source > 0: BrowseContent {
+            cards: App.ps-cards;
+            tracks: App.ps-tracks;
+            list: "psearch";
+            loading: App.ps-loading;
+            error: App.ps-error;
+        }
+        if App.search-source == 0 && App.search-text != "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0: EmptyState {
             icon: Icons.search;
             title: @tr("No results");
             body: @tr("Nothing in your library matches. Check the spelling, or try fewer words.");
         }
-        if App.s-artists.length > 0: VerticalLayout {
+        if App.search-source == 0 && App.s-artists.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
             SectionTitle { text: @tr("Artists"); }
@@ -926,13 +925,13 @@ export component SearchPage inherits PageScroll {
                 }
             }
         }
-        if App.s-tracks.length > 0: VerticalLayout {
+        if App.search-source == 0 && App.s-tracks.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
             SectionTitle { text: @tr("Tracks"); }
             TrackTable { rows: App.s-tracks; list: "search"; show-cover: true; header: false; limit: 12; }
         }
-        if App.s-albums.length > 0: VerticalLayout {
+        if App.search-source == 0 && App.s-albums.length > 0: VerticalLayout {
             spacing: 12px;
             padding-top: 16px;
             SectionTitle { text: @tr("Albums"); }

@@ -1,6 +1,6 @@
 // Data exchanged with Rust, and the single global that carries it.
 
-export enum Page { home, albums, album, artists, artist, tracks, genres, genre, favorites, playlist, radio, search, settings }
+export enum Page { home, albums, album, artists, artist, tracks, genres, genre, favorites, playlist, radio, search, settings, browse }
 
 export struct AlbumCard {
     id: string,
@@ -11,6 +11,8 @@ export struct AlbumCard {
     ckey: string,
     hires: bool,
     fav: bool,
+    // an album, playlist… of a plugin (opens its browse page)
+    plugin: bool,
 }
 
 export struct TrackRow {
@@ -104,6 +106,31 @@ export struct DeviceRow {
     caps-status: string,
     // library albums this device cannot play natively, one per line
     lib-note: string,
+}
+
+// A declared source plugin, for the settings page.
+export struct PluginRow {
+    id: string,
+    name: string,
+    // "id · version"
+    detail: string,
+    status: string,
+    // 0 fine, 1 starting / restarting, 2 needs attention
+    state: int,
+    enabled: bool,
+    // has a sign-in, and is signed in
+    auth: bool,
+    signed-in: bool,
+}
+
+// Sidebar entry of a signed-in plugin: a header (its name) or a section.
+export struct PluginNav {
+    header: bool,
+    title: string,
+    // browse page argument
+    arg: string,
+    // folder | album | playlist | artist | track
+    kind: string,
 }
 
 export struct ChainHop {
@@ -342,6 +369,49 @@ export global App {
     in property <bool> settings-at-end;
     callback copy-report();
     callback open-logs();
+
+    // ---------------------------------------------------------------- plugins
+    in property <[PluginRow]> plugin-rows;
+    callback plugin-toggle(string, bool);
+    callback plugin-sign-in(string);
+    callback plugin-sign-out(string);
+    in property <[PluginNav]> plugin-nav;
+    // sign-in dialog
+    in-out property <bool> signin-open;
+    in property <string> signin-title;
+    in property <string> signin-url;
+    in property <string> signin-instructions;
+    in property <string> signin-status;
+    in property <image> signin-qr;
+    in property <bool> signin-busy;
+    in property <bool> signin-expects-input;
+    in-out property <string> signin-input;
+    callback signin-open-browser();
+    callback signin-complete(string);
+    callback signin-cancel();
+    // browse page (a plugin's list)
+    in property <string> br-arg;
+    in property <string> br-title;
+    in property <string> br-sub;
+    in property <[AlbumCard]> br-cards;
+    in property <[TrackRow]> br-tracks;
+    in property <bool> br-loading;
+    in property <bool> br-more;
+    in property <string> br-error;
+    in property <bool> br-auth;
+    callback br-load-more();
+    callback br-sign-in();
+    callback br-play(bool);
+    // search: "Library" then each plugin that searches
+    in property <[string]> search-sources;
+    in-out property <int> search-source;
+    callback search-source-changed();
+    in property <[AlbumCard]> ps-cards;
+    in property <[TrackRow]> ps-tracks;
+    in property <bool> ps-loading;
+    in property <string> ps-error;
+    // a plugin track's URL is being fetched (shown after 300 ms)
+    in property <bool> resolving;
 
     // ---------------------------------------------------------------- toasts
     in property <string> toast;

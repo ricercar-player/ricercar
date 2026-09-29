@@ -592,6 +592,7 @@ pub fn store_caps(ui: &Ui, name: &str, caps: crate::dac::CachedCaps) {
         .borrow_mut()
         .dac_caps
         .insert(name.to_string(), caps);
+    crate::plugins::push_output(ui);
     let st = ui.saved_state.borrow().clone();
     if std::env::var_os("RICERCAR_SNAPSHOT").is_none()
         && let Err(e) = st.save(&crate::ui_state::default_path())
@@ -755,6 +756,7 @@ pub fn wire(ui: &Rc<Ui>) {
         with_ui(|ui| {
             let name = name.to_string();
             ui.ctx.update_config(|c| c.audio.device = name.clone());
+            crate::plugins::push_output(ui);
             refresh_devices(ui);
             ui.toast(format!("{}: {name}", t("Output device")), false);
         })

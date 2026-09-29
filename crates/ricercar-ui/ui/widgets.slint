@@ -543,3 +543,23 @@ export component ArtistTile inherits Rectangle {
         }
     }
 }
+
+/// Centered icon, title and text for empty or failed lists.
+export component EmptyState inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> body;
+    in property <string> action;
+    callback act();
+    alignment: center;
+    spacing: 10px;
+    padding: 48px;
+    HorizontalLayout { alignment: center; Icon { source: icon; size: 44px; tint: Theme.text3; } }
+    Text { text: title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; horizontal-alignment: center; }
+    Text { text: body; font-size: Theme.fs-md; color: Theme.text2; horizontal-alignment: center; wrap: word-wrap; }
+    if action != "": HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        Button { text: action; primary: true; clicked => { root.act(); } }
+    }
+}

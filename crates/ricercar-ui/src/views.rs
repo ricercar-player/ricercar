@@ -144,6 +144,7 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
         Page::Playlist => load_playlist(ui, arg.parse().unwrap_or(0)),
         Page::Search => run_search(ui, &app.get_search_text()),
         Page::Radio => crate::extras::load_radio(ui),
+        Page::Browse => crate::plugins::load_browse(ui, arg),
         Page::Settings => crate::extras::load_settings(ui),
     }
 }
@@ -376,6 +377,9 @@ pub fn refresh_stats(ui: &Rc<Ui>) {
 }
 
 pub fn run_search(ui: &Rc<Ui>, q: &str) {
+    if ui.app().get_search_source() > 0 {
+        return crate::plugins::run_search(ui, q);
+    }
     let r = ui.ctx.lib.search(q);
     let m = &ui.models;
     let artists: Vec<_> = r.artists.iter().map(|a| artist_card(ui, a, true)).collect();
@@ -485,6 +489,15 @@ pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
         return;
     };
     let ctl = &ui.ctx.ctl;
+    // Plugin tracks have no album or artist page and no folder; their
+    // favourite lives on the service.
+    if tr.is_plugin() {
+        match action {
+            "album" | "artist" | "folder" => return,
+            "fav" => return crate::plugins::favorite_track(ui, &tr),
+            _ => {}
+        }
+    }
     match action {
         "play" => track_activate(ui, list, index),
         "next" => {
@@ -525,12 +538,13 @@ pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
             refresh_playlists(ui);
             ui.toast(t("Removed from the playlist"), false);
         }
-        a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], std::slice::from_ref(&tr.path)),
+        a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], std::slice::from_ref(&tr)),
         _ => {}
     }
 }
 
-fn add_to_playlist(ui: &Rc<Ui>, target: &str, paths: &[String]) {
+/// Append tracks (library files, or plugin tracks with their metadata).
+pub fn add_to_playlist(ui: &Rc<Ui>, target: &str, tracks: &[Track]) {
     let lib = &ui.ctx.lib;
     let id = if target == "new" {
         // The dialog just created it: the most recent playlist.
@@ -542,7 +556,7 @@ fn add_to_playlist(ui: &Rc<Ui>, target: &str, paths: &[String]) {
         target.parse().ok()
     };
     let Some(id) = id else { return };
-    lib.add_to_playlist(id, paths);
+    lib.add_infos_to_playlist(id, &infos(tracks));
     refresh_playlists(ui);
     let name = lib.playlist(id).map(|p| p.name).unwrap_or_default();
     ui.toast(format!("+ {name}"), false);
@@ -579,6 +593,9 @@ pub fn show_in_folder(path: &str) {
 }
 
 pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
+    if let Some(arg) = id.strip_prefix(crate::plugins::CARD) {
+        return crate::plugins::card_action(ui, arg, action);
+    }
     let lib = ui.ctx.lib.clone();
     let ctl = &ui.ctx.ctl;
     match action {
@@ -646,10 +663,7 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
             );
         }
         "folder" => show_in_folder(&tracks[0].path),
-        a if a.starts_with("pl:") => {
-            let paths: Vec<String> = tracks.iter().map(|t| t.path.clone()).collect();
-            add_to_playlist(ui, &a[3..], &paths);
-        }
+        a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], &tracks),
         _ => {}
     }
 }
@@ -659,7 +673,12 @@ pub fn wire(ui: &Rc<Ui>) {
     app.on_navigate(|page, arg| with_ui(|ui| ui.navigate(page, &arg, true)));
     app.on_back(|| with_ui(|ui| ui.back()));
     app.on_forward(|| with_ui(|ui| ui.forward()));
-    app.on_album_activate(|id| with_ui(|ui| ui.navigate(Page::Album, &id, true)));
+    app.on_album_activate(|id| {
+        with_ui(|ui| match id.strip_prefix(crate::plugins::CARD) {
+            Some(arg) => ui.navigate(Page::Browse, arg, true),
+            None => ui.navigate(Page::Album, &id, true),
+        })
+    });
     app.on_artist_activate(|name| with_ui(|ui| ui.navigate(Page::Artist, &name, true)));
     app.on_track_activate(|list, i| with_ui(|ui| track_activate(ui, &list, i.max(0) as usize)));
     app.on_track_action(|list, i, a| with_ui(|ui| track_action(ui, &list, i.max(0) as usize, &a)));

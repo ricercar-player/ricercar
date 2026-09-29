@@ -7,6 +7,7 @@ import { Sidebar, PlayerBar, ChainPanel } from "chrome.slint";
 import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, GenresPage, GenrePage, FavoritesPage, PlaylistPage, SearchPage } from "pages.slint";
 import { RadioPage, SettingsPage } from "more.slint";
 import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays.slint";
+import { BrowsePage, SignInDialog } from "plugins.slint";
 
 export { App, Page, Theme, TrackMenu }
 export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, MenuEntry } from "state.slint";
@@ -67,7 +68,7 @@ export component MainWindow inherits Window {
 
     keys := FocusScope {
         key-pressed(e) => {
-            if dialog != 0 { return reject; }
+            if dialog != 0 || App.signin-open { return reject; }
             if e.text == " " {
                 App.play-pause();
                 return accept;
@@ -153,6 +154,7 @@ export component MainWindow inherits Window {
                     if App.page == Page.search: SearchPage { }
                     if App.page == Page.radio: RadioPage { }
                     if App.page == Page.settings: SettingsPage { }
+                    if App.page == Page.browse: BrowsePage { }
                 }
                 if App.queue-open && !App.now-playing-open: QueuePanel { }
             }
@@ -229,6 +231,10 @@ export component MainWindow inherits Window {
                 keys.focus();
             }
         }
+    }
+
+    if App.signin-open: SignInDialog {
+        init => { self.focus-input(); }
     }
 
     init => {

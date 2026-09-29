@@ -234,6 +234,7 @@ fn tick_inner(ui: &Rc<Ui>) {
     }
 
     crate::extras::poll_network_status(ui);
+    crate::plugins::poll(ui);
 
     // ---- library changes & scan progress
     let lib = &ui.ctx.lib;
@@ -529,6 +530,15 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     app.set_device_label(c.device.clone().into());
 
     let mut hops = Vec::new();
+    // A plugin hands over a URL; what follows is decoded and played as is.
+    let plugin = ui.ctx.ctl.plugin_name(&info.uri);
+    if let Some(name) = &plugin {
+        hops.push(ChainHop {
+            label: t("Source").into(),
+            value: format!("{name} · {}", t("plugin")).into(),
+            state: 0,
+        });
+    }
     let src_val = match (info.codec.as_deref(), fmt) {
         (codec, Some(f)) => format!(
             "{}{} kHz · {} ch{}",
@@ -541,7 +551,12 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         _ => "—".into(),
     };
     hops.push(ChainHop {
-        label: t("Source").into(),
+        label: if plugin.is_some() {
+            t("Stream")
+        } else {
+            t("Source")
+        }
+        .into(),
         value: src_val.into(),
         state: if lossy { 1 } else { 0 },
     });
@@ -598,7 +613,15 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     app.set_chain(ModelRc::new(VecModel::from(hops)));
 
     // Compact form for the player bar: FLAC 24/96 → Vol 73 % → S24_LE → hw:1,0
-    let mut short = vec![ChainHop {
+    let mut short: Vec<ChainHop> = plugin
+        .iter()
+        .map(|name| ChainHop {
+            label: "".into(),
+            value: name.clone().into(),
+            state: 0,
+        })
+        .collect();
+    short.push(ChainHop {
         label: "".into(),
         value: match info.codec.as_deref() {
             Some(c) => format!("{c} {}", app.get_quality()),
@@ -608,7 +631,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         .to_string()
         .into(),
         state: if lossy { 1 } else { 0 },
-    }];
+    });
     if gain_touch {
         short.push(ChainHop {
             label: "".into(),

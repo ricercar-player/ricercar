@@ -141,6 +141,10 @@ msgid "LIVE"
 msgstr "DIRECT"
 
 msgctxt "PlayerBar"
+msgid "Loading…"
+msgstr "Chargement…"
+
+msgctxt "PlayerBar"
 msgid "Lyrics"
 msgstr "Paroles"
 
@@ -171,6 +175,34 @@ msgstr "Durée"
 msgctxt "TrackLine"
 msgid "Favorite"
 msgstr "Favori"
+
+msgctxt "BrowseContent"
+msgid "Loading…"
+msgstr "Chargement…"
+
+msgctxt "BrowseContent"
+msgid "Sign in to see this"
+msgstr "Connectez-vous pour voir ceci"
+
+msgctxt "BrowseContent"
+msgid "Could not load this list"
+msgstr "Impossible de charger cette liste"
+
+msgctxt "BrowseContent"
+msgid "Sign in"
+msgstr "Se connecter"
+
+msgctxt "BrowseContent"
+msgid "Nothing here"
+msgstr "Rien ici"
+
+msgctxt "BrowseContent"
+msgid "This list is empty."
+msgstr "Cette liste est vide."
+
+msgctxt "BrowseContent"
+msgid "Show more"
+msgstr "Afficher plus"
 
 msgctxt "DeviceCaps"
 msgid "Sample rates"
@@ -357,6 +389,30 @@ msgstr "Lecture depuis d'autres applis (renderer UPnP / OpenHome)"
 msgctxt "SettingsPage"
 msgid "Share my library (UPnP media server)"
 msgstr "Partager ma bibliothèque (serveur UPnP)"
+
+msgctxt "SettingsPage"
+msgid "Plugins"
+msgstr "Plugins"
+
+msgctxt "SettingsPage"
+msgid "Plugins add catalogues from other sources. Each one is a separate program running with your permissions: install only plugins you trust. They are declared in config.toml."
+msgstr "Les plugins ajoutent des catalogues d'autres sources. Chacun est un programme séparé qui tourne avec vos droits : n'installez que des plugins de confiance. Ils se déclarent dans config.toml."
+
+msgctxt "SettingsPage"
+msgid "No plugins declared"
+msgstr "Aucun plugin déclaré"
+
+msgctxt "SettingsPage"
+msgid "Add a [[plugins]] table to config.toml; it applies without a restart."
+msgstr "Ajoutez une table [[plugins]] à config.toml ; elle s'applique sans redémarrer."
+
+msgctxt "SettingsPage"
+msgid "Sign in"
+msgstr "Se connecter"
+
+msgctxt "SettingsPage"
+msgid "Sign out"
+msgstr "Se déconnecter"
 
 msgctxt "SettingsPage"
 msgid "Scrobbling"
@@ -1003,3 +1059,47 @@ msgstr "Titres"
 msgctxt "SearchPage"
 msgid "Albums"
 msgstr "Albums"
+
+msgctxt "BrowsePage"
+msgid "Play"
+msgstr "Lecture"
+
+msgctxt "BrowsePage"
+msgid "Shuffle"
+msgstr "Aléatoire"
+
+msgctxt "SignInDialog"
+msgid "Asking the plugin for a sign-in address…"
+msgstr "Demande d'une adresse de connexion au plugin…"
+
+msgctxt "SignInDialog"
+msgid "QR code of the sign-in address"
+msgstr "QR code de l'adresse de connexion"
+
+msgctxt "SignInDialog"
+msgid "Sign in in your browser. On another device, scan the code."
+msgstr "Connectez-vous dans votre navigateur. Sur un autre appareil, scannez le code."
+
+msgctxt "SignInDialog"
+msgid "Open in browser"
+msgstr "Ouvrir dans le navigateur"
+
+msgctxt "SignInDialog"
+msgid "This closes by itself once you are signed in. If the browser runs elsewhere, paste the address it ends on."
+msgstr "Cette fenêtre se ferme d'elle-même une fois connecté. Si le navigateur tourne ailleurs, collez l'adresse sur laquelle il s'arrête."
+
+msgctxt "SignInDialog"
+msgid "Paste the address or code"
+msgstr "Collez l'adresse ou le code"
+
+msgctxt "SignInDialog"
+msgid "Cancel"
+msgstr "Annuler"
+
+msgctxt "SignInDialog"
+msgid "Checking…"
+msgstr "Vérification…"
+
+msgctxt "SignInDialog"
+msgid "Sign in"
+msgstr "Se connecter"
