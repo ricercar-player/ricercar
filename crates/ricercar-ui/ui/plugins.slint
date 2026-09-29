@@ -225,33 +225,39 @@ export component PluginsPage inherits PageScroll {
                             wrap: word-wrap;
                         }
                     }
-                    if p.enabled && p.auth && !p.signed-in && p.state == 0: Button {
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("Sign in");
-                        primary: true;
-                        clicked => { App.plugin-sign-in(p.id); }
-                    }
-                    if p.enabled && p.signed-in: Button {
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("Sign out");
-                        clicked => { App.plugin-sign-out(p.id); }
-                    }
-                    if p.update: Button {
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("Update");
-                        icon: Icons.download;
-                        clicked => { App.plugin-update(p.id); }
-                    }
-                    Button {
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("Remove");
-                        danger: true;
-                        clicked => { App.plugin-remove(p.id); }
-                    }
-                    Toggle {
-                        y: (parent.height - self.height) / 2;
-                        checked: p.enabled;
-                        toggled(on) => { App.plugin-toggle(p.id, on); }
+                    // Controls centred on the row, whatever their heights.
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            if p.enabled && p.auth && !p.signed-in && p.state == 0: Button {
+                                text: @tr("Sign in");
+                                primary: true;
+                                clicked => { App.plugin-sign-in(p.id); }
+                            }
+                            if p.enabled && p.signed-in: Button {
+                                text: @tr("Sign out");
+                                clicked => { App.plugin-sign-out(p.id); }
+                            }
+                            if p.update: Button {
+                                text: @tr("Update");
+                                icon: Icons.download;
+                                clicked => { App.plugin-update(p.id); }
+                            }
+                            Button {
+                                text: @tr("Remove");
+                                danger: true;
+                                clicked => { App.plugin-remove(p.id); }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Toggle {
+                                    checked: p.enabled;
+                                    toggled(on) => { App.plugin-toggle(p.id, on); }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -261,7 +267,10 @@ export component PluginsPage inherits PageScroll {
             padding-top: 12px;
             spacing: 12px;
             SectionTitle { text: @tr("Community catalogue"); horizontal-stretch: 1; }
-            Button { y: (parent.height - self.height) / 2; text: @tr("Open the hub"); clicked => { App.open-hub(); } }
+            VerticalLayout {
+                alignment: center;
+                Button { text: @tr("Open the hub"); clicked => { App.open-hub(); } }
+            }
         }
         Text {
             text: @tr("Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256.");
@@ -295,31 +304,37 @@ export component PluginsPage inherits PageScroll {
                         if c.description != "": Text { text: c.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
                         if c.caps != "": Text { text: c.caps; font-size: Theme.fs-xs; color: Theme.text3; }
                     }
-                    Button {
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("Repository");
-                        clicked => { App.catalog-open-repo(c.id); }
-                    }
-                    if c.state == 0: Button {
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("Install");
-                        icon: Icons.download;
-                        primary: true;
-                        clicked => { App.catalog-install(c.id); }
-                    }
-                    if c.state == 1: Text {
-                        text: @tr("Installed");
-                        font-size: Theme.fs-sm;
-                        color: Theme.text3;
-                        vertical-alignment: center;
-                    }
-                    if c.state == 2: Text {
-                        width: 150px;
-                        text: @tr("No build for this computer");
-                        font-size: Theme.fs-sm;
-                        color: Theme.text3;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: end;
+                            Button {
+                                text: @tr("Repository");
+                                clicked => { App.catalog-open-repo(c.id); }
+                            }
+                            if c.state == 0: Button {
+                                text: @tr("Install");
+                                icon: Icons.download;
+                                primary: true;
+                                clicked => { App.catalog-install(c.id); }
+                            }
+                            if c.state == 1: Text {
+                                width: 150px;
+                                text: @tr("Installed");
+                                font-size: Theme.fs-sm;
+                                color: Theme.text3;
+                                vertical-alignment: center;
+                            }
+                            if c.state == 2: Text {
+                                width: 150px;
+                                text: @tr("No build for this computer");
+                                font-size: Theme.fs-sm;
+                                color: Theme.text3;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
                 }
             }
