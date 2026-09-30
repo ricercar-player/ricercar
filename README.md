@@ -318,6 +318,14 @@ flowchart LR
 See [docs/CONTROLS.md](docs/CONTROLS.md) for the control-point compatibility
 matrix and what the protocol tests cover.
 
+Phone app doesn't see ricercar, or sees it at a strange address? On machines
+with a VPN, Docker or virtual machines, ricercar is announced on every
+interface. Pick your home network under **Settings → Network → Network
+interface** (or `interface = "eth0"` in `[network]`, `--interface eth0` on
+the daemon): ricercar then listens and announces there only. If that
+interface goes away (cable unplugged, Wi-Fi down), sharing pauses and comes
+back on its own when the interface has an address again.
+
 For an always-on audio box:
 
 ```sh
@@ -375,6 +383,7 @@ watch = true
 name = "Living room"       # name shown in phone apps
 renderer = true            # UPnP AV + OpenHome renderer
 media_server = true        # share the library over UPnP
+interface = "eth0"         # serve on this interface only; omit for all
 
 [ui]
 theme = "dark"             # dark | light
@@ -398,7 +407,8 @@ radio = true
 
 ```text
 ricercar [FILE|URI]... [--headless] [--config FILE] [--device NAME] [--name NAME]
-         [--db PATH] [--library DIR]... [--no-mpris] [--no-upnp] [--no-session]
+         [--db PATH] [--library DIR]... [--interface IFACE] [--no-mpris] [--no-upnp]
+         [--no-session]
 ricercar --print-devices
 
 ricercar-cli status | play | pause | toggle | stop | next | prev

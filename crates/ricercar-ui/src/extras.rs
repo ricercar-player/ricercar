@@ -30,6 +30,8 @@ pub struct Extras {
     stations: Option<Rc<VecModel<StationRow>>>,
     /// Network status revision shown in the settings.
     network_rev: Option<u64>,
+    /// Interface names behind the settings choice ("" first: all).
+    net_ifaces: Vec<String>,
     /// Devices whose capabilities panel is open, being probed, or failed.
     pub expanded: std::collections::HashSet<String>,
     probing: std::collections::HashSet<String>,
@@ -341,6 +343,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_renderer_name(cfg.network.name.clone().into());
     app.set_renderer_enabled(cfg.network.renderer);
     app.set_server_enabled(cfg.network.media_server);
+    refresh_interfaces(ui);
     refresh_network_status(ui);
     app.set_lb_token(cfg.scrobble.listenbrainz_token.clone().into());
     if cfg.scrobble.listenbrainz_token.is_empty() {
@@ -380,20 +383,59 @@ pub fn load_settings(ui: &Rc<Ui>) {
     refresh_library_rows(ui);
 }
 
+/// Choices for the network interface: all, then each interface that is up
+/// with its IPv4 address; the configured one stays listed when it is gone.
+fn interface_choices(
+    current: &str,
+    up: &[(String, std::net::Ipv4Addr)],
+) -> (Vec<String>, Vec<String>, usize) {
+    let mut names = vec![String::new()];
+    let mut labels = vec![t("All interfaces").to_string()];
+    for (name, ip) in up {
+        names.push(name.clone());
+        labels.push(format!("{name} · {ip}"));
+    }
+    if !current.is_empty() && !names.iter().any(|n| n == current) {
+        names.push(current.to_string());
+        labels.push(format!("{current} ({})", t("not available")));
+    }
+    let selected = names.iter().position(|n| n == current).unwrap_or(0);
+    (names, labels, selected)
+}
+
+/// The network interface choice, read afresh (settings page opened).
+pub fn refresh_interfaces(ui: &Ui) {
+    let current = ui.ctx.config.read().unwrap().network.interface.clone();
+    let (names, labels, selected) =
+        interface_choices(&current, &ricercar_daemon::network_interfaces());
+    let app = ui.app();
+    let labels: Vec<SharedString> = labels.into_iter().map(Into::into).collect();
+    app.set_net_ifaces(ModelRc::new(VecModel::from(labels)));
+    app.set_net_iface(selected as i32);
+    ui.extras.borrow_mut().net_ifaces = names;
+}
+
 /// The status line under the network toggles; follows restarts live.
 pub fn refresh_network_status(ui: &Ui) {
     use ricercar_daemon::NetworkStatus;
     let rev = ui.ctx.network_revision();
     ui.extras.borrow_mut().network_rev = Some(rev);
-    let name = ui.ctx.config.read().unwrap().network.name.clone();
+    let net = ui.ctx.config.read().unwrap().network.clone();
+    let name = net.name;
+    let on = if net.interface.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", net.interface)
+    };
     let text = match ui.ctx.network_status() {
         NetworkStatus::Running { port } => format!(
-            "{} “{name}” · {} {port}",
+            "{} “{name}” · {} {port}{on}",
             t("Visible on the network as"),
             t("port")
         ),
         NetworkStatus::Starting => t("Starting…").into(),
         NetworkStatus::Off => t("Network sharing is off").into(),
+        NetworkStatus::InterfaceMissing(i) => t("Interface {} is not available").replace("{}", &i),
         NetworkStatus::Failed(e) => format!("{}: {e}", t("Network unavailable")),
     };
     ui.app().set_network_status(text.into());
@@ -817,6 +859,21 @@ pub fn wire(ui: &Rc<Ui>) {
             ui.toast(format!("{}: {name}", t("Output device")), false);
         })
     });
+    app.on_select_net_iface(|i| {
+        with_ui(|ui| {
+            let name = ui
+                .extras
+                .borrow()
+                .net_ifaces
+                .get(i.max(0) as usize)
+                .cloned();
+            if let Some(name) = name {
+                ui.ctx.update_config(|c| c.network.interface = name.clone());
+            }
+            refresh_interfaces(ui);
+            refresh_network_status(ui);
+        })
+    });
     app.on_refresh_devices(|| {
         with_ui(|ui| {
             refresh_devices(ui);
@@ -992,7 +1049,26 @@ pub fn wire(ui: &Rc<Ui>) {
 
 #[cfg(test)]
 mod tests {
-    use super::typed_folder;
+    use super::{interface_choices, typed_folder};
+
+    #[test]
+    fn interface_choice_list() {
+        let up = [
+            ("eth0".to_string(), "192.168.1.20".parse().unwrap()),
+            ("wg0".to_string(), "10.8.0.2".parse().unwrap()),
+        ];
+        let (names, labels, sel) = interface_choices("", &up);
+        assert_eq!(names, ["", "eth0", "wg0"]);
+        assert_eq!(labels[1], "eth0 · 192.168.1.20");
+        assert_eq!(sel, 0);
+        let (_, _, sel) = interface_choices("wg0", &up);
+        assert_eq!(sel, 2);
+        // Configured but gone: still listed, selected.
+        let (names, labels, sel) = interface_choices("eth1", &up);
+        assert_eq!(names.last().unwrap(), "eth1");
+        assert_eq!(labels.last().unwrap(), "eth1 (not available)");
+        assert_eq!(sel, 3);
+    }
 
     #[test]
     fn typed_folder_paths() {

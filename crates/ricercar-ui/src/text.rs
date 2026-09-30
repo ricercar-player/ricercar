@@ -111,6 +111,9 @@ pub fn t(en: &'static str) -> &'static str {
         "Network sharing is off" => "Le partage réseau est désactivé",
         "Starting…" => "Démarrage…",
         "Network unavailable" => "Réseau indisponible",
+        "Interface {} is not available" => "L'interface {} n'est pas disponible",
+        "All interfaces" => "Toutes les interfaces",
+        "not available" => "indisponible",
         "Reading capabilities…" => "Lecture des capacités…",
         "In use: capabilities from the last check." => {
             "En cours d'utilisation : capacités du dernier relevé."

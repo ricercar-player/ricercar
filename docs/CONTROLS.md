@@ -84,6 +84,12 @@ LOCATION on the requester's subnet (loopback here), `BOOTID.UPNP.ORG` and
   after the MX-random delay; LOCATION uses the interface on the requester's
   subnet; re-announce when interfaces change; `ssdp:byebye` when the renderer
   handle is dropped. OpenHome service types are advertised.
+- With `[network] interface` set (or `--interface`): HTTP listens on that
+  interface's IPv4 address only; SSDP joins the group, announces and sends
+  byebye on it only, and answers only searches from its subnet. While the
+  interface is missing or has no address nothing is bound and the status
+  says so; the services start when the address appears and restart when it
+  changes. IPv4 only, as before.
 - HTTP: at most 64 concurrent connections (503 beyond), read timeout 10 s,
   write timeout 30 s, one request per connection (`Connection: close`).
 - Cover art is served only for library tracks/albums (resized 500 px JPEG
@@ -91,7 +97,9 @@ LOCATION on the requester's subnet (loopback here), `BOOTID.UPNP.ORG` and
   already in the play queue.
 
 Implemented but covered only by unit tests or not at all: the MX delay
-(unit-tested parsing/jitter), subnet choice (unit-tested), interface-change
+(unit-tested parsing/jitter), subnet choice and single-interface search
+filtering (unit-tested; binding to `lo` and to a missing interface is tested
+for real), interface-change
 re-announce, byebye on drop, the connection cap and the socket timeouts.
 
 ## Not implemented / known limits

@@ -15,12 +15,18 @@ pub mod diag;
 pub mod logging;
 mod scrobble;
 
+/// Up, non-loopback IPv4 interfaces (name, address) the UPnP services can
+/// be limited to.
+pub use ricercar_upnp::interfaces as network_interfaces;
+
 /// Command-line overrides on top of the config file.
 #[derive(Debug, Clone, Default)]
 pub struct Args {
     pub config: Option<PathBuf>,
     pub device: Option<String>,
     pub name: Option<String>,
+    /// Network interface for UPnP (`eth0`); overrides the config.
+    pub interface: Option<String>,
     pub db: Option<PathBuf>,
     pub roots: Vec<PathBuf>,
     pub no_mpris: bool,
@@ -44,6 +50,7 @@ impl Args {
                 "--config" => out.config = Some(value(&mut args, "--config")?.into()),
                 "--device" => out.device = Some(value(&mut args, "--device")?),
                 "--name" => out.name = Some(value(&mut args, "--name")?),
+                "--interface" => out.interface = Some(value(&mut args, "--interface")?),
                 "--db" => out.db = Some(value(&mut args, "--db")?.into()),
                 "--library" => out.roots.push(value(&mut args, "--library")?.into()),
                 "--no-mpris" => out.no_mpris = true,
@@ -72,9 +79,11 @@ pub fn version() -> String {
 
 pub fn usage() -> String {
     "usage: ricercar [FILE|URI]... [--headless] [--config FILE] [--device NAME] [--name NAME] [--db PATH]
-                [--library DIR]... [--no-mpris] [--no-upnp] [--no-session]
+                [--library DIR]... [--interface IFACE] [--no-mpris] [--no-upnp] [--no-session]
        ricercar --print-devices
        ricercar --help | --version
+
+  --interface IFACE   serve UPnP on this network interface only (eth0, wlan0…)
 
 Settings live in ~/.config/ricercar/config.toml; flags override them for this run."
         .into()
@@ -187,8 +196,14 @@ pub enum NetworkStatus {
     Running {
         port: u16,
     },
+    /// The chosen interface is missing, down or without an IPv4 address:
+    /// the services start once it has one.
+    InterfaceMissing(String),
     Failed(String),
 }
+
+/// How often a chosen interface is checked (address back, or changed).
+const INTERFACE_POLL: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The UPnP services, restartable while the app runs.
 struct Network {
@@ -198,6 +213,9 @@ struct Network {
     rev: AtomicU64,
     /// One restart at a time; holds the settings last applied.
     applied: Mutex<Option<config::NetworkConfig>>,
+    /// Last HTTP port served, asked again after a stop or an interface
+    /// outage: control points keep their cached URLs.
+    last_port: std::sync::atomic::AtomicU16,
     disabled: bool,
 }
 
@@ -214,8 +232,47 @@ impl Network {
             return;
         }
         *applied = Some(cfg.clone());
+        self.restart(ctl, cfg, &mut applied);
+    }
+
+    /// With an interface chosen: start once it is back, restart when its
+    /// address changes (a new bind; control points get byebye then alive).
+    fn check_interface(&self, ctl: &Arc<Controller>) {
+        let mut applied = self.applied.lock().unwrap();
+        let Some(cfg) = applied.clone() else {
+            return;
+        };
+        if cfg.interface.is_empty() || self.disabled || !(cfg.renderer || cfg.media_server) {
+            return;
+        }
+        let now = ricercar_upnp::interface_ipv4(&cfg.interface);
+        let bound = self.handle.read().unwrap().as_ref().and_then(|h| h.ip);
+        let status = self.status.read().unwrap().clone();
+        let again = match status {
+            NetworkStatus::InterfaceMissing(_) => now.is_some(),
+            NetworkStatus::Running { .. } => now != bound,
+            _ => false,
+        };
+        if again {
+            tracing::info!(
+                "interface {}: address now {}",
+                cfg.interface,
+                now.map(|ip| ip.to_string())
+                    .unwrap_or_else(|| "none".into())
+            );
+            self.restart(ctl, &cfg, &mut applied);
+        }
+    }
+
+    /// Stop what runs and start with `cfg`; `applied` is the held lock.
+    fn restart(
+        &self,
+        ctl: &Arc<Controller>,
+        cfg: &config::NetworkConfig,
+        applied: &mut Option<config::NetworkConfig>,
+    ) {
         let old = self.handle.write().unwrap().take();
-        let port = old.as_ref().map(|h| h.port).unwrap_or(0);
+        let port = self.last_port.load(Ordering::SeqCst);
         if let Some(mut h) = old {
             self.set_status(NetworkStatus::Starting);
             h.stop();
@@ -229,6 +286,7 @@ impl Network {
             renderer: cfg.renderer,
             media_server: cfg.media_server,
             port,
+            interface: (!cfg.interface.is_empty()).then(|| cfg.interface.clone()),
         };
         match ricercar_upnp::start(ctl.clone(), &opts) {
             Ok(h) => {
@@ -240,8 +298,17 @@ impl Network {
                     h.port
                 );
                 let port = h.port;
+                self.last_port.store(port, Ordering::SeqCst);
                 *self.handle.write().unwrap() = Some(h);
                 self.set_status(NetworkStatus::Running { port });
+            }
+            Err(e)
+                if opts.interface.is_some() && e.kind() == std::io::ErrorKind::AddrNotAvailable =>
+            {
+                // Kept as applied: the interface watch starts the services
+                // when the interface comes back.
+                tracing::warn!("UPnP waiting: {e}");
+                self.set_status(NetworkStatus::InterfaceMissing(cfg.interface.clone()));
             }
             Err(e) => {
                 tracing::warn!("UPnP unavailable: {e}");
@@ -267,6 +334,9 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     }
     if let Some(n) = &args.name {
         cfg.network.name = n.clone();
+    }
+    if let Some(i) = &args.interface {
+        cfg.network.interface = i.clone();
     }
     for r in &args.roots {
         if !cfg.library.roots.contains(r) {
@@ -321,9 +391,11 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         status: RwLock::new(NetworkStatus::Off),
         rev: AtomicU64::new(0),
         applied: Mutex::new(None),
+        last_port: Default::default(),
         disabled: args.no_upnp,
     });
     network.apply(&ctl, &cfg.network);
+    watch_interface(network.clone(), ctl.clone(), quit.clone());
 
     let mpris = if !args.no_mpris {
         let opts = ricercar_mpris::MprisOptions {
@@ -409,6 +481,18 @@ fn reconcile_plugins(host: &ricercar_core::plugin::PluginHost, config: &RwLock<C
     let _one = APPLYING.lock().unwrap_or_else(|e| e.into_inner());
     let list = config.read().unwrap().plugins.clone();
     host.reconcile(&list);
+}
+
+/// Follow the chosen network interface (a no-op while none is chosen).
+fn watch_interface(network: Arc<Network>, ctl: Arc<Controller>, quit: Arc<AtomicBool>) {
+    let _ = std::thread::Builder::new()
+        .name("ricercar-upnp-iface".into())
+        .spawn(move || {
+            while !quit.load(Ordering::Relaxed) {
+                std::thread::sleep(INTERFACE_POLL);
+                network.check_interface(&ctl);
+            }
+        });
 }
 
 /// `[[plugins]]` edited in config.toml by hand applies without a restart:
@@ -663,12 +747,14 @@ mod tests {
             status: RwLock::new(NetworkStatus::Off),
             rev: AtomicU64::new(0),
             applied: Mutex::new(None),
+            last_port: Default::default(),
             disabled: false,
         };
         let mut cfg = config::NetworkConfig {
             name: "One".into(),
             renderer: true,
             media_server: false,
+            interface: String::new(),
         };
         net.apply(&ctl, &cfg);
         let NetworkStatus::Running { port } = net.status.read().unwrap().clone() else {
@@ -695,12 +781,64 @@ mod tests {
     }
 
     #[test]
+    fn missing_interface_waits_then_follows() {
+        let lib = Arc::new(Library::in_memory().unwrap());
+        let ctl = Arc::new(Controller::new(lib, "null"));
+        let net = Network {
+            handle: RwLock::new(None),
+            status: RwLock::new(NetworkStatus::Off),
+            rev: AtomicU64::new(0),
+            applied: Mutex::new(None),
+            last_port: Default::default(),
+            disabled: false,
+        };
+        let mut cfg = config::NetworkConfig {
+            interface: "no-such-if0".into(),
+            ..Default::default()
+        };
+        net.apply(&ctl, &cfg);
+        assert_eq!(
+            *net.status.read().unwrap(),
+            NetworkStatus::InterfaceMissing("no-such-if0".into())
+        );
+        assert!(net.handle.read().unwrap().is_none(), "no fallback to all");
+        // Still missing: the watch leaves it waiting.
+        net.check_interface(&ctl);
+        assert!(matches!(
+            *net.status.read().unwrap(),
+            NetworkStatus::InterfaceMissing(_)
+        ));
+
+        // Switching to an interface that exists starts the services on it.
+        let Some(lo) = ricercar_upnp::interface_ipv4("lo") else {
+            return;
+        };
+        cfg.interface = "lo".into();
+        net.apply(&ctl, &cfg);
+        assert!(matches!(
+            *net.status.read().unwrap(),
+            NetworkStatus::Running { .. }
+        ));
+        assert_eq!(net.handle.read().unwrap().as_ref().unwrap().ip, Some(lo));
+        // Same address: the watch changes nothing.
+        let rev = net.rev.load(Ordering::SeqCst);
+        net.check_interface(&ctl);
+        assert_eq!(net.rev.load(Ordering::SeqCst), rev);
+        net.handle.write().unwrap().take();
+    }
+
+    #[test]
     fn version_and_usage() {
         assert_eq!(version(), format!("ricercar {}", env!("CARGO_PKG_VERSION")));
         assert!(usage().contains("--version"));
         let a = Args::parse(["--headless".to_string(), "a.flac".to_string()].into_iter()).unwrap();
         assert!(a.headless && a.open == ["a.flac"]);
         assert!(Args::parse(["--bogus".to_string()].into_iter()).is_err());
+        assert!(usage().contains("--interface"));
+        let a = Args::parse(["--interface".to_string(), "eth0".to_string()].into_iter()).unwrap();
+        assert_eq!(a.interface.as_deref(), Some("eth0"));
+        assert!(a.open.is_empty());
+        assert!(Args::parse(["--interface".to_string()].into_iter()).is_err());
     }
 
     #[test]

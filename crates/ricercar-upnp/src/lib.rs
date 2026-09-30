@@ -40,12 +40,13 @@ use ricercar_core::{Controller, QueueItem, Repeat, TrackInfo};
 use events::Subscribers;
 use soap::{Args, Reply};
 
-/// Non-loopback IPv4 interfaces (name, address): where SSDP announces us.
+/// Non-loopback IPv4 interfaces that are up (name, address): where SSDP
+/// announces us, and the choices offered in the settings.
 pub fn interfaces() -> Vec<(String, std::net::Ipv4Addr)> {
     let mut v: Vec<(String, std::net::Ipv4Addr)> = if_addrs::get_if_addrs()
         .map(|l| {
             l.into_iter()
-                .filter(|i| !i.is_loopback())
+                .filter(|i| !i.is_loopback() && i.is_oper_up())
                 .filter_map(|i| match i.addr {
                     if_addrs::IfAddr::V4(a) => Some((i.name, a.ip)),
                     _ => None,
@@ -56,6 +57,21 @@ pub fn interfaces() -> Vec<(String, std::net::Ipv4Addr)> {
     v.sort();
     v.dedup();
     v
+}
+
+/// IPv4 address of the interface called `name` (loopback included), when it
+/// is up and has one.
+pub fn interface_ipv4(name: &str) -> Option<std::net::Ipv4Addr> {
+    ssdp::named_iface(name).map(|i| i.ip)
+}
+
+/// The error `start` returns when the chosen interface is missing, down or
+/// without an IPv4 address (cable unplugged, VPN down…).
+pub fn interface_unavailable(name: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::AddrNotAvailable,
+        format!("Interface {name} is not available"),
+    )
 }
 
 /// Exposed for tests and UI integration.
@@ -384,11 +400,17 @@ pub struct UpnpOptions {
     /// Preferred HTTP port (0: any). A restart asks for the previous port so
     /// control points that cached our URLs keep working.
     pub port: u16,
+    /// Network interface to serve on (`eth0`); `None`: all of them. When
+    /// set, HTTP listens on its IPv4 address only and SSDP joins, announces
+    /// and answers on it only.
+    pub interface: Option<String>,
 }
 
 /// The running UPnP services. Dropping it stops them too.
 pub struct RendererHandle {
     pub port: u16,
+    /// Address of the chosen interface, when the services are bound to one.
+    pub ip: Option<std::net::Ipv4Addr>,
     stop: Arc<AtomicBool>,
     renderer: Arc<Renderer>,
     threads: Vec<std::thread::JoinHandle<()>>,
@@ -402,10 +424,8 @@ impl RendererHandle {
     pub fn stop(&mut self) {
         if !self.stop.swap(true, Ordering::SeqCst) {
             // Unblock the accept loop.
-            let _ = TcpStream::connect_timeout(
-                &([127, 0, 0, 1], self.port).into(),
-                Duration::from_millis(200),
-            );
+            let ip = self.ip.unwrap_or(std::net::Ipv4Addr::LOCALHOST);
+            let _ = TcpStream::connect_timeout(&(ip, self.port).into(), Duration::from_millis(200));
         }
         for t in self.threads.drain(..) {
             let _ = t.join();
@@ -449,16 +469,29 @@ pub fn start_with(
             renderer: true,
             media_server,
             port: 0,
+            interface: None,
         },
     )
 }
 
 /// Start the renderer and/or the media server on one HTTP port. SSDP only
-/// announces the devices that run.
+/// announces the devices that run. With `opts.interface` set and that
+/// interface unavailable, nothing is bound and the error is
+/// [`interface_unavailable`].
 pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result<RendererHandle> {
+    let scope = match opts.interface.as_deref().filter(|n| !n.is_empty()) {
+        None => ssdp::Scope::All,
+        Some(name) => {
+            ssdp::Scope::One(ssdp::named_iface(name).ok_or_else(|| interface_unavailable(name))?)
+        }
+    };
+    let bind_ip = match scope {
+        ssdp::Scope::All => std::net::Ipv4Addr::UNSPECIFIED,
+        ssdp::Scope::One(i) => i.ip,
+    };
     let listener = match opts.port {
-        0 => TcpListener::bind("0.0.0.0:0")?,
-        p => TcpListener::bind(("0.0.0.0", p)).or_else(|_| TcpListener::bind("0.0.0.0:0"))?,
+        0 => TcpListener::bind((bind_ip, 0))?,
+        p => TcpListener::bind((bind_ip, p)).or_else(|_| TcpListener::bind((bind_ip, 0)))?,
     };
     let port = listener.local_addr()?.port();
     let (name, media_server) = (opts.name.as_str(), opts.media_server);
@@ -469,7 +502,7 @@ pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result
         let _ = std::fs::remove_file(config_dir().join("udn-server"));
         server_udn = load_or_create_udn_named("udn-server");
     }
-    let ip = ssdp::local_ip();
+    let ip = ssdp::local_ip(scope);
 
     let stop = Arc::new(AtomicBool::new(false));
     let (tx, rx) = mpsc::channel::<Wake>();
@@ -560,6 +593,7 @@ pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result
             ssdp::Kind::Server => media_server,
         })
         .collect(),
+        scope,
     );
     if ssdp.is_none() {
         tracing::warn!("SSDP port 1900 unavailable — renderer not discoverable");
@@ -567,6 +601,10 @@ pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result
 
     Ok(RendererHandle {
         port,
+        ip: match scope {
+            ssdp::Scope::All => None,
+            ssdp::Scope::One(i) => Some(i.ip),
+        },
         stop,
         renderer,
         threads,

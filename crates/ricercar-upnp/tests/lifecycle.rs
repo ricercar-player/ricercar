@@ -22,6 +22,7 @@ fn opts(name: &str, renderer: bool, media_server: bool, port: u16) -> UpnpOption
         renderer,
         media_server,
         port,
+        interface: None,
     }
 }
 

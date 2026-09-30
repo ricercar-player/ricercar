@@ -123,8 +123,19 @@ impl AppContext {
             NetworkStatus::Running { port } => format!("Status: running, HTTP port {port}"),
             NetworkStatus::Starting => "Status: starting".into(),
             NetworkStatus::Off => "Status: off".into(),
+            NetworkStatus::InterfaceMissing(i) => {
+                format!("Status: waiting (interface {i} is not available)")
+            }
             NetworkStatus::Failed(e) => format!("Status: failed ({e})"),
         });
+        out.push(format!(
+            "Serving on: {}",
+            if cfg.interface.is_empty() {
+                "all interfaces"
+            } else {
+                &cfg.interface
+            }
+        ));
         let ifs = ricercar_upnp::interfaces();
         if ifs.is_empty() {
             out.push("Interfaces: none (no IPv4 address)".into());

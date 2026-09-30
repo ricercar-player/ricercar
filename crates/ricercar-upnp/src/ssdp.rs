@@ -1,5 +1,6 @@
-//! SSDP discovery: multicast announcements on every IPv4 interface,
-//! M-SEARCH replies after the MX-random delay, `ssdp:byebye` on shutdown.
+//! SSDP discovery: multicast announcements on every IPv4 interface (or on
+//! the one chosen in the settings), M-SEARCH replies after the MX-random
+//! delay, `ssdp:byebye` on shutdown.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
@@ -125,9 +126,45 @@ impl Common {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Iface {
-    ip: Ipv4Addr,
-    mask: Ipv4Addr,
+pub struct Iface {
+    pub ip: Ipv4Addr,
+    pub mask: Ipv4Addr,
+}
+
+/// Where SSDP listens and announces.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scope {
+    /// Every non-loopback IPv4 interface, followed as they come and go.
+    All,
+    /// One interface only (its address at start; a new address means a
+    /// restart of the services).
+    One(Iface),
+}
+
+impl Scope {
+    /// The interfaces to join, announce on and answer for.
+    fn ifaces(self) -> Vec<Iface> {
+        match self {
+            Scope::All => ifaces(),
+            Scope::One(i) => vec![i],
+        }
+    }
+}
+
+/// The IPv4 address of the interface called `name`, when it is up.
+/// Loopback included (`lo`), so a renderer can be kept on this host.
+pub fn named_iface(name: &str) -> Option<Iface> {
+    if_addrs::get_if_addrs()
+        .ok()?
+        .into_iter()
+        .filter(|i| i.name == name && i.is_oper_up())
+        .find_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(a) => Some(Iface {
+                ip: a.ip,
+                mask: a.netmask,
+            }),
+            _ => None,
+        })
 }
 
 fn ifaces() -> Vec<Iface> {
@@ -168,6 +205,15 @@ fn ip_for_peer(peer: IpAddr, ifs: &[Iface]) -> Ipv4Addr {
         .or(ifs.first())
         .map(|i| i.ip)
         .unwrap_or(Ipv4Addr::LOCALHOST)
+}
+
+/// The address a search reply points to: the chosen interface's, which is
+/// the only one the HTTP server listens on, else the peer's best match.
+fn reply_ip(scope: Scope, peer: IpAddr, ifs: &[Iface]) -> Ipv4Addr {
+    match scope {
+        Scope::One(i) => i.ip,
+        Scope::All => ip_for_peer(peer, ifs),
+    }
 }
 
 /// Searches are answered only for this host and the attached subnets.
@@ -286,14 +332,16 @@ pub struct Ssdp {
     sock: Arc<socket2::Socket>,
     common: Arc<Common>,
     stop: Arc<AtomicBool>,
+    scope: Scope,
 }
 
 impl Ssdp {
-    /// Binds UDP 1900 (reuse), joins the group on every interface and spawns
-    /// responder + announcer threads. `None` if the port is unavailable.
-    pub fn start(port: u16, devices: Vec<Device>) -> Option<Ssdp> {
-        let sock = bind_ssdp_socket()?;
-        let send = Arc::new(sender_socket()?);
+    /// Binds UDP 1900 (reuse), joins the group on the interfaces of `scope`
+    /// and spawns responder + announcer threads. `None` if the port is
+    /// unavailable.
+    pub fn start(port: u16, devices: Vec<Device>, scope: Scope) -> Option<Ssdp> {
+        let sock = bind_ssdp_socket(scope)?;
+        let send = Arc::new(sender_socket(scope)?);
         let stop = Arc::new(AtomicBool::new(false));
         let bootid = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -314,7 +362,7 @@ impl Ssdp {
             std::thread::Builder::new()
                 .name("ricercar-ssdp-alive".into())
                 .spawn(move || {
-                    let mut known = ifaces();
+                    let mut known = scope.ifaces();
                     join_all(&sock, &known);
                     let mut burst = [50u64, 150, 600].into_iter();
                     let mut next = Instant::now();
@@ -327,7 +375,7 @@ impl Ssdp {
                                     burst.next().unwrap_or(CACHE_SECS as u64 / 2 * 1000),
                                 );
                         }
-                        if last_check.elapsed() >= Duration::from_secs(5) {
+                        if scope == Scope::All && last_check.elapsed() >= Duration::from_secs(5) {
                             last_check = Instant::now();
                             let now = ifaces();
                             if now != known {
@@ -353,7 +401,7 @@ impl Ssdp {
                 .spawn(move || {
                     let mut buf = [0u8; 2048];
                     sock.set_read_timeout(Some(Duration::from_millis(300))).ok();
-                    let mut ifs = ifaces();
+                    let mut ifs = scope.ifaces();
                     let mut ifs_at = Instant::now();
                     let mut limit = RateLimit::new(Instant::now());
                     while !stop.load(Ordering::Relaxed) {
@@ -366,13 +414,13 @@ impl Ssdp {
                         };
                         let now = Instant::now();
                         if now.saturating_duration_since(ifs_at) >= IFACE_CACHE {
-                            ifs = ifaces();
+                            ifs = scope.ifaces();
                             ifs_at = now;
                         }
                         if !peer_is_local(from.ip(), &ifs) || !limit.allow(from.ip(), now) {
                             continue;
                         }
-                        let ip = ip_for_peer(from.ip(), &ifs);
+                        let ip = reply_ip(scope, from.ip(), &ifs);
                         let replies: Vec<String> = common
                             .entries
                             .iter()
@@ -412,6 +460,7 @@ impl Ssdp {
             sock: send,
             common,
             stop,
+            scope,
         })
     }
 }
@@ -419,7 +468,8 @@ impl Ssdp {
 impl Drop for Ssdp {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        self.common.announce(&self.sock, &ifaces(), false);
+        self.common
+            .announce(&self.sock, &self.scope.ifaces(), false);
     }
 }
 
@@ -434,20 +484,33 @@ fn join_all(sock: &UdpSocket, ifs: &[Iface]) {
 }
 
 /// Socket for multicast announcements (outgoing interface set per send).
-fn sender_socket() -> Option<socket2::Socket> {
+/// With one interface, bound to its address: packets leave from it only.
+fn sender_socket(scope: Scope) -> Option<socket2::Socket> {
     use socket2::{Domain, Protocol, Socket, Type};
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).ok()?;
-    s.bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0).into())
-        .ok()?;
+    let local = match scope {
+        Scope::All => Ipv4Addr::UNSPECIFIED,
+        Scope::One(i) => i.ip,
+    };
+    s.bind(&SocketAddr::new(IpAddr::V4(local), 0).into()).ok()?;
+    if let Scope::One(i) = scope {
+        s.set_multicast_if_v4(&i.ip).ok()?;
+    }
     let _ = s.set_multicast_ttl_v4(4);
     let _ = s.set_multicast_loop_v4(true);
     Some(s)
 }
 
-fn bind_ssdp_socket() -> Option<Arc<UdpSocket>> {
+/// The listening socket stays on 0.0.0.0:1900 (multicast is only delivered
+/// to wildcard binds); with one interface it hears only the group joined on
+/// it, not those other programs joined elsewhere.
+fn bind_ssdp_socket(scope: Scope) -> Option<Arc<UdpSocket>> {
     use socket2::{Domain, Protocol, Socket, Type};
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).ok()?;
     socket.set_reuse_address(true).ok()?;
+    if matches!(scope, Scope::One(_)) {
+        let _ = socket.set_multicast_all_v4(false);
+    }
     socket
         .bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PORT).into())
         .ok()?;
@@ -457,8 +520,9 @@ fn bind_ssdp_socket() -> Option<Arc<UdpSocket>> {
 }
 
 /// Primary LAN address (URLs emitted outside of a request).
-pub fn local_ip() -> IpAddr {
-    ifaces()
+pub fn local_ip(scope: Scope) -> IpAddr {
+    scope
+        .ifaces()
         .first()
         .map(|i| IpAddr::V4(i.ip))
         .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST))
@@ -506,6 +570,46 @@ mod tests {
         assert!(!peer_is_local("8.8.8.8".parse().unwrap(), &ifs));
         assert!(!peer_is_local("::1".parse().unwrap(), &ifs));
         assert!(!peer_is_local("8.8.8.8".parse().unwrap(), &[]));
+    }
+
+    #[test]
+    fn one_interface_answers_its_subnet_only() {
+        let eth = Iface {
+            ip: Ipv4Addr::new(192, 168, 1, 7),
+            mask: Ipv4Addr::new(255, 255, 255, 0),
+        };
+        let scope = Scope::One(eth);
+        let ifs = scope.ifaces();
+        assert_eq!(ifs, [eth]);
+        // Its own subnet (and this host) is answered, with its address.
+        let lan: IpAddr = "192.168.1.42".parse().unwrap();
+        assert!(peer_is_local(lan, &ifs));
+        assert_eq!(reply_ip(scope, lan, &ifs), eth.ip);
+        let me: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(peer_is_local(me, &ifs));
+        assert_eq!(reply_ip(scope, me, &ifs), eth.ip);
+        // Another NIC's subnet (VPN, docker bridge) is not.
+        for other in ["10.8.0.2", "172.17.0.2", "192.168.2.42"] {
+            assert!(!peer_is_local(other.parse().unwrap(), &ifs), "{other}");
+        }
+        // Loopback as the chosen interface.
+        let lo = Scope::One(Iface {
+            ip: Ipv4Addr::LOCALHOST,
+            mask: Ipv4Addr::new(255, 0, 0, 0),
+        });
+        let ifs = lo.ifaces();
+        assert!(peer_is_local("127.0.0.1".parse().unwrap(), &ifs));
+        assert!(!peer_is_local(lan, &ifs));
+        assert_eq!(reply_ip(lo, me, &ifs), Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
+    fn named_interfaces() {
+        assert!(named_iface("no-such-if0").is_none());
+        // CI runners and desktops have `lo` up; skip where they don't.
+        if let Some(lo) = named_iface("lo") {
+            assert!(lo.ip.is_loopback());
+        }
     }
 
     #[test]

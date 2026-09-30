@@ -2,7 +2,7 @@ import { ScrollView, Slider, AboutSlint } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, StationRow, DeviceRow, CapChip } from "state.slint";
-import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Toggle, TextField, Badge } from "widgets.slint";
+import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Toggle, TextField, Badge, FocusRing } from "widgets.slint";
 import { PageScroll } from "pages.slint";
 
 // ------------------------------------------------------------------ settings: DAC
@@ -239,6 +239,64 @@ component Row inherits HorizontalLayout {
     }
 }
 
+/// One option of a single choice (radio): Tab reaches it, Space or Enter
+/// picks it.
+component ChoiceLine inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback picked();
+    height: 44px;
+    border-radius: Theme.r-md;
+    background: ta.has-hover ? Theme.hover : transparent;
+    forward-focus: fs;
+    accessible-role: radio-button;
+    accessible-checkable: true;
+    accessible-checked: selected;
+    accessible-label: text;
+    accessible-action-default => { picked(); }
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.picked();
+                return accept;
+            }
+            reject
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 14px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            border-width: 2px;
+            border-color: root.selected ? Theme.accent : Theme.line-strong;
+            if root.selected: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            font-size: Theme.fs-md;
+            color: Theme.text;
+            overflow: elide;
+        }
+    }
+    if fs.has-focus: FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+    }
+}
+
 component Divider inherits Rectangle {
     height: 1px;
     Rectangle { x: 16px; width: parent.width - 32px; background: Theme.line; }
@@ -405,6 +463,26 @@ export component SettingsPage inherits PageScroll {
             Row {
                 label: @tr("Share my library (UPnP media server)");
                 Toggle { checked <=> App.server-enabled; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Network interface");
+                hint: @tr("Where phones and other apps can reach ricercar. With a VPN or containers, pick your home network.");
+            }
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-bottom: 8px;
+                for label[i] in App.net-ifaces: ChoiceLine {
+                    text: label;
+                    selected: i == App.net-iface;
+                    picked => {
+                        if i != App.net-iface {
+                            App.net-iface = i;
+                            App.select-net-iface(i);
+                        }
+                    }
+                }
             }
         }
 

@@ -85,6 +85,10 @@ pub struct NetworkConfig {
     pub name: String,
     pub renderer: bool,
     pub media_server: bool,
+    /// Network interface the renderer and media server use (`eth0`); empty:
+    /// all of them. A name, not an address: it survives DHCP renewals.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub interface: String,
 }
 
 impl Default for NetworkConfig {
@@ -93,6 +97,7 @@ impl Default for NetworkConfig {
             name: "ricercar".into(),
             renderer: true,
             media_server: true,
+            interface: String::new(),
         }
     }
 }
@@ -345,6 +350,27 @@ mod tests {
         assert_eq!(c.audio.replaygain, ReplayGain::Album);
         assert_eq!(c.audio.device, "default");
         assert_eq!(c.network.name, "ricercar");
+    }
+
+    #[test]
+    fn network_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        // Older files: all interfaces.
+        std::fs::write(&p, "[network]\nname = \"Den\"\n").unwrap();
+        let mut c = Config::load(&p);
+        assert_eq!(c.network.interface, "");
+        // Empty: not written.
+        c.save(&p).unwrap();
+        assert!(!std::fs::read_to_string(&p).unwrap().contains("interface"));
+        c.network.interface = "eth0".into();
+        c.save(&p).unwrap();
+        assert!(
+            std::fs::read_to_string(&p)
+                .unwrap()
+                .contains("interface = \"eth0\"")
+        );
+        assert_eq!(Config::load(&p), c);
     }
 
     #[test]

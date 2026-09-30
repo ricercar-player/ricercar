@@ -453,6 +453,14 @@ msgid "Share my library (UPnP media server)"
 msgstr "Partager ma bibliothèque (serveur UPnP)"
 
 msgctxt "SettingsPage"
+msgid "Network interface"
+msgstr "Interface réseau"
+
+msgctxt "SettingsPage"
+msgid "Where phones and other apps can reach ricercar. With a VPN or containers, pick your home network."
+msgstr "Là où les téléphones et autres applications joignent ricercar. Avec un VPN ou des conteneurs, choisissez votre réseau domestique."
+
+msgctxt "SettingsPage"
 msgid "Plugins"
 msgstr "Plugins"
 

@@ -431,6 +431,10 @@ export global App {
     in-out property <bool> renderer-enabled;
     in-out property <bool> server-enabled;
     in property <string> network-status;
+    // network interface choice: "All interfaces", then one per interface
+    in property <[string]> net-ifaces;
+    in-out property <int> net-iface;
+    callback select-net-iface(int);
     in-out property <string> lb-token;
     in property <string> lb-status;
     callback lb-save();
