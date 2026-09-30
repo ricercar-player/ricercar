@@ -1,12 +1,14 @@
 [Unit]
 Description=ricercar headless player and UPnP/OpenHome renderer
-After=network-online.target sound.target
-Wants=network-online.target
 
 [Service]
 ExecStart=/usr/bin/ricercar-daemon
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=default.target

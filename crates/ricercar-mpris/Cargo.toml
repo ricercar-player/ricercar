@@ -3,6 +3,7 @@ name = "ricercar-mpris"
 version = "0.5.2"
 edition = "2024"
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ricercar-audio = { version = "0.5.2", path = "../ricercar-audio" }

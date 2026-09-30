@@ -8,13 +8,33 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# Read-only by default; only the publish job may write (create the release).
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # A tag must name the version the workspace builds.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: tag matches Cargo.toml
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          ui=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/ricercar-ui/Cargo.toml | head -1)
+          echo "workspace $version, ricercar-ui $ui, ref $GITHUB_REF_NAME"
+          if [ -z "$version" ] || [ "$version" != "$ui" ]; then
+            echo "::error::workspace version ($version) and ricercar-ui version ($ui) differ"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version"
+            exit 1
+          fi
+
   # Debian/Ubuntu .deb, Fedora/openSUSE .rpm, AppImage and a plain tarball.
   # Built on Ubuntu 22.04 so the binaries run on distributions with glibc ≥ 2.35.
   linux:
@@ -27,16 +47,19 @@ jobs:
             runner: ubuntu-22.04
           - arch: aarch64
             runner: ubuntu-22.04-arm
+    needs: version
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
       - name: system deps
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libfontconfig1-dev libxkbcommon-dev \
             pkg-config clang libclang-dev file desktop-file-utils
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-${{ matrix.arch }}
       - name: version
@@ -44,9 +67,25 @@ jobs:
       - name: build
         run: cargo build --release --locked -p ricercar-ui -p ricercar-cli -p ricercar-daemon
       - name: packaging tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
-          tool: cargo-deb,cargo-generate-rpm
+          tool: cargo-deb,cargo-generate-rpm,cargo-about
+      - name: third-party licenses
+        run: dist/third-party-licenses.sh
+      - name: smoke test
+        run: |
+          ./target/release/ricercar --version
+          ./target/release/ricercar-daemon --version
+          ./target/release/ricercar-cli --help >/dev/null
+          # Built on Ubuntu 22.04: nothing may need a newer glibc than 2.35.
+          for bin in ricercar ricercar-daemon ricercar-cli; do
+            max=$(objdump -T "target/release/$bin" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+            echo "$bin needs glibc $max"
+            if [ "$(printf '%s\n2.35\n' "$max" | sort -V | tail -1)" != 2.35 ]; then
+              echo "::error::$bin needs glibc $max (> 2.35)"
+              exit 1
+            fi
+          done
       - name: deb
         run: |
           mkdir -p target/dist
@@ -58,20 +97,26 @@ jobs:
       - name: tarball
         run: |
           name="ricercar-$VERSION-linux-${{ matrix.arch }}"
-          mkdir -p "target/$name/bin" "target/$name/share/applications" \
-            "target/$name/share/icons/hicolor/scalable/apps" "target/$name/lib/systemd/user"
+          mkdir -p "target/$name/bin" "target/$name/share/applications" "target/$name/share/metainfo" \
+            "target/$name/share/icons/hicolor/scalable/apps" "target/$name/lib/systemd/user" \
+            "target/$name/share/licenses/ricercar"
           cp target/release/ricercar target/release/ricercar-cli target/release/ricercar-daemon "target/$name/bin/"
           cp dist/ricercar.desktop "target/$name/share/applications/"
+          cp dist/io.github.ricercar_player.ricercar.metainfo.xml "target/$name/share/metainfo/"
           cp dist/ricercar.svg "target/$name/share/icons/hicolor/scalable/apps/"
+          for size in 48 128 256; do
+            mkdir -p "target/$name/share/icons/hicolor/${size}x${size}/apps"
+            cp "dist/icons/${size}x${size}/ricercar.png" "target/$name/share/icons/hicolor/${size}x${size}/apps/"
+          done
           cp dist/ricercar.service "target/$name/lib/systemd/user/"
           cp README.md LICENSE "target/$name/"
+          cp LICENSE target/THIRD-PARTY-LICENSES crates/ricercar-ui/assets/fonts/OFL.txt \
+            "target/$name/share/licenses/ricercar/"
+          cp crates/ricercar-ui/assets/icons/LICENSE "target/$name/share/licenses/ricercar/icons-LICENSE"
           tar -C target -czf "target/dist/$name.tar.gz" "$name"
-      - name: smoke test
-        run: |
-          ./target/release/ricercar --help || true
-          ./target/release/ricercar-cli --help
-          ls -la target/dist
-      - uses: actions/upload-artifact@v4
+      - name: list packages
+        run: ls -la target/dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-${{ matrix.arch }}
           path: target/dist/*
@@ -80,14 +125,15 @@ jobs:
   # Native Arch Linux package (also for Manjaro, EndeavourOS, CachyOS, Omarchy…).
   arch:
     name: arch linux x86_64
+    needs: version
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
       - name: system deps
         run: |
-          pacman -Syu --noconfirm --needed rust git alsa-lib fontconfig libxkbcommon
+          pacman -Syu --noconfirm --needed rust cargo-about git alsa-lib fontconfig libxkbcommon
           useradd -m builder
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: makepkg
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/ricercar-ui/Cargo.toml | head -1)
@@ -97,7 +143,7 @@ jobs:
           sudo -u builder makepkg -p PKGBUILD.ci --nodeps --noconfirm
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp ./*.pkg.tar.zst "$GITHUB_WORKSPACE/out/"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: arch-x86_64
           path: out/*.pkg.tar.zst
@@ -108,9 +154,11 @@ jobs:
     needs: [linux, arch]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: assets
           merge-multiple: true

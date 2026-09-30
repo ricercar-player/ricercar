@@ -9,11 +9,24 @@ OUT="${OUT:-target/dist}"
 APPDIR=target/AppDir
 
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
-    "$APPDIR/usr/share/icons/hicolor/scalable/apps" "$OUT"
+LICENSES="$APPDIR/usr/share/licenses/ricercar"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/metainfo" \
+    "$APPDIR/usr/share/icons/hicolor/scalable/apps" "$LICENSES" "$OUT"
 cp target/release/ricercar target/release/ricercar-cli target/release/ricercar-daemon "$APPDIR/usr/bin/"
 cp dist/ricercar.desktop "$APPDIR/usr/share/applications/"
 cp dist/ricercar.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
+for size in 48 128 256; do
+    mkdir -p "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps"
+    cp "dist/icons/${size}x${size}/ricercar.png" "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps/"
+done
+cp dist/io.github.ricercar_player.ricercar.metainfo.xml "$APPDIR/usr/share/metainfo/"
+cp LICENSE "$LICENSES/"
+cp crates/ricercar-ui/assets/fonts/OFL.txt "$LICENSES/"
+cp crates/ricercar-ui/assets/icons/LICENSE "$LICENSES/icons-LICENSE"
+# Written by dist/third-party-licenses.sh (the release workflow runs it first).
+if [ -f target/THIRD-PARTY-LICENSES ]; then
+    cp target/THIRD-PARTY-LICENSES "$LICENSES/"
+fi
 
 TOOL="target/linuxdeploy-$ARCH.AppImage"
 if [ ! -x "$TOOL" ]; then
@@ -22,10 +35,13 @@ if [ ! -x "$TOOL" ]; then
     chmod +x "$TOOL"
 fi
 
-# linuxdeploy bundles libasound, fontconfig & co; GL, glibc and the display
-# server libraries (dlopened by winit) come from the host, as they must.
+# GL, glibc, fontconfig and the display server libraries (dlopened by winit)
+# come from the host, as they must. So does libasound: a bundled copy would
+# not find the host's ALSA plugins and configuration (PipeWire, Bluetooth,
+# dmix). linuxdeploy's default excludelist already skips it; be explicit.
 LINUXDEPLOY_OUTPUT_VERSION="$VERSION" "$TOOL" --appimage-extract-and-run \
     --appdir "$APPDIR" \
+    --exclude-library 'libasound.so*' \
     --executable "$APPDIR/usr/bin/ricercar" \
     --desktop-file "$APPDIR/usr/share/applications/ricercar.desktop" \
     --icon-file "$APPDIR/usr/share/icons/hicolor/scalable/apps/ricercar.svg" \

@@ -1,0 +1,30 @@
+Third-party software in ricercar
+================================
+
+ricercar is distributed under the MIT license (see LICENSE). The binaries
+include the Rust crates listed below, each under the license quoted after
+its name. The Inter typeface (SIL Open Font License, OFL.txt) and the Lucide
+icons (ISC, icons-LICENSE) are shipped next to this file.
+
+The Slint UI toolkit (crates slint, slint-macros and i-slint-*) is used under
+the Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0,
+reproduced at the end of this file.
+
+Overview
+--------
+{{#each overview}}
+{{{name}}}: {{count}} crate(s)
+{{/each}}
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} <{{{crate.repository}}}>{{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

@@ -3,6 +3,7 @@ name = "ricercar-upnp"
 version = "0.5.2"
 edition = "2024"
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 if-addrs = "0.15.0"

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ricercar_player.ricercar</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>ricercar</name>
+  <summary>Bit-perfect music player and network receiver</summary>
+  <summary xml:lang="fr">Lecteur de musique bit-perfect et récepteur réseau</summary>
+  <developer id="io.github.ricercar_player">
+    <name>ricercar-player</name>
+  </developer>
+  <description>
+    <p>
+      ricercar is a native music player for Linux that sends your lossless
+      library to your DAC untouched, and is also a UPnP AV and OpenHome
+      network receiver for the streaming apps on your phone.
+    </p>
+    <ul>
+      <li>Exclusive ALSA output at each track's native rate, gapless</li>
+      <li>Local library with synced lyrics, playlists and internet radio</li>
+      <li>Receives streams pushed from control points such as BubbleUPnP or Kazoo</li>
+      <li>MPRIS, scrobbling, tray icon and a headless daemon</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">ricercar.desktop</launchable>
+  <icon type="stock">ricercar</icon>
+  <url type="homepage">https://github.com/ricercar-player/ricercar</url>
+  <url type="bugtracker">https://github.com/ricercar-player/ricercar/issues</url>
+  <url type="vcs-browser">https://github.com/ricercar-player/ricercar</url>
+  <url type="contribute">https://github.com/ricercar-player/ricercar/blob/main/CONTRIBUTING.md</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>player</keyword>
+    <keyword>flac</keyword>
+    <keyword>hi-res</keyword>
+    <keyword>bit-perfect</keyword>
+    <keyword>upnp</keyword>
+    <keyword>dlna</keyword>
+    <keyword>openhome</keyword>
+  </keywords>
+  <provides>
+    <binary>ricercar</binary>
+    <binary>ricercar-daemon</binary>
+    <binary>ricercar-cli</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Home</caption>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/home.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>An album</caption>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/album.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>Synced lyrics</caption>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/lyrics.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>The signal path, from file to DAC</caption>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/signal-path.jpg</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.5.2" date="2026-09-30">
+      <description>
+        <p>Check for a new version from Settings → About and install it in place, verified against the release checksums.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.5.2</url>
+    </release>
+    <release version="0.5.1" date="2026-09-30">
+      <description>
+        <p>One click plays, the player bar leads to albums and artists, and search puts your own music first.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.5.1</url>
+    </release>
+    <release version="0.5.0" date="2026-09-29">
+      <description>
+        <p>Plugin playlists sit with yours, their picks show on Home, search sorts everything by kind, and Bluetooth headphones appear in the outputs.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.5.0</url>
+    </release>
+  </releases>
+</component>

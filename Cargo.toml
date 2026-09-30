@@ -7,7 +7,7 @@ version = "0.5.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/ricercar-player/ricercar"
-rust-version = "1.85"
+rust-version = "1.92"
 
 [workspace.dependencies]
 ricercar-audio = { path = "crates/ricercar-audio", version = "0.5.2" }

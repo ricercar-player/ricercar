@@ -6,10 +6,11 @@ pkgdesc="Bit-perfect music player and UPnP/OpenHome network receiver for Linux"
 arch=('x86_64')
 url="https://github.com/ricercar-player/ricercar"
 license=('MIT')
-depends=('alsa-lib' 'fontconfig' 'libxkbcommon' 'gcc-libs' 'glibc')
+depends=('alsa-lib' 'fontconfig' 'libxkbcommon' 'gcc-libs' 'glibc' 'hicolor-icon-theme')
 optdepends=('xdg-desktop-portal: folder picker for the library settings'
-            'pipewire-alsa: play through the system mixer when not bit-perfect')
-makedepends=('cargo')
+            'pipewire-alsa: play through the system mixer when not bit-perfect'
+            'polkit: install updates from Settings → About')
+makedepends=('cargo' 'cargo-about')
 options=('!lto' '!debug')
 
 _root() { realpath "$startdir/../.."; }
@@ -17,6 +18,7 @@ _root() { realpath "$startdir/../.."; }
 build() {
   cd "$(_root)"
   cargo build --release --locked -p ricercar-ui -p ricercar-cli -p ricercar-daemon
+  dist/third-party-licenses.sh
 }
 
 package() {
@@ -27,5 +29,16 @@ package() {
   install -Dm644 dist/ricercar.desktop "$pkgdir/usr/share/applications/ricercar.desktop"
   install -Dm644 dist/ricercar.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/ricercar.svg"
   install -Dm644 dist/ricercar.service "$pkgdir/usr/lib/systemd/user/ricercar.service"
+  for size in 48 128 256; do
+    install -Dm644 "dist/icons/${size}x${size}/ricercar.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/ricercar.png"
+  done
+  install -Dm644 dist/io.github.ricercar_player.ricercar.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/io.github.ricercar_player.ricercar.metainfo.xml"
+  # Official package: lets the app upgrade it in place (see README, packaging).
+  install -Dm644 dist/self-update "$pkgdir/usr/share/ricercar/self-update"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/ricercar/LICENSE"
+  install -Dm644 target/THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/ricercar/THIRD-PARTY-LICENSES"
+  install -Dm644 crates/ricercar-ui/assets/fonts/OFL.txt "$pkgdir/usr/share/licenses/ricercar/OFL.txt"
+  install -Dm644 crates/ricercar-ui/assets/icons/LICENSE "$pkgdir/usr/share/licenses/ricercar/icons-LICENSE"
 }

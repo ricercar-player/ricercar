@@ -9,9 +9,9 @@ A native Linux music player that is also a UPnP / OpenHome network receiver.
 
 [![CI](https://github.com/ricercar-player/ricercar/actions/workflows/ci.yml/badge.svg)](https://github.com/ricercar-player/ricercar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-d4a35a.svg)](LICENSE)
-[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.92+](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org)
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-3fb8a8.svg)
-![UI: Slint](https://img.shields.io/badge/UI-Slint-4f9cf0.svg)
+[![Made with Slint](https://img.shields.io/badge/made%20with-Slint-4f9cf0.svg)](https://slint.dev)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-8b7cf6.svg)
 
 [Features](#-features) ·
@@ -185,7 +185,9 @@ They are rendered with `RICERCAR_SNAPSHOT`, see [Development](#-development).</s
 ### Download a package
 
 Every [release](https://github.com/ricercar-player/ricercar/releases/latest) ships
-ready-made packages for **x86_64** and **aarch64**:
+ready-made packages. The `.deb`, `.rpm`, `.AppImage` and tarball exist for
+**x86_64** and **aarch64**; the Arch package is **x86_64** only (on aarch64
+Arch, build it from source with `dist/arch/PKGBUILD`):
 
 | Your system | Package | Install |
 |---|---|---|
@@ -228,7 +230,7 @@ cargo build --release
 ```
 </details>
 
-Rust 1.85 or newer is required. The binaries end up in `target/release/`:
+Rust 1.92 or newer is required. The binaries end up in `target/release/`:
 
 | binary | what it is |
 |---|---|
@@ -239,6 +241,31 @@ Rust 1.85 or newer is required. The binaries end up in `target/release/`:
 Desktop integration: copy `dist/ricercar.desktop` to
 `~/.local/share/applications/` and `dist/ricercar.svg` to
 `~/.local/share/icons/hicolor/scalable/apps/`.
+
+The systemd user unit (`dist/ricercar.service`, also in the release tarball
+under `lib/systemd/user/`) starts `/usr/bin/ricercar-daemon`. If you run the
+binaries from somewhere else, such as an unpacked tarball or `~/.local/bin`,
+fix `ExecStart=` before copying the unit to `~/.config/systemd/user/`.
+
+<details>
+<summary><b>Packaging ricercar for a distribution</b></summary>
+
+The official packages install an empty marker file,
+`/usr/share/ricercar/self-update`, which lets **About → Check for updates**
+replace the installed .deb / .rpm / pacman package in place. Distribution
+packages should **not** ship that file: without it the app only tells users
+that a new version exists and leaves upgrades to the package manager.
+Setting `RICERCAR_NO_SELF_UPDATE=1` in the environment disables in-place
+updates as well.
+
+Install `dist/io.github.ricercar_player.ricercar.metainfo.xml` into
+`/usr/share/metainfo/`, and the third-party notices into
+`/usr/share/licenses/ricercar/`: `THIRD-PARTY-LICENSES` (written to
+`target/` by `dist/third-party-licenses.sh`, which needs
+[cargo-about](https://github.com/EmbarkStudios/cargo-about)),
+`crates/ricercar-ui/assets/fonts/OFL.txt` and
+`crates/ricercar-ui/assets/icons/LICENSE` (as `icons-LICENSE`).
+</details>
 
 ### First run
 
@@ -518,7 +545,8 @@ unit in `dist/`, and control it from your phone over UPnP / OpenHome.
 - [ ] Optional parametric EQ / convolution (clearly marked non bit-perfect)
 - [ ] DSD over PCM (DoP), CUE sheets
 - [ ] Composer / work views for classical music
-- [ ] Flatpak and AppImage
+- [x] AppImage
+- [ ] Flatpak
 
 ## 🤝 Contributing
 
