@@ -2,8 +2,9 @@
 //! release (no account, `ETag` so an unchanged answer costs nothing) and
 //! compare it with the running version. Installing is a separate, explicit
 //! step ([`install`]): the release file matching how ricercar was installed
-//! is downloaded, checked against the release's `SHA256SUMS`, then either
-//! replaces the AppImage or goes to the package manager through `pkexec`.
+//! is downloaded, checked against the release's `SHA256SUMS` (itself signed
+//! with the project's minisign key), then either replaces the AppImage or
+//! goes to the package manager through `pkexec`.
 
 use std::cmp::Ordering;
 use std::io::Read;
@@ -21,6 +22,9 @@ pub const INTERVAL: i64 = 24 * 3600;
 /// Release files are only taken from here.
 const DOWNLOADS: &str = "https://github.com/ricercar-player/ricercar/releases/download/";
 const SUMS: &str = "SHA256SUMS";
+const SUMS_SIG: &str = "SHA256SUMS.minisig";
+/// The release signing key (also in dist/minisign.pub).
+const PUBLIC_KEY: &str = "RWSLPLWZ/M4/9X1orGjyBkKYA7BmzgxxI8dveJ8YVcSQVrOpjinxS9fV";
 const MAX_FILE: u64 = 512 << 20;
 /// Installed by the release packages: only they are upgraded in place.
 const PACKAGE_MARKER: &str = "/usr/share/ricercar/self-update";
@@ -251,6 +255,23 @@ pub fn asset_for<'a>(release: &'a Release, kind: &Install, arch: &str) -> Option
 pub fn installable(release: &Release, kind: &Install) -> bool {
     asset_for(release, kind, std::env::consts::ARCH).is_some()
         && release.assets.iter().any(|a| a.name == SUMS)
+        && release.assets.iter().any(|a| a.name == SUMS_SIG)
+}
+
+/// Whether `sig` is a signature of `sums` by `key` for release `version`.
+/// The trusted comment names the release, so an older signed list can't
+/// be passed off as a newer one.
+fn sums_signed(sums: &[u8], sig: &[u8], key: &str, version: &str) -> bool {
+    let Ok(key) = minisign_verify::PublicKey::from_base64(key) else {
+        return false;
+    };
+    let Ok(sig) = std::str::from_utf8(sig)
+        .map_err(|_| ())
+        .and_then(|s| minisign_verify::Signature::decode(s).map_err(|_| ()))
+    else {
+        return false;
+    };
+    sig.trusted_comment() == format!("ricercar v{version}") && key.verify(sums, &sig, false).is_ok()
 }
 
 /// `sha256sum` output: the digest of `name`, if listed.
@@ -294,6 +315,8 @@ pub enum InstallError {
     Network(String),
     /// The file does not match `SHA256SUMS`.
     Checksum,
+    /// `SHA256SUMS` is not signed by the release key.
+    Signature,
     /// The password prompt was closed.
     Cancelled,
     /// Not authorised, or no polkit authentication agent to ask with.
@@ -307,6 +330,7 @@ impl std::fmt::Display for InstallError {
             InstallError::NoFile => write!(f, "no release file for this system"),
             InstallError::Network(e) => write!(f, "download: {e}"),
             InstallError::Checksum => write!(f, "the download does not match SHA256SUMS"),
+            InstallError::Signature => write!(f, "SHA256SUMS is not signed by the release key"),
             InstallError::Cancelled => write!(f, "cancelled"),
             InstallError::NotAuthorized => write!(
                 f,
@@ -329,7 +353,16 @@ pub fn install(release: &Release, kind: &Install, work: &Path) -> Result<(), Ins
         .iter()
         .find(|a| a.name == SUMS)
         .ok_or(InstallError::NoFile)?;
+    let sig_asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == SUMS_SIG)
+        .ok_or(InstallError::NoFile)?;
     let sums = download(&sums_asset.url).map_err(InstallError::Network)?;
+    let sig = download(&sig_asset.url).map_err(InstallError::Network)?;
+    if !sums_signed(&sums, &sig, PUBLIC_KEY, &release.version) {
+        return Err(InstallError::Signature);
+    }
     let want =
         sum_for(&String::from_utf8_lossy(&sums), &asset.name).ok_or(InstallError::Checksum)?;
     let bytes = download(&asset.url).map_err(InstallError::Network)?;
@@ -564,6 +597,7 @@ mod tests {
     fn release() -> Release {
         let names = [
             "SHA256SUMS",
+            "SHA256SUMS.minisig",
             "ricercar-0.6.0-1-x86_64.pkg.tar.zst",
             "ricercar-0.6.0-1.aarch64.rpm",
             "ricercar-0.6.0-1.x86_64.rpm",
@@ -634,7 +668,43 @@ mod tests {
         assert!(installable(&r, &Install::Package(Manager::Deb, p.clone())));
         let mut no_sums = r.clone();
         no_sums.assets.retain(|a| a.name != "SHA256SUMS");
-        assert!(!installable(&no_sums, &Install::Package(Manager::Deb, p)));
+        assert!(!installable(
+            &no_sums,
+            &Install::Package(Manager::Deb, p.clone())
+        ));
+        let mut unsigned = r.clone();
+        unsigned.assets.retain(|a| a.name != "SHA256SUMS.minisig");
+        assert!(!installable(&unsigned, &Install::Package(Manager::Deb, p)));
+    }
+
+    #[test]
+    fn signed_sums() {
+        // Made with a throwaway key: `minisign -S -t "ricercar v0.6.0"`.
+        let key = "RWTT7JcKBGMASn/t7DYGrglgrCQeSY89SdjSWOY3XWfrCNzAlgRzM53B";
+        let sums = format!("{}  ricercar-0.6.0-x86_64.AppImage\n", "a".repeat(64));
+        let sig = "untrusted comment: signature from minisign secret key
+RUTT7JcKBGMASgX8e2hrmnedR+uWC0zNpyJs4PJNcCK8caXQsWOtiM0gqqxSF0vaqWGixjtx3Qx9B9+xYT44cbf11sch8xSryA0=
+trusted comment: ricercar v0.6.0
+qdAS7jpP6rwrEQuiRdOaiG86j2iMDEeBJ345h8xHcgKccLn/zYZJLq754eJwW3ffkVohVZfKIXXtz/PvT9sOBw==
+";
+        assert!(sums_signed(sums.as_bytes(), sig.as_bytes(), key, "0.6.0"));
+        // Another release, other contents, another key, garbage.
+        assert!(!sums_signed(sums.as_bytes(), sig.as_bytes(), key, "0.7.0"));
+        let forged = sums.replace('a', "b");
+        assert!(!sums_signed(
+            forged.as_bytes(),
+            sig.as_bytes(),
+            key,
+            "0.6.0"
+        ));
+        assert!(!sums_signed(
+            sums.as_bytes(),
+            sig.as_bytes(),
+            PUBLIC_KEY,
+            "0.6.0"
+        ));
+        assert!(!sums_signed(sums.as_bytes(), b"nope", key, "0.6.0"));
+        assert!(minisign_verify::PublicKey::from_base64(PUBLIC_KEY).is_ok());
     }
 
     #[test]

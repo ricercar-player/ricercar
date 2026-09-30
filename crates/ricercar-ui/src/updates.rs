@@ -167,6 +167,10 @@ fn install(ui: &Rc<Ui>) {
                         "The download does not match the release checksums; nothing was installed.",
                     )
                     .to_string(),
+                    InstallError::Signature => {
+                        t("The release is not signed with the ricercar key; nothing was installed.")
+                            .to_string()
+                    }
                     InstallError::Network(_) => {
                         t("The download failed. Check the connection and try again.").to_string()
                     }

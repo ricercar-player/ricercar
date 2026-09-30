@@ -116,7 +116,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - **Updates**: a new release or plugin update is shown in the app; Settings →
   About checks on demand and installs the new release (AppImage, or the
   .deb / .rpm / pacman package through your password prompt), checked
-  against its SHA256SUMS
+  against its SHA256SUMS, itself signed with the project's minisign key
 - **English and French** interface, chosen in Settings or from the system
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
@@ -195,6 +195,15 @@ Arch, build it from source with `dist/arch/PKGBUILD`):
 | Fedora, openSUSE, RHEL / Alma / Rocky | `.rpm` | `sudo dnf install ./ricercar-*.rpm` |
 | Arch, Manjaro, EndeavourOS, CachyOS, Omarchy | `.pkg.tar.zst` | `sudo pacman -U ricercar-*.pkg.tar.zst` |
 | Anything else | `.AppImage` | `chmod +x ricercar-*.AppImage && ./ricercar-*.AppImage` |
+
+To check a download, verify the signed checksum list with
+[minisign](https://jedisct1.github.io/minisign/) and the key in
+[`dist/minisign.pub`](dist/minisign.pub), then the file itself:
+
+```sh
+minisign -Vm SHA256SUMS -P RWSLPLWZ/M4/9X1orGjyBkKYA7BmzgxxI8dveJ8YVcSQVrOpjinxS9fV
+sha256sum --check --ignore-missing SHA256SUMS
+```
 
 ### From source
 

@@ -183,6 +183,9 @@ pub fn t(en: &'static str) -> &'static str {
         "Report saved to" => "Rapport enregistré dans",
         "Folder added; indexing…" => "Dossier ajouté ; indexation…",
         "This folder does not exist." => "Ce dossier n'existe pas.",
+        "The release is not signed with the ricercar key; nothing was installed." => {
+            "La version n'est pas signée avec la clé de ricercar ; rien n'a été installé."
+        }
         "Not authorised. Is a polkit authentication agent running?" => {
             "Non autorisé. Un agent d'authentification polkit est-il lancé ?"
         }

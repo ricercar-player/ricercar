@@ -164,6 +164,20 @@ jobs:
           merge-multiple: true
       - name: checksums
         run: cd assets && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      # The in-app updater refuses a release whose SHA256SUMS is not signed
+      # by dist/minisign.pub with the trusted comment "ricercar <tag>".
+      - name: sign
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          key="$RUNNER_TEMP/minisign.key"
+          (umask 077 && printf '%s\n' "$MINISIGN_KEY" > "$key")
+          printf '%s\n' "$MINISIGN_PASSWORD" |
+            minisign -S -s "$key" -m assets/SHA256SUMS -t "ricercar ${GITHUB_REF_NAME}"
+          rm -f "$key"
+          minisign -V -p dist/minisign.pub -m assets/SHA256SUMS
       - name: release
         env:
           GH_TOKEN: ${{ github.token }}
