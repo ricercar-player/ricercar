@@ -41,9 +41,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - **It is a real desktop app.** Album grid, artist pages, synced lyrics,
   queue, playlists, radio and search, native and fast, with no webview and no
   Electron.
-- **It plays what your phone streams.** BubbleUPnP, Symfonium, Linn Kazoo or
-  mConnect push a streaming service, Tidal or your NAS to ricercar the same way they would
-  push to a hi-fi network streamer.
+- **It plays what your phone streams.** Control points such as BubbleUPnP,
+  Symfonium or Linn Kazoo can push your NAS, or a service they support, to
+  ricercar the way they would to a hi-fi network streamer (protocol-tested;
+  real-app reports welcome).
 
 > ricercar is **inspired by QBZ** but is a clean-room project with no QBZ
 > code. The core contains **no private or unofficial streaming-service
@@ -506,7 +507,7 @@ dbus-run-session -- cargo test -p ricercar-mpris
 ## ❓ FAQ
 
 <details>
-<summary><b>Is this a a streaming service / Tidal client?</b></summary>
+<summary><b>Is this a streaming-service client?</b></summary>
 
 No. ricercar itself never talks to a streaming service's API. Your phone
 app, used with your own subscription, sends ricercar a plain stream URL over
@@ -592,6 +593,6 @@ Thanks to the QBZ project for showing what a Linux hi-fi player can be.
 [MIT](LICENSE) © ricercar contributors. See [AUTHORS](AUTHORS).
 
 <sub>ricercar is an independent open-source project. It is **not affiliated
-with, endorsed by, or connected to** the record label *Ricercar* (Outhere),
-a streaming service, or any other streaming service. "Ricercar" is used in its old musical
+with, endorsed by, or connected to** the record label *Ricercar* (Outhere)
+or any streaming service. "Ricercar" is used in its old musical
 sense: a contrapuntal study, literally "to search".</sub>

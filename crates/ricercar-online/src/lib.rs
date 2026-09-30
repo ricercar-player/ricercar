@@ -1,6 +1,6 @@
 //! Online integrations for ricercar, built exclusively on open, documented
-//! public APIs. This crate never talks to a streaming service or any other streaming
-//! service's private API, and bundles no API keys: every credential (Last.fm
+//! public APIs. This crate never talks to a streaming service's private
+//! API, and bundles no API keys: every credential (Last.fm
 //! API key/secret, ListenBrainz token) is supplied by the user via config.
 //!
 //! All network calls are blocking (`ureq`), send the ricercar `User-Agent`
