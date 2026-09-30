@@ -46,7 +46,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   push to a hi-fi network streamer.
 
 > ricercar is **inspired by QBZ** but is a clean-room project with no QBZ
-> code. Like QBZ, it contains **no private or unofficial streaming-service
+> code. The core contains **no private or unofficial streaming-service
 > API**. Catalogues reach it through standard UPnP / OpenHome, with your own
 > subscription in your own app, or through a **source plugin** you install
 > yourself: a separate program the core only talks to through a documented
