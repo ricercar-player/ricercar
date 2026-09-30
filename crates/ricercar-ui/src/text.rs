@@ -164,6 +164,17 @@ pub fn t(en: &'static str) -> &'static str {
         "by" => "par",
         "Update" => "Mettre à jour",
         "Install" => "Installer",
+        "Could not reach GitHub. Check the connection and try again." => {
+            "Impossible de joindre GitHub. Vérifiez la connexion et réessayez."
+        }
+        "Update cancelled." => "Mise à jour annulée.",
+        "The download does not match the release checksums; nothing was installed." => {
+            "Le téléchargement ne correspond pas aux sommes de contrôle de la version ; rien n'a été installé."
+        }
+        "The download failed. Check the connection and try again." => {
+            "Le téléchargement a échoué. Vérifiez la connexion et réessayez."
+        }
+        "The update could not be installed." => "La mise à jour n'a pas pu être installée.",
         "Installed" => "Installé",
         "Removed" => "Retiré",
         "this computer" => "cet ordinateur",

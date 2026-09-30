@@ -443,6 +443,19 @@ export global App {
     in property <string> update-url;
     callback update-open();
     callback update-dismiss();
+    // the sidebar notice: go to Settings → About
+    callback update-show();
+    // About → Updates: 0 idle, 1 checking, 2 up to date, 3 available,
+    // 4 installing, 5 installed (restart), 6 failed (update-error)
+    in property <int> update-stage;
+    // the newer release, even when its sidebar notice was closed
+    in property <string> update-latest;
+    // ricercar can install it itself (else: its release page)
+    in property <bool> update-direct;
+    in property <string> update-error;
+    callback update-check();
+    callback update-install();
+    callback update-restart();
     in-out property <bool> updates-online;
     in property <[CatalogRow]> catalog-rows;
     in property <string> catalog-status;

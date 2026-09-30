@@ -113,7 +113,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   declared by hand (browse, search, sign-in in your browser); their albums,
   artists and tracks join your library pages and search; playback stays
   bit-perfect
-- **Update notices**: a new release or plugin update is shown in the app
+- **Updates**: a new release or plugin update is shown in the app; Settings →
+  About checks on demand and installs the new release (AppImage, or the
+  .deb / .rpm / pacman package through your password prompt), checked
+  against its SHA256SUMS
 - **English and French** interface, chosen in Settings or from the system
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
@@ -399,6 +402,7 @@ ricercar works fully offline. Its optional online features contact only:
 | GitHub (raw.githubusercontent.com) | community plugin catalogue | opening the Plugins page · Settings → Online extras |
 | a plugin author's download host | the plugin binary | only when you click Install or Update |
 | GitHub (api.github.com, raw.githubusercontent.com) | new ricercar release, plugin updates (at most once a day at startup) | Settings → Online extras → Updates |
+| GitHub (github.com release files) | the new ricercar release | only when you click Check for updates or Update now (Settings → About) |
 
 No telemetry, no account, and never a streaming-service API in ricercar
 itself. Plugins you declare are separate programs: what they contact is up

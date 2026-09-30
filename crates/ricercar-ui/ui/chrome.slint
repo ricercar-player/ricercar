@@ -236,7 +236,7 @@ export component Sidebar inherits Rectangle {
                 }
             }
         }
-        // A newer ricercar: its release page, or close the notice.
+        // A newer ricercar: Settings → About to install it, or close the notice.
         if App.update-version != "": Rectangle {
             border-radius: Theme.r-md;
             background: ut.has-hover ? Theme.hover : Theme.raised;
@@ -255,12 +255,12 @@ export component Sidebar inherits Rectangle {
                         color: Theme.text;
                         wrap: word-wrap;
                     }
-                    Text { text: @tr("What's new"); font-size: Theme.fs-xs; color: Theme.accent; }
+                    Text { text: App.update-direct ? @tr("Update now") : @tr("What's new"); font-size: Theme.fs-xs; color: Theme.accent; }
                 }
             }
             ut := TouchArea {
                 mouse-cursor: pointer;
-                clicked => { App.update-open(); }
+                clicked => { App.update-show(); }
             }
             IconButton {
                 x: parent.width - self.width - 4px;

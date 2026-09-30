@@ -578,6 +578,31 @@ export component SettingsPage inherits PageScroll {
             }
             Divider { }
             Row {
+                label: @tr("Software update");
+                hint: App.update-stage == 1 ? @tr("Checking…")
+                    : App.update-stage == 2 ? @tr("ricercar is up to date.")
+                    : App.update-stage == 3 ? (App.update-direct ? @tr("ricercar {} is available.", App.update-latest) : @tr("ricercar {} is available. Download it from its release page.", App.update-latest))
+                    : App.update-stage == 4 ? @tr("Downloading and installing ricercar {}…", App.update-latest)
+                    : App.update-stage == 5 ? @tr("ricercar {} is installed. Restart ricercar to use it.", App.update-latest)
+                    : App.update-stage == 6 ? App.update-error
+                    : @tr("Ask GitHub whether a newer ricercar is out.");
+                if App.update-stage == 3: Button { text: @tr("What's new"); clicked => { App.update-open(); } }
+                if App.update-stage == 3: Button {
+                    text: App.update-direct ? @tr("Update now") : @tr("Download");
+                    icon: Icons.download;
+                    primary: true;
+                    clicked => { App.update-install(); }
+                }
+                if App.update-stage == 5: Button { text: @tr("Restart"); icon: Icons.refresh-cw; primary: true; clicked => { App.update-restart(); } }
+                if App.update-stage == 6 && App.update-latest != "": Button { text: @tr("What's new"); clicked => { App.update-open(); } }
+                if App.update-stage == 0 || App.update-stage == 2 || App.update-stage == 6: Button {
+                    text: @tr("Check for updates");
+                    icon: Icons.refresh-cw;
+                    clicked => { App.update-check(); }
+                }
+            }
+            Divider { }
+            Row {
                 label: @tr("Diagnostic report");
                 hint: @tr("For compatibility reports. Secrets are hidden.");
                 Button { text: @tr("Open logs folder"); icon: Icons.folder-open; clicked => { App.open-logs(); } }

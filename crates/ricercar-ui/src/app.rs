@@ -609,6 +609,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     let _ = window.hide();
     ctx.shutdown();
     UI.with(|u| *u.borrow_mut() = None);
+    crate::updates::restart_if_asked();
     Ok(())
 }
 

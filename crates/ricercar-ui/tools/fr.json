@@ -254,5 +254,16 @@
 "Read the list of community plugins from GitHub when you open the Plugins page.": "Lire la liste des plugins communautaires sur GitHub à l'ouverture de la page Plugins.",
 "Repository": "Dépôt",
 "Update": "Mettre à jour",
-"{n} plugin": ["{n} plugin", "{n} plugins"]
+"{n} plugin": ["{n} plugin", "{n} plugins"],
+"Software update": "Mise à jour du logiciel",
+"ricercar is up to date.": "ricercar est à jour.",
+"ricercar {} is available.": "ricercar {} est disponible.",
+"ricercar {} is available. Download it from its release page.": "ricercar {} est disponible. Téléchargez-le depuis sa page de version.",
+"Downloading and installing ricercar {}…": "Téléchargement et installation de ricercar {}…",
+"ricercar {} is installed. Restart ricercar to use it.": "ricercar {} est installé. Redémarrez ricercar pour l'utiliser.",
+"Ask GitHub whether a newer ricercar is out.": "Demander à GitHub si une version plus récente de ricercar est sortie.",
+"Update now": "Mettre à jour",
+"Download": "Télécharger",
+"Restart": "Redémarrer",
+"Check for updates": "Rechercher des mises à jour"
 }
