@@ -142,6 +142,11 @@ pub struct PluginHost {
     inner: Arc<Inner>,
 }
 
+/// Methods that change something on the service: never retried.
+fn changes_something(method: &str) -> bool {
+    method.starts_with("playlists.") || method == "favorites.set"
+}
+
 /// The system locale (LC_ALL > LC_MESSAGES > LANG), as a BCP 47 tag.
 fn system_locale() -> Option<String> {
     let lang = ["LC_ALL", "LC_MESSAGES", "LANG"]
@@ -715,7 +720,9 @@ impl PluginHost {
         let mut r = rpc
             .call(method, params.clone(), timeout)
             .map_err(map_call_error);
-        if r == Err(PluginError::Network) {
+        // A second try only for reads: a failed write may still have
+        // happened on the service, and sending it again could duplicate it.
+        if r == Err(PluginError::Network) && !changes_something(method) {
             r = rpc.call(method, params, timeout).map_err(map_call_error);
         }
         match &r {
@@ -1357,6 +1364,9 @@ impl PluginHost {
         // (queue item id, plugin id, ref) of the item being reported.
         let mut reported: Option<(u64, String, String)> = None;
         let mut listened_ms = 0u64;
+        // Duration and furthest position of the reported item: a queue that
+        // plays to its end stops the transport, which is still an end.
+        let (mut reported_dur, mut reported_pos) = (0u64, 0u64);
         let mut last_tick = Instant::now();
         let mut last_progress = Instant::now();
         let mut last_state = Instant::now();
@@ -1370,7 +1380,7 @@ impl PluginHost {
             let Some(ctl) = self.inner.ctl.read().unwrap().upgrade() else {
                 return;
             };
-            let (status, cur, origin, pos, dur, vol, muted) = {
+            let (status, cur, origin, pos, dur, vol, muted, finished) = {
                 let st = ctl.lock();
                 (
                     st.status,
@@ -1380,6 +1390,7 @@ impl PluginHost {
                     st.dur_ms,
                     st.volume,
                     st.muted,
+                    st.last_finished,
                 )
             };
             let playing = status == TransportStatus::Playing;
@@ -1397,15 +1408,22 @@ impl PluginHost {
                     Some((*qid, pid, r))
                 });
             let changed = reported.as_ref().map(|r| r.0) != now_item.as_ref().map(|n| n.0);
+            if !changed && reported.is_some() {
+                reported_dur = reported_dur.max(dur);
+                reported_pos = reported_pos.max(pos);
+            }
             if changed {
-                if let Some((_, pid, r)) = reported.take() {
-                    let reason = if status == TransportStatus::Stopped {
-                        "stopped"
-                    } else if dur > 0 && listened_ms + 3_000 >= dur {
-                        "ended"
-                    } else {
-                        "skipped"
-                    };
+                if let Some((qid, pid, r)) = reported.take() {
+                    let near_end = |ms: u64| reported_dur > 0 && ms + 3_000 >= reported_dur;
+                    let reason =
+                        if finished == Some(qid) || near_end(listened_ms) || near_end(reported_pos)
+                        {
+                            "ended"
+                        } else if status == TransportStatus::Stopped {
+                            "stopped"
+                        } else {
+                            "skipped"
+                        };
                     self.report(
                         &pid,
                         "playback.ended",
@@ -1413,6 +1431,7 @@ impl PluginHost {
                     );
                 }
                 listened_ms = 0;
+                (reported_dur, reported_pos) = (0, 0);
                 last_progress = Instant::now();
                 if let Some((qid, pid, r)) = now_item {
                     self.report(&pid, "playback.started", json!({ "ref": r }));

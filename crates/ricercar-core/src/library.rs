@@ -58,6 +58,12 @@ pub struct Track {
     /// their file).
     #[serde(default)]
     pub art: Option<String>,
+    /// Plugin tracks: their album and artist refs (see `TrackInfo`), so a
+    /// track played from a list keeps them in the queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist_ref: Option<String>,
 }
 
 impl Track {
@@ -84,6 +90,8 @@ impl Track {
             bits: info.bits,
             codec: info.codec.clone(),
             art: info.cover.clone(),
+            album_ref: info.album_ref.clone(),
+            artist_ref: info.artist_ref.clone(),
             ..Default::default()
         }
     }
@@ -392,6 +400,8 @@ fn row_to_track(r: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
         favorite: r.get::<_, i64>(22)? != 0,
         play_count: r.get(23)?,
         art: None,
+        album_ref: None,
+        artist_ref: None,
     })
 }
 

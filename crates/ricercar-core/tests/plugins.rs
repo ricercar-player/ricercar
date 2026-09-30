@@ -258,6 +258,12 @@ fn resolve_then_play_with_gapless_preload() {
     assert_eq!(rig.count("track.resolve track/2 preload"), 1);
     assert_eq!(rig.count("track.resolve track/2 play"), 0);
     assert!(rig.wait_log("playback.ended track/3"));
+    // The queue ran out on the last track: that is an end, not a stop.
+    assert!(
+        rig.wait_log(r#"playback.reason track/3 "ended""#),
+        "{}",
+        rig.log()
+    );
     let st = ctl.lock();
     assert_eq!(
         st.current_item().unwrap().info.uri,
@@ -663,6 +669,12 @@ fn playlist_editing() {
     h.playlist_remove("demo", &p, &entries[1..]).unwrap();
     assert_eq!(h.browse_list("demo", &p, 0, 50).unwrap().0.len(), 1);
     h.playlist_rename("demo", &p, "Road trip II").unwrap();
+    // A failed write is not sent again: it may have happened on the service.
+    assert_eq!(
+        h.playlist_rename("demo", &p, "offline").err(),
+        Some(PluginError::Network)
+    );
+    assert_eq!(rig.count(&format!("playlists.rename {p} offline")), 1);
     let gone = h.playlist_delete("demo", &p).unwrap();
     assert_eq!(gone.playlists.unwrap().len(), 2);
     assert!(rig.wait_log("playlists.delete playlist/3"));

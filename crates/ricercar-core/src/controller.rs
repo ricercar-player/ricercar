@@ -72,6 +72,8 @@ impl From<&Track> for TrackInfo {
                 sample_rate: t.sample_rate,
                 bits: t.bits,
                 codec: t.codec.clone(),
+                album_ref: t.album_ref.clone(),
+                artist_ref: t.artist_ref.clone(),
                 ..Default::default()
             };
         }
@@ -256,6 +258,8 @@ pub struct CtlState {
     pub delivery: Option<Delivery>,
     /// Continuous playback is asking the plugin for more tracks.
     pub radio_pending: bool,
+    /// Queue id of the last item the engine played to its very end.
+    pub last_finished: Option<u64>,
 }
 
 impl CtlState {
@@ -406,6 +410,7 @@ impl Controller {
                 resolving: None,
                 delivery: None,
                 radio_pending: false,
+                last_finished: None,
             })),
             pending: Arc::new(Mutex::new(Pending::default())),
             events: Arc::new(EventHub::default()),
@@ -512,6 +517,10 @@ impl Controller {
                                 bridge.lock_state().stream_title = Some(title.clone());
                                 events.publish(CtlEvent::StreamTitle(title));
                             }
+                            Some(EngineEvent::TrackEnded {
+                                uri,
+                                reason: ricercar_audio::EndReason::Finished,
+                            }) => bridge.on_track_finished(&uri),
                             Some(EngineEvent::TrackEnded { .. }) | None => {}
                         }
                         let save_due = last_save.elapsed() >= Duration::from_secs(10);
@@ -1532,6 +1541,28 @@ impl Bridge {
     }
 
     /// Queue item the engine is playing when it reports `uri`.
+    /// The engine played `uri` to its end: remember which queue item it
+    /// was (plugin items play from their resolved URL).
+    fn on_track_finished(&self, uri: &str) {
+        let by_url: Vec<u64> = self
+            .lock_pending()
+            .resolved
+            .iter()
+            .filter(|(_, r)| r.url == uri)
+            .map(|(id, _)| *id)
+            .collect();
+        let mut st = self.lock_state();
+        let matches = |q: &QueueItem| q.info.uri == uri || by_url.contains(&q.id);
+        let id = st
+            .current_item()
+            .filter(|q| matches(q))
+            .or_else(|| st.queue.iter().find(|q| matches(q)))
+            .map(|q| q.id);
+        if id.is_some() {
+            st.last_finished = id;
+        }
+    }
+
     fn on_track_started(&self, uri: &str, format: Option<ricercar_audio::PcmFormat>) {
         let (armed, seek, by_url) = {
             let mut p = self.lock_pending();

@@ -199,7 +199,7 @@ fn schema(signed_in: bool) -> Value {
     json!([
         {"key": "report_playback", "type": "bool", "section": "Playback",
          "label": "Report what I play",
-         "description": "Tell the service which tracks you listen to.",
+         "description": "Tell the service which tracks you listen to, and when. The service keeps this history on your account and may use it for its recommendations and statistics. Nothing is sent while this is off; what was already sent stays on the service.",
          "default": true},
         {"key": "quality", "type": "choice", "section": "Playback",
          "label": "Streaming quality",
@@ -381,7 +381,7 @@ fn details(st: &State, r: &str) -> Option<Value> {
     if r == "artist/1" {
         return Some(json!({
             "biography": {
-                "text": "Demo Ensemble records short test pieces for ricercar.\n\nEvery track lasts one second.",
+                "text": "Demo Ensemble records short test pieces for ricercar. The group formed to give a music player something to play while it is being built: every track lasts one second, every album cover is the same colour, and every sample lands exactly where it should.\n\nTheir first record, Demo Sessions, is in CD quality. Night Studies followed three years later in high resolution, so the signal path has something to show, with one track that cannot be played on purpose.\n\nThe ensemble never tours. It lives on 127.0.0.1 and answers only to the sign-in code DEMO.",
                 "source": "Demo Music"
             },
             "related": [
@@ -608,6 +608,9 @@ fn main() {
                 _ => {
                     let r = params.get("ref").and_then(Value::as_str).unwrap_or("");
                     st.log(format!("{method} {r}").trim_end());
+                    if method == "playback.ended" {
+                        st.log(&format!("playback.reason {r} {}", params["reason"]));
+                    }
                 }
             }
             continue;
@@ -834,10 +837,15 @@ fn main() {
                 "playlists.rename" => {
                     let name = params["name"].as_str().unwrap_or("").to_string();
                     st.log(&format!("playlists.rename {r} {name}"));
-                    st.editable(&r).map(|p| {
-                        p.title = name;
-                        Value::Null
-                    })
+                    if name == "offline" {
+                        // The service failed; the rename may or may not have happened.
+                        Err(err(-32005, "no network"))
+                    } else {
+                        st.editable(&r).map(|p| {
+                            p.title = name;
+                            Value::Null
+                        })
+                    }
                 }
                 "playlists.delete" => {
                     st.log(&format!("playlists.delete {r}"));

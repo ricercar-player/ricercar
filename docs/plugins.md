@@ -289,7 +289,8 @@ Every entry a plugin returns is an **item**:
   included.
 - `favorite` lets the host show a filled or empty heart for plugins that
   declare `favorites`, and update it after `favorites.set`. Absent, the
-  host shows no state.
+  host shows no state; a plugin that knows an item is not a favourite sends
+  `false`, so the empty heart shows.
 - `actions` opens related content without a method per case: an artist's
   radio, similar albums, a label's catalogue. `kind: "play"`: the host reads
   `browse.list` on `ref` (up to 500 playable tracks) and queues them,
@@ -298,7 +299,8 @@ Every entry a plugin returns is an **item**:
   the `locale` of `initialize`; `id` names the action (≤ 64 characters).
   The host shows at most 8 actions per item, below its own, and drops
   entries with an unknown `kind`, an empty or overlong label (80
-  characters) or a bad `ref`.
+  characters) or a bad `ref`. An `actions` that is not a list (a string,
+  an object) counts as no actions, without a warning.
 
 ## Browsing and search
 
@@ -307,7 +309,7 @@ Every entry a plugin returns is an **item**:
 | `browse.root` | `{sections: [item], home?: [item]}`. `sections`: top-level entries shown under the plugin's name in the sidebar (e.g. "Favourites", "Playlists", "New releases"). `home` (optional, used with `library`): entries shown as shelves on the host's Home page (e.g. "New releases"); the host shows the first page of each. |
 | `browse.list {ref, offset, limit}` | `{items: [item], total?, has_more}`. Children of a browsable item. Pages of at most 200. |
 | `search {query, kinds?, offset, limit}` | `{groups: [{kind, items, total?, has_more}]}` |
-| `item.get {ref}` | One item, fresh. Used to refresh metadata of restored sessions. |
+| `item.get {ref}` | One item, fresh. Used to refresh metadata of restored sessions, and to check that a playlist is editable. The host only calls it with the `ref` of items the plugin listed (tracks, albums, artists, playlists); refs that only appear in `actions`, `album_ref`, `artist_ref` or `label_ref` are opened with `browse.list` and need not work with `item.get`. |
 | `favorites.set {ref, on}` | Only with the `favorites` capability. |
 
 The host caches nothing beyond the current page and the cover images,
@@ -398,7 +400,10 @@ page, and it has no sidebar section of its own. A plugin that only declares
 With the `reporting` capability, the host sends these notifications:
 - `playback.started {ref}`
 - `playback.progress {ref, pos_ms}` (every 30 s)
-- `playback.ended {ref, listened_ms, reason}`
+- `playback.ended {ref, listened_ms, reason}`: `reason` is `ended` when
+  the item played to within 3 s of its end (also when the queue stops
+  there), `skipped` when the user moved on earlier, `stopped` when playback
+  was stopped earlier.
 
 Some services require them for royalty accounting. Scrobbling stays a host
 feature and works for plugin tracks from their metadata.
@@ -445,6 +450,8 @@ tracks before LRCLIB (tags and `.lrc` files are for local files only):
   the user allows it, and remembers the `not_found` for a day.
 - Answer within 5 s. On a timeout or any other error the host goes on with
   LRCLIB and asks again next time.
+- With both `synced` and `plain`, the host shows `synced`; `plain` is only
+  used when there are no synced lines. Sending both is fine.
 - The host sorts `synced` by time and keeps at most 5000 lines of 500
   characters. Text is plain text. Lyrics found are cached on disk under the
   track's `plugin://` URI.
@@ -462,7 +469,7 @@ playlists on the service, and add or remove tracks, from ricercar.
 | `playlists.delete` | `{ref}` | `null` |
 | `playlists.add` | `{ref, items: [ref]}` | `null`: tracks appended |
 | `playlists.remove` | `{ref, entries: [entry_id]}` | `null` |
-| `playlists.move` (optional) | `{ref, entry, to}` | `null`: the entry moves to position `to` (0-based, in the list before the move) |
+| `playlists.move` (optional) | `{ref, entry, to}` | `null`: the entry is taken out, then put back at position `to`, 0-based and counted once the entry is out; a `to` at or past the end puts it last. `[A,B,C,D]`, A to 2: `[B,C,A,D]` |
 
 - `editable: true` marks the playlists the user owns, as opposed to those
   they follow. The host offers editing on those only, never calls an edit
@@ -496,8 +503,9 @@ than the item: a biography, shelves of related items, facts.
 }}
 ```
 
-- Asked after the page shows, without holding it up. `not_found` or an
-  error: the page stays as it is.
+- Asked after the page shows, without holding it up. `not_found`, an
+  empty answer (`{}`) and an error all leave the page as it is: `{}` and
+  `not_found` are equivalent.
 - Everything is plain text: the plugin strips any markup itself. Titles
   and labels come in the `locale` of `initialize`.
 - The host keeps a biography of 20 000 characters, 10 shelves of 50 items
@@ -586,6 +594,9 @@ Every entry has:
   entries are kept.
 - Labels are shown as sent: plugins translate them themselves, from
   `locale` in `initialize`.
+- Text longer than these limits is cut, without a warning: `label` and
+  option labels 200 characters, `description` 1000, `section` 80,
+  `placeholder` 200, `unit` 20, `key` 64 (a longer key drops the entry).
 - The plugin may send `settings.declared {"settings": [...]}`
   (notification) at any time to replace its declaration, for example when
   the choices depend on the signed-in account. The dialog follows.
@@ -627,7 +638,7 @@ to a UI message and never shows raw text from the plugin as HTML.
 | -32002 | `not_found` | Grey the item out. |
 | -32003 | `unavailable` | "Not available (region, subscription or format)". Skip to the next track when playing. |
 | -32004 | `rate_limited` | `data.retry_after` in seconds (capped at 3600). Back off. |
-| -32005 | `network` | Retry once, then show an offline state. |
+| -32005 | `network` | Reads are retried once, then an offline state shows. Methods that change something (`playlists.*`, `favorites.set`) are never retried, since the change may have happened: the host reports the failure and the user tries again. |
 
 ## Changes in ricercar
 
