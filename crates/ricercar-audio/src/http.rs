@@ -23,6 +23,10 @@ use crate::error::{AudioError, Result};
 const CHUNK: usize = 64 * 1024;
 /// Live streams: at most this much read ahead of the decoder.
 const LIVE_BUFFER: usize = 8 * 1024 * 1024;
+/// Largest body spooled to disk; bigger ones are played forward-only.
+const SPOOL_MAX: u64 = 2 * 1024 * 1024 * 1024;
+/// Disk space always left free by the spool.
+const SPOOL_MARGIN: u64 = 512 * 1024 * 1024;
 
 pub struct HttpSource {
     pub source: Box<dyn MediaSource + Send + 'static>,
@@ -63,7 +67,7 @@ pub fn open(uri: &str) -> Result<HttpSource> {
         .filter(|_| identity && metaint.is_none());
     let body: Box<dyn Read + Send> = Box::new(resp.into_reader());
 
-    match len {
+    match len.filter(|&n| n <= spool_limit(free_space(&spool_dir()))) {
         Some(len) => Ok(HttpSource {
             source: Box::new(SpoolReader::start(body, len)?),
             seekable: true,
@@ -97,6 +101,26 @@ pub fn spool_dir() -> PathBuf {
         return dir;
     }
     std::env::temp_dir()
+}
+
+/// Bytes a single spool may take given the free space of its filesystem.
+fn spool_limit(free: Option<u64>) -> u64 {
+    free.map_or(SPOOL_MAX, |f| f.saturating_sub(SPOOL_MARGIN).min(SPOOL_MAX))
+}
+
+// The statvfs field widths vary between targets.
+#[allow(clippy::unnecessary_cast)]
+fn free_space(dir: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut st = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and `st` is a valid out pointer.
+    if unsafe { libc::statvfs(path.as_ptr(), st.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: statvfs succeeded and filled `st`.
+    let st = unsafe { st.assume_init() };
+    Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64))
 }
 
 /// Remove spool files left behind by processes that no longer exist
@@ -166,6 +190,7 @@ impl SpoolReader {
             .spawn(move || {
                 use std::io::Write;
                 let mut buf = vec![0u8; CHUNK];
+                let mut written = 0u64;
                 let outcome = loop {
                     if sh.cancel.load(Ordering::Relaxed) {
                         break Ok(());
@@ -173,11 +198,17 @@ impl SpoolReader {
                     match body.read(&mut buf) {
                         Ok(0) => break Ok(()),
                         Ok(n) => {
+                            // Never spool more than the announced length.
+                            let n = (n as u64).min(len - written) as usize;
                             if let Err(e) = writer.write_all(&buf[..n]) {
                                 break Err(format!("spool write: {e}"));
                             }
-                            lock(&sh.progress).downloaded += n as u64;
+                            written += n as u64;
+                            lock(&sh.progress).downloaded = written;
                             sh.cv.notify_all();
+                            if written == len {
+                                break Ok(());
+                            }
                         }
                         Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                         Err(e) => break Err(format!("http read: {e}")),
@@ -387,6 +418,12 @@ impl LiveReader {
                             }
                         }
                         Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                        // Closed before the announced length: end the stream
+                        // like a plain close, so the decoder keeps what it has.
+                        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                            tracing::debug!("live stream closed early: {e}");
+                            break;
+                        }
                         Err(e) => {
                             let _ = tx.send(Err(e));
                             break;
@@ -508,6 +545,24 @@ mod tests {
         assert_eq!(all, data);
         drop(r);
         assert!(!path.exists(), "spool file removed on drop");
+    }
+
+    #[test]
+    fn spool_is_capped_by_size_and_free_space() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(spool_limit(None), SPOOL_MAX);
+        assert_eq!(spool_limit(Some(100 * GIB)), SPOOL_MAX);
+        assert_eq!(spool_limit(Some(GIB)), GIB - SPOOL_MARGIN);
+        assert_eq!(spool_limit(Some(SPOOL_MARGIN / 2)), 0);
+        assert!(free_space(&std::env::temp_dir()).is_some());
+    }
+
+    #[test]
+    fn spool_stops_at_the_announced_length() {
+        let mut r = SpoolReader::start(Box::new(io::Cursor::new(vec![7u8; 5000])), 1000).unwrap();
+        let mut v = Vec::new();
+        assert_eq!(r.read_to_end(&mut v).unwrap(), 1000);
+        assert_eq!(std::fs::metadata(&r.path).unwrap().len(), 1000);
     }
 
     #[test]

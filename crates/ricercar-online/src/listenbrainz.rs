@@ -13,10 +13,19 @@ pub const API_BASE: &str = "https://api.listenbrainz.org";
 /// payload size, so stay well below.
 pub const MAX_BATCH: usize = 100;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ListenBrainz {
     token: String,
     base: String,
+}
+
+impl std::fmt::Debug for ListenBrainz {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ListenBrainz")
+            .field("token", &"<redacted>")
+            .field("base", &self.base)
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
@@ -145,6 +154,12 @@ fn non_empty(s: &Option<String>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_token() {
+        let dbg = format!("{:?}", ListenBrainz::new("hush-token"));
+        assert!(!dbg.contains("hush"), "{dbg}");
+    }
 
     fn track() -> ScrobbleTrack {
         ScrobbleTrack {

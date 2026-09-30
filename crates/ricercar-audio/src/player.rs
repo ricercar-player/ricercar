@@ -1,3 +1,4 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver as StdReceiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -240,7 +241,11 @@ pub fn spawn_player_with_sink(sink: Box<dyn AudioSink>) -> PlayerHandle {
         pos_frames: 0,
         last_pos_emit: Instant::now(),
     };
-    let alive_t = AliveGuard(alive.clone());
+    let alive_t = AliveGuard {
+        alive: alive.clone(),
+        hub: hub.clone(),
+        state: state.clone(),
+    };
     std::thread::Builder::new()
         .name("ricercar-engine".into())
         .spawn(move || {
@@ -257,12 +262,81 @@ pub fn spawn_player_with_sink(sink: Box<dyn AudioSink>) -> PlayerHandle {
     }
 }
 
-/// Clears the alive flag however the engine thread exits (even by panic).
-struct AliveGuard(Arc<AtomicBool>);
+/// Clears the alive flag however the engine thread exits; a panic that got
+/// past the engine's own recovery is reported as a stop with an error.
+struct AliveGuard {
+    alive: Arc<AtomicBool>,
+    hub: Arc<EventHub>,
+    state: Arc<Mutex<PlayerShared>>,
+}
 
 impl Drop for AliveGuard {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Relaxed);
+        self.alive.store(false, Ordering::Relaxed);
+        if std::thread::panicking() {
+            {
+                let mut st = lock(&self.state);
+                st.status = TransportStatus::Stopped;
+                st.track_uri = None;
+                st.next_uri = None;
+            }
+            self.hub.publish(EngineEvent::Error {
+                message: "audio engine stopped after an internal fault".into(),
+                uri: None,
+                http_status: None,
+            });
+            self.hub.publish(EngineEvent::Status {
+                status: TransportStatus::Stopped,
+            });
+        }
+    }
+}
+
+fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".into())
+}
+
+/// Why a track could not be opened, reported when the engine takes it up.
+struct OpenFailure {
+    message: String,
+    uri: Option<String>,
+    http_status: Option<u16>,
+}
+
+type Opened = std::result::Result<TrackSource, OpenFailure>;
+
+/// Open and prime a track; a panicking demuxer or decoder is an error like
+/// any other, not the end of the engine.
+fn open_source(uri: &str) -> Opened {
+    let opened = catch_unwind(AssertUnwindSafe(|| {
+        TrackSource::open(uri).map(|mut src| {
+            let ok = prime(&mut src);
+            (src, ok)
+        })
+    }));
+    match opened {
+        Ok(Ok((src, true))) => Ok(src),
+        Ok(Ok((_, false))) => Err(OpenFailure {
+            message: format!("cannot decode {uri}"),
+            uri: None,
+            http_status: None,
+        }),
+        Ok(Err(e)) => Err(OpenFailure {
+            message: format!("{uri}: {e}"),
+            uri: Some(uri.to_string()),
+            http_status: match &e {
+                AudioError::HttpStatus { status, .. } => Some(*status),
+                _ => None,
+            },
+        }),
+        Err(p) => Err(OpenFailure {
+            message: format!("{uri}: decoder fault: {}", panic_message(p.as_ref())),
+            uri: Some(uri.to_string()),
+            http_status: None,
+        }),
     }
 }
 
@@ -284,6 +358,8 @@ fn chain_of(
 
 enum NextSource {
     Pending(String),
+    /// Being opened on a worker thread, off the audio path.
+    Opening(String, Receiver<Opened>),
     Open(TrackSource),
 }
 
@@ -308,31 +384,50 @@ struct Engine {
 impl Engine {
     fn run(mut self, rx: Receiver<EngineCommand>) {
         loop {
-            if self.status == TransportStatus::Playing {
-                // Apply everything queued before producing more audio, so a
-                // `load` + `seek`/`pause` burst takes effect atomically.
-                loop {
-                    match rx.try_recv() {
-                        Ok(cmd) => self.handle(cmd),
-                        Err(TryRecvError::Empty) => break,
-                        Err(TryRecvError::Disconnected) => return self.shutdown(),
-                    }
-                }
-                if self.status == TransportStatus::Playing {
-                    self.pump();
-                    if self.last_pos_emit.elapsed() >= POSITION_EVERY {
-                        self.emit_position();
-                    }
-                }
-            } else {
-                // Paused / stopped: sleep on the command channel.
-                match rx.recv_timeout(Duration::from_secs(1)) {
-                    Ok(cmd) => self.handle(cmd),
-                    Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => return self.shutdown(),
-                }
+            match catch_unwind(AssertUnwindSafe(|| self.step(&rx))) {
+                Ok(true) => {}
+                Ok(false) => return self.shutdown(),
+                Err(p) => self.recover(&panic_message(p.as_ref())),
             }
         }
+    }
+
+    /// One round of the engine loop; false once the handle is gone.
+    fn step(&mut self, rx: &Receiver<EngineCommand>) -> bool {
+        if self.status == TransportStatus::Playing {
+            // Apply everything queued before producing more audio, so a
+            // `load` + `seek`/`pause` burst takes effect atomically.
+            loop {
+                match rx.try_recv() {
+                    Ok(cmd) => self.handle(cmd),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return false,
+                }
+            }
+            if self.status == TransportStatus::Playing {
+                self.pump();
+                if self.last_pos_emit.elapsed() >= POSITION_EVERY {
+                    self.emit_position();
+                }
+            }
+        } else {
+            // Paused / stopped: sleep on the command channel.
+            match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(cmd) => self.handle(cmd),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return false,
+            }
+        }
+        true
+    }
+
+    /// Something panicked mid-step: drop the track and go back to a clean
+    /// stopped state, ready for the next command.
+    fn recover(&mut self, what: &str) {
+        self.error(format!("audio engine fault: {what}; playback stopped"));
+        self.next = None;
+        self.end_current(EndReason::Error);
+        self.go_stopped(false);
     }
 
     fn shutdown(&mut self) {
@@ -361,6 +456,7 @@ impl Engine {
                     if let Err(e) = self.sink.pause() {
                         return self.sink_failed(e);
                     }
+                    self.rewind_dropped();
                     self.set_status(TransportStatus::Paused);
                 }
             }
@@ -491,29 +587,85 @@ impl Engine {
     // ------------------------------------------------------------ tracks
 
     fn open_track(&self, uri: &str) -> Option<TrackSource> {
-        let mut src = match TrackSource::open(uri) {
-            Ok(t) => t,
-            Err(e) => {
-                let message = format!("{uri}: {e}");
-                tracing::warn!("{message}");
-                let http_status = match &e {
-                    AudioError::HttpStatus { status, .. } => Some(*status),
-                    _ => None,
-                };
+        self.accept(open_source(uri))
+    }
+
+    fn accept(&self, opened: Opened) -> Option<TrackSource> {
+        match opened {
+            Ok(src) => Some(src),
+            Err(f) => {
+                tracing::warn!("{}", f.message);
                 self.hub.publish(EngineEvent::Error {
-                    message,
-                    uri: Some(uri.to_string()),
-                    http_status,
+                    message: f.message,
+                    uri: f.uri,
+                    http_status: f.http_status,
                 });
-                return None;
+                None
             }
-        };
-        if prime(&mut src) {
-            Some(src)
-        } else {
-            self.error(format!("cannot decode {uri}"));
-            None
         }
+    }
+
+    /// Start opening the pending next track on a worker thread (network
+    /// sources may take seconds to connect; the device buffer does not).
+    fn preopen_next(&mut self) {
+        let Some((NextSource::Pending(uri), opts)) = self.next.take() else {
+            return;
+        };
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let u = uri.clone();
+        let spawned = std::thread::Builder::new()
+            .name("ricercar-preopen".into())
+            .spawn(move || {
+                let _ = tx.send(open_source(&u));
+            });
+        self.next = Some(match spawned {
+            Ok(_) => (NextSource::Opening(uri, rx), opts),
+            Err(_) => (NextSource::Pending(uri), opts),
+        });
+    }
+
+    /// Take up the pre-opened next track once the worker is done.
+    fn poll_next(&mut self) {
+        let ready = match &self.next {
+            Some((NextSource::Opening(_, rx), _)) => match rx.try_recv() {
+                Ok(r) => Some(Some(r)),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(None),
+            },
+            _ => None,
+        };
+        let Some(result) = ready else { return };
+        if let Some((NextSource::Opening(uri, _), opts)) = self.next.take() {
+            self.next = match result {
+                Some(r) => self.accept(r).map(|t| (NextSource::Open(t), opts)),
+                None => Some((NextSource::Pending(uri), opts)),
+            };
+        }
+    }
+
+    /// Without hardware pause the device threw queued audio away: move the
+    /// position back to what was heard, and the source with it when it can
+    /// seek, so resuming neither skips audio nor misreports the position.
+    fn rewind_dropped(&mut self) {
+        let dropped = self.sink.take_dropped_frames();
+        if dropped == 0 {
+            return;
+        }
+        self.pos_frames = self.pos_frames.saturating_sub(dropped);
+        if let Some(src) = self.current.as_mut().filter(|s| s.seekable) {
+            let rate = src.format.map_or(44100, |f| f.sample_rate as u64);
+            let ms = self.pos_frames * 1000 / rate;
+            match catch_unwind(AssertUnwindSafe(|| src.seek_ms(ms))) {
+                Ok(Ok(actual)) => {
+                    self.pos_frames = (actual.as_secs_f64() * rate as f64).round() as u64;
+                }
+                Ok(Err(e)) => tracing::warn!("rewind after pause failed: {e}"),
+                Err(p) => {
+                    tracing::warn!("rewind after pause failed: {}", panic_message(p.as_ref()))
+                }
+            }
+        }
+        self.emit_position();
     }
 
     /// Make sure the sink runs at `fmt`; a fresh open drops what is queued,
@@ -578,7 +730,13 @@ impl Engine {
         let Some(src) = self.current.as_mut().filter(|s| s.seekable) else {
             return;
         };
-        match src.seek_ms(ms) {
+        let res = catch_unwind(AssertUnwindSafe(|| src.seek_ms(ms))).unwrap_or_else(|p| {
+            Err(AudioError::Decode(format!(
+                "decoder fault: {}",
+                panic_message(p.as_ref())
+            )))
+        });
+        match res {
             Ok(actual) => {
                 let rate = src.format.map_or(44100.0, |f| f.sample_rate as f64);
                 self.pos_frames = (actual.as_secs_f64() * rate).round() as u64;
@@ -610,13 +768,20 @@ impl Engine {
             _ => false,
         };
         if near_end && matches!(self.next, Some((NextSource::Pending(_), _))) {
-            if let Some((NextSource::Pending(uri), opts)) = self.next.take() {
-                self.next = self.open_track(&uri).map(|t| (NextSource::Open(t), opts));
-            }
-            return;
+            self.preopen_next();
         }
+        self.poll_next();
 
-        if let Err(e) = src.pump() {
+        let Some(src) = self.current.as_mut() else {
+            return;
+        };
+        let pumped = catch_unwind(AssertUnwindSafe(|| src.pump())).unwrap_or_else(|p| {
+            Err(AudioError::Decode(format!(
+                "decoder fault: {}",
+                panic_message(p.as_ref())
+            )))
+        });
+        if let Err(e) = pumped {
             let msg = format!("{}: {e}", src.uri);
             self.error(msg);
             self.end_current(EndReason::Error);
@@ -661,6 +826,11 @@ impl Engine {
         lock(&self.state).next_uri = None;
         let next = match self.next.take() {
             Some((NextSource::Open(t), opts)) => Some((t, opts)),
+            Some((NextSource::Opening(uri, rx), opts)) => match rx.recv() {
+                Ok(r) => self.accept(r),
+                Err(_) => self.open_track(&uri),
+            }
+            .map(|t| (t, opts)),
             Some((NextSource::Pending(uri), opts)) => self.open_track(&uri).map(|t| (t, opts)),
             None => None,
         };

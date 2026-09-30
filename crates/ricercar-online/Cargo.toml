@@ -3,6 +3,7 @@ name = "ricercar-online"
 version = "0.5.2"
 edition = "2024"
 license.workspace = true
+rust-version.workspace = true
 description = "Online integrations for ricercar: scrobbling, lyrics, internet radio, cover art (open APIs only)"
 
 [dependencies]

@@ -20,17 +20,35 @@ pub const AUTH_URL: &str = "https://www.last.fm/api/auth/";
 /// `track.scrobble` accepts at most 50 scrobbles per request.
 pub const MAX_BATCH: usize = 50;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LastFm {
     api_key: String,
     shared_secret: String,
 }
 
+impl std::fmt::Debug for LastFm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LastFm")
+            .field("api_key", &self.api_key)
+            .field("shared_secret", &"<redacted>")
+            .finish()
+    }
+}
+
 /// An authorized session; `key` is long-lived and should be persisted.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub name: String,
     pub key: String,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("name", &self.name)
+            .field("key", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Outcome of a `track.scrobble` call, summed over batches.
@@ -220,6 +238,19 @@ fn parse_scrobble_outcome(v: &Value) -> ScrobbleOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_secrets() {
+        let dbg = format!(
+            "{:?} {:?}",
+            LastFm::new("k", "hush-secret"),
+            Session {
+                name: "n".into(),
+                key: "hush-key".into()
+            }
+        );
+        assert!(!dbg.contains("hush"), "{dbg}");
+    }
 
     fn p(pairs: &[(&str, &str)]) -> Params {
         pairs

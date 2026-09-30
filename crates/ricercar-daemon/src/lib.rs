@@ -49,7 +49,14 @@ impl Args {
                 "--no-upnp" => out.no_upnp = true,
                 "--no-session" => out.no_session = true,
                 "--headless" => out.headless = true,
-                "-h" | "--help" => return Err(usage()),
+                "-h" | "--help" => {
+                    println!("{}", usage());
+                    std::process::exit(0);
+                }
+                "-V" | "--version" => {
+                    println!("{}", version());
+                    std::process::exit(0);
+                }
                 other if !other.starts_with('-') => out.open.push(other.to_string()),
                 other => return Err(format!("unknown argument: {other}\n{}", usage())),
             }
@@ -58,10 +65,15 @@ impl Args {
     }
 }
 
+pub fn version() -> String {
+    format!("ricercar {}", env!("CARGO_PKG_VERSION"))
+}
+
 pub fn usage() -> String {
     "usage: ricercar [FILE|URI]... [--headless] [--config FILE] [--device NAME] [--name NAME] [--db PATH]
                 [--library DIR]... [--no-mpris] [--no-upnp] [--no-session]
        ricercar --print-devices
+       ricercar --help | --version
 
 Settings live in ~/.config/ricercar/config.toml; flags override them for this run."
         .into()
@@ -595,6 +607,15 @@ mod tests {
         net.apply(&ctl, &cfg);
         assert_eq!(*net.status.read().unwrap(), NetworkStatus::Off);
         assert!(net.handle.read().unwrap().is_none());
+    }
+
+    #[test]
+    fn version_and_usage() {
+        assert_eq!(version(), format!("ricercar {}", env!("CARGO_PKG_VERSION")));
+        assert!(usage().contains("--version"));
+        let a = Args::parse(["--headless".to_string(), "a.flac".to_string()].into_iter()).unwrap();
+        assert!(a.headless && a.open == ["a.flac"]);
+        assert!(Args::parse(["--bogus".to_string()].into_iter()).is_err());
     }
 
     #[test]

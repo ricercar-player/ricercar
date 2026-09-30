@@ -549,3 +549,153 @@ fn alsa_null_plugin_pause_resume() {
     h.stop();
     assert!(wait_finished(&sub, 10));
 }
+
+/// Records what the engine writes; optionally panics on the first write,
+/// or throws queued audio away on pause like a device without hardware
+/// pause.
+struct ScriptedSink {
+    dev: DeviceInfo,
+    fmt: Option<PcmFormat>,
+    samples: Arc<Mutex<Vec<i32>>>,
+    panic_once: bool,
+    write_delay: Duration,
+    drop_on_pause: u64,
+    dropped: u64,
+    /// Samples written when the last pause came in.
+    paused_at: Arc<Mutex<Option<usize>>>,
+}
+
+impl ScriptedSink {
+    fn new(samples: Arc<Mutex<Vec<i32>>>) -> ScriptedSink {
+        ScriptedSink {
+            dev: device_info("hw:9,0"),
+            fmt: None,
+            samples,
+            panic_once: false,
+            write_delay: Duration::ZERO,
+            drop_on_pause: 0,
+            dropped: 0,
+            paused_at: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl AudioSink for ScriptedSink {
+    fn device(&self) -> &DeviceInfo {
+        &self.dev
+    }
+    fn opened_format(&self) -> Option<PcmFormat> {
+        self.fmt
+    }
+    fn opened_container(&self) -> Option<Container> {
+        self.fmt.map(|f| Container::for_bits(f.bits))
+    }
+    fn open(&mut self, fmt: PcmFormat) -> ricercar_audio::Result<()> {
+        self.fmt = Some(fmt);
+        Ok(())
+    }
+    fn write_i32(&mut self, s: &[i32]) -> ricercar_audio::Result<()> {
+        if std::mem::take(&mut self.panic_once) {
+            panic!("scripted sink fault");
+        }
+        std::thread::sleep(self.write_delay);
+        self.samples.lock().unwrap().extend_from_slice(s);
+        Ok(())
+    }
+    fn drain(&mut self) -> ricercar_audio::Result<()> {
+        Ok(())
+    }
+    fn close(&mut self) {
+        self.fmt = None;
+    }
+    fn pause(&mut self) -> ricercar_audio::Result<()> {
+        let written = self.samples.lock().unwrap().len();
+        *self.paused_at.lock().unwrap() = Some(written);
+        let frames = (written / 2) as u64;
+        self.dropped = self.drop_on_pause.min(frames);
+        Ok(())
+    }
+    fn take_dropped_frames(&mut self) -> u64 {
+        std::mem::take(&mut self.dropped)
+    }
+}
+
+#[test]
+fn engine_survives_a_panic_and_plays_on() {
+    let samples = Arc::new(Mutex::new(Vec::new()));
+    let mut sink = ScriptedSink::new(samples.clone());
+    sink.panic_once = true;
+    let h = ricercar_audio::spawn_player_with_sink(Box::new(sink));
+    let sub = h.subscribe();
+    h.load(fixture_uri("tone_16_441.flac"));
+    let mut error = None;
+    let mut reason = None;
+    let stopped = wait_for(&sub, 10, |e| {
+        match e {
+            EngineEvent::Error { message, .. } => error = Some(message.clone()),
+            EngineEvent::TrackEnded { reason: r, .. } => reason = Some(*r),
+            EngineEvent::Status {
+                status: TransportStatus::Stopped,
+            } => return Some(()),
+            _ => {}
+        }
+        None
+    });
+    assert!(stopped.is_some());
+    assert!(error.is_some_and(|m| m.contains("scripted sink fault")));
+    assert_eq!(reason, Some(EndReason::Error));
+    assert!(h.is_alive());
+
+    h.load(fixture_uri("tone_16_441.flac"));
+    assert!(wait_finished(&sub, 20));
+    assert_eq!(
+        *samples.lock().unwrap(),
+        golden_content("golden_16_441.raw", 16)
+    );
+}
+
+#[test]
+fn pause_without_hardware_pause_replays_dropped_audio() {
+    const DROPPED: u64 = 4410;
+    let samples = Arc::new(Mutex::new(Vec::new()));
+    let mut sink = ScriptedSink::new(samples.clone());
+    sink.write_delay = Duration::from_millis(20);
+    sink.drop_on_pause = DROPPED;
+    let paused_at = sink.paused_at.clone();
+    let h = ricercar_audio::spawn_player_with_sink(Box::new(sink));
+    let sub = h.subscribe();
+    h.load(fixture_uri("tone_16_441.flac"));
+    wait_for(&sub, 5, |e| {
+        matches!(e, EngineEvent::TrackStarted { .. }).then_some(())
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    h.pause();
+    wait_for(&sub, 5, |e| {
+        matches!(
+            e,
+            EngineEvent::Status {
+                status: TransportStatus::Paused
+            }
+        )
+        .then_some(())
+    })
+    .unwrap();
+    let written = paused_at.lock().unwrap().expect("paused");
+    let heard_ms = (written as u64 / 2 - DROPPED) * 1000 / 44100;
+    let pos = h.state.lock().unwrap().pos_ms;
+    assert!(
+        pos <= heard_ms && pos + 150 > heard_ms,
+        "{pos} vs {heard_ms}"
+    );
+    h.resume();
+    assert!(wait_finished(&sub, 20));
+
+    let golden = golden_content("golden_16_441.raw", 16);
+    let got = samples.lock().unwrap().clone();
+    assert_eq!(got[..written], golden[..written]);
+    // Playback resumed at or before the first dropped frame.
+    let resumed_at = golden.len() - (got.len() - written);
+    assert!(resumed_at <= written - DROPPED as usize * 2);
+    assert_eq!(got[written..], golden[resumed_at..]);
+}

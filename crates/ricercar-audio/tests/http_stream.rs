@@ -18,6 +18,10 @@ enum Mode {
     Icy { metaint: usize },
     /// The server refuses: `410 Gone` (an expired signed URL).
     Gone,
+    /// Content-Length far beyond what may be spooled to disk.
+    Huge,
+    /// The connection drops halfway through a sized body.
+    Cut,
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -77,6 +81,18 @@ fn serve(name: &str, mode: Mode) -> (String, Arc<Mutex<Vec<String>>>) {
                     "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nConnection: close\r\n\r\n"
                         .to_string(),
                     body.clone(),
+                ),
+                Mode::Huge => (
+                    "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: 1000000000000000\r\nConnection: close\r\n\r\n"
+                        .to_string(),
+                    body.clone(),
+                ),
+                Mode::Cut => (
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    ),
+                    body[..body.len() / 2].to_vec(),
                 ),
                 Mode::Gone => (
                     "HTTP/1.1 410 Gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -247,4 +263,40 @@ fn http_error_status_is_reported() {
         }
     }
     assert_eq!(got, Some((Some(uri), Some(410))));
+}
+
+#[test]
+fn oversized_body_is_streamed_not_spooled() {
+    let (uri, _) = serve("tone_16_441.flac", Mode::Huge);
+    let (h, out) = file_player("huge");
+    let sub = h.subscribe();
+    h.load(&uri);
+    let mut seekable = None;
+    assert!(wait_stopped(&sub, |ev| {
+        if let EngineEvent::TrackStarted { .. } = ev {
+            seekable = Some(h.state.lock().unwrap().seekable);
+        }
+    }));
+    assert_eq!(seekable, Some(false));
+    assert_eq!(std::fs::read(&out).unwrap(), golden());
+}
+
+#[test]
+fn dropped_connection_is_an_error_not_an_end() {
+    let (uri, _) = serve("tone_16_441.flac", Mode::Cut);
+    let (h, _out) = file_player("cut");
+    let sub = h.subscribe();
+    h.load(&uri);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut error = None;
+    let mut reason = None;
+    while Instant::now() < deadline && reason.is_none() {
+        match sub.0.recv_timeout(Duration::from_millis(200)) {
+            Ok(EngineEvent::Error { message, .. }) => error = Some(message),
+            Ok(EngineEvent::TrackEnded { reason: r, .. }) => reason = Some(r),
+            _ => {}
+        }
+    }
+    assert_eq!(reason, Some(ricercar_audio::EndReason::Error));
+    assert!(error.is_some_and(|m| m.contains("http read")));
 }

@@ -32,6 +32,11 @@ pub trait AudioSink: Send {
     fn delay_frames(&self) -> u64 {
         0
     }
+    /// Queued frames the last `pause` had to throw away (devices without
+    /// hardware pause); reading resets it.
+    fn take_dropped_frames(&mut self) -> u64 {
+        0
+    }
 }
 
 pub fn make_sink(device: &DeviceInfo) -> Box<dyn AudioSink> {
@@ -87,6 +92,7 @@ pub struct AlsaSink {
     fmt: Option<PcmFormat>,
     container: Option<Container>,
     can_pause: bool,
+    dropped: u64,
     bytes: Vec<u8>,
 }
 
@@ -98,6 +104,7 @@ impl AlsaSink {
             fmt: None,
             container: None,
             can_pause: false,
+            dropped: 0,
             bytes: Vec::new(),
         }
     }
@@ -223,6 +230,7 @@ impl AudioSink for AlsaSink {
         self.fmt = None;
         self.container = None;
         self.can_pause = false;
+        self.dropped = 0;
     }
 
     fn pause(&mut self) -> Result<()> {
@@ -237,7 +245,10 @@ impl AudioSink for AlsaSink {
         if self.can_pause && pcm.pause(true).is_ok() {
             return Ok(());
         }
-        pcm.drop().map_err(|e| self.err(e))
+        let queued = pcm.delay().map_or(0, |d| d.max(0) as u64);
+        pcm.drop().map_err(|e| self.err(e))?;
+        self.dropped = queued;
+        Ok(())
     }
 
     fn resume(&mut self) -> Result<()> {
@@ -264,6 +275,10 @@ impl AudioSink for AlsaSink {
             .as_ref()
             .and_then(|p| p.delay().ok())
             .map_or(0, |d| d.max(0) as u64)
+    }
+
+    fn take_dropped_frames(&mut self) -> u64 {
+        std::mem::take(&mut self.dropped)
     }
 }
 
