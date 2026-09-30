@@ -603,10 +603,11 @@ fn update_chain(ui: &Ui, st: &CtlState) {
             state: 0,
         });
     }
+    let device = device_label(&c.device);
     let (dev_desc, dev_state) = match c.device_kind {
         DeviceKind::Hardware => (format!("{} · {}", c.device, t("exclusive, no mixer")), 0),
         DeviceKind::Virtual => (
-            format!("{} · {}", c.device, t("shared: may resample or mix")),
+            format!("{device} · {}", t("shared: may resample or mix")),
             1,
         ),
         DeviceKind::Null => (t("Null sink: audio discarded").to_string(), 1),
@@ -664,7 +665,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         label: "".into(),
         value: match c.device_kind {
             DeviceKind::Null => t("Null sink").into(),
-            _ => c.device.clone().into(),
+            _ => device.into(),
         },
         state: dev_state,
     });
@@ -847,6 +848,60 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
 
 // ------------------------------------------------------------------ notifications
 
+/// A readable name for a PipeWire output (`pipewire:NODE="bluez_output…"`
+/// → the headset's name), read once from the device list; other devices
+/// keep their ALSA name.
+fn device_label(name: &str) -> String {
+    thread_local! {
+        static LABELS: std::cell::RefCell<std::collections::HashMap<String, String>> =
+            Default::default();
+    }
+    if !name.starts_with("pipewire:NODE=") {
+        return name.to_string();
+    }
+    LABELS.with(|l| {
+        l.borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                ricercar_audio::device::list_devices()
+                    .into_iter()
+                    .find(|d| d.name == name)
+                    // "WH-1000XM4 (Bluetooth, not bit-perfect)" → "WH-1000XM4"
+                    .map(|d| match d.description.rsplit_once(" (") {
+                        Some((n, _)) => n.to_string(),
+                        None => d.description,
+                    })
+                    .unwrap_or_else(|| name.to_string())
+            })
+            .clone()
+    })
+}
+
+/// A small file of a cover given by URL (plugin tracks), for the
+/// notification: downloaded once into the cover cache.
+fn url_thumb(covers: &ricercar_core::covers::CoverCache, url: &str) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    use std::io::Read;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut h);
+    let key = format!("url-{:016x}", h.finish());
+    if let Some(p) = covers.cached_thumb(&key, 128) {
+        return Some(p);
+    }
+    let resp = ureq::get(url)
+        .set("User-Agent", ricercar_online::USER_AGENT)
+        .timeout(std::time::Duration::from_secs(5))
+        .call()
+        .ok()?;
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .take(8 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    covers.put_original(&key, &bytes).ok()?;
+    covers.thumb(&key, std::path::Path::new(""), 128)
+}
+
 fn notify(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
     if !ui.ctx.config.read().unwrap().ui.notifications {
         return;
@@ -861,16 +916,6 @@ fn notify(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
             .collect::<Vec<_>>()
             .join(" — ")
     };
-    let icon = info
-        .cover
-        .as_ref()
-        .filter(|c| !c.starts_with("http"))
-        .and_then(|c| {
-            let key = info.album_id.clone().unwrap_or_else(|| format!("p:{c}"));
-            ui.ctx.covers.thumb(&key, std::path::Path::new(c), 128)
-        })
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "ricercar".into());
     let shown = (
         info.path.clone().unwrap_or_else(|| info.title.clone()),
         live_title.map(str::to_string),
@@ -879,8 +924,22 @@ fn notify(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
         return;
     }
     ui.player.borrow_mut().notified = Some(shown);
+    let cover = info.cover.clone();
+    let album_key = info.album_id.clone();
+    let covers = ui.ctx.covers.clone();
     let replace = ui.player.borrow().notif_id;
     std::thread::spawn(move || {
+        let icon = cover
+            .and_then(|c| {
+                if c.starts_with("http://") || c.starts_with("https://") {
+                    url_thumb(&covers, &c)
+                } else {
+                    let key = album_key.unwrap_or_else(|| format!("p:{c}"));
+                    covers.thumb(&key, std::path::Path::new(&c), 128)
+                }
+            })
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "ricercar".into());
         let Ok(conn) = zbus::blocking::Connection::session() else {
             return;
         };

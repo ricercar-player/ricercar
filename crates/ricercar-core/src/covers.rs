@@ -62,6 +62,11 @@ impl CoverCache {
             .or_else(|| std::fs::read(self.original_path(key)).ok())
     }
 
+    /// The thumbnail of a key when it is already on disk.
+    pub fn cached_thumb(&self, key: &str, size: u32) -> Option<PathBuf> {
+        Some(self.thumb_path(key, size)).filter(|p| p.exists())
+    }
+
     /// A JPEG no larger than `size`×`size`, generated on first use.
     pub fn thumb(&self, key: &str, track: &Path, size: u32) -> Option<PathBuf> {
         let out = self.thumb_path(key, size);
