@@ -72,6 +72,12 @@
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.0" date="2026-09-30">
+      <description>
+        <p>A hardened network receiver, signed updates, steadier playback, keyboard access and search in a single plugin.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.6.0</url>
+    </release>
     <release version="0.5.2" date="2026-09-30">
       <description>
         <p>Check for a new version from Settings → About and install it in place, verified against the release checksums.</p>

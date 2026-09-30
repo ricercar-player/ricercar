@@ -1,13 +1,13 @@
 [package]
 name = "ricercar-daemon"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 ctrlc = { version = "3.5.2", features = ["termination"] }
-ricercar-audio = { version = "0.5.2", path = "../ricercar-audio" }
+ricercar-audio = { version = "0.6.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 ricercar-online.workspace = true
 ricercar-mpris.workspace = true

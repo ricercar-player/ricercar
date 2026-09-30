@@ -192,7 +192,7 @@ Arch, build it from source with `dist/arch/PKGBUILD`):
 | Your system | Package | Install |
 |---|---|---|
 | Debian, Ubuntu, Mint, Pop!_OS… | `.deb` | `sudo apt install ./ricercar_*.deb` |
-| Fedora, openSUSE, RHEL / Alma / Rocky | `.rpm` | `sudo dnf install ./ricercar-*.rpm` |
+| Fedora, openSUSE Tumbleweed / Leap 16, RHEL / Alma / Rocky 10+ | `.rpm` | `sudo dnf install ./ricercar-*.rpm` (`zypper install` on openSUSE) |
 | Arch, Manjaro, EndeavourOS, CachyOS, Omarchy | `.pkg.tar.zst` | `sudo pacman -U ricercar-*.pkg.tar.zst` |
 | Anything else | `.AppImage` | `chmod +x ricercar-*.AppImage && ./ricercar-*.AppImage` |
 

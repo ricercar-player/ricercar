@@ -164,7 +164,7 @@ enabled = true
 // host → plugin
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
   "protocol": 1,
-  "host": {"name":"ricercar","version":"0.5.2"},
+  "host": {"name":"ricercar","version":"0.6.0"},
   "data_dir": "/home/u/.local/share/ricercar/plugins/example",
   "cache_dir": "/home/u/.cache/ricercar/plugins/example",
   "locale": "fr-FR",
