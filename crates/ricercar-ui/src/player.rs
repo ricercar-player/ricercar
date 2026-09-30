@@ -534,7 +534,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     // shared device never qualifies, whatever the engine's own flag says.
     let hardware = c.device_kind == DeviceKind::Hardware;
     app.set_bitperfect(fmt.is_some() && c.bit_perfect && hardware);
-    app.set_device_label(c.device.clone().into());
+    app.set_device_label(device_label(&c.device).into());
 
     let mut hops = Vec::new();
     // A plugin hands over a URL; what follows is decoded and played as is.
@@ -859,22 +859,26 @@ fn device_label(name: &str) -> String {
     if !name.starts_with("pipewire:NODE=") {
         return name.to_string();
     }
-    LABELS.with(|l| {
-        l.borrow_mut()
-            .entry(name.to_string())
-            .or_insert_with(|| {
-                ricercar_audio::device::list_devices()
-                    .into_iter()
-                    .find(|d| d.name == name)
-                    // "WH-1000XM4 (Bluetooth, not bit-perfect)" → "WH-1000XM4"
-                    .map(|d| match d.description.rsplit_once(" (") {
-                        Some((n, _)) => n.to_string(),
-                        None => d.description,
-                    })
-                    .unwrap_or_else(|| name.to_string())
-            })
-            .clone()
-    })
+    if let Some(label) = LABELS.with(|l| l.borrow().get(name).cloned()) {
+        return label;
+    }
+    // Only a name found in the device list is kept: a device that is not
+    // listed yet (Bluetooth still connecting) is looked up again next time.
+    let found = ricercar_audio::device::list_devices()
+        .into_iter()
+        .find(|d| d.name == name)
+        // "WH-1000XM4 (Bluetooth, not bit-perfect)" → "WH-1000XM4"
+        .map(|d| match d.description.rsplit_once(" (") {
+            Some((n, _)) => n.to_string(),
+            None => d.description,
+        });
+    match found {
+        Some(label) => {
+            LABELS.with(|l| l.borrow_mut().insert(name.to_string(), label.clone()));
+            label
+        }
+        None => name.to_string(),
+    }
 }
 
 /// A small file of a cover given by URL (plugin tracks), for the
