@@ -329,9 +329,11 @@ fn append_tracks(ui: &Rc<Ui>, serial: u64, mut rest: Vec<Track>, started: std::t
 }
 
 fn load_album(ui: &Rc<Ui>, id: &str) {
+    crate::details::clear_album(ui);
     if let Some((arg, true)) = crate::plugins::card_target(id) {
         return crate::plugins::load_album_page(ui, id, arg);
     }
+    crate::plugin_favs::forget_album();
     ui.app().set_al_plugin(false);
     let lib = &ui.ctx.lib;
     let Some(a) = lib.album(id) else { return };
@@ -405,6 +407,7 @@ fn load_artist(ui: &Rc<Ui>, name: &str) {
     let app = ui.app();
     let (own, appears) = lib.artist_albums(name);
     let top = lib.artist_top_tracks(name, 5);
+    crate::details::clear_artist(ui);
     app.set_ar_name(name.into());
     app.set_ar_albums((own.len()) as i32);
     app.set_ar_tracks(own.iter().map(|a| a.track_count as i32).sum());
@@ -615,7 +618,7 @@ fn infos(tracks: &[Track]) -> Vec<TrackInfo> {
     tracks.iter().map(TrackInfo::from).collect()
 }
 
-fn list_tracks(ui: &Ui, list: &str) -> Vec<Track> {
+pub fn list_tracks(ui: &Ui, list: &str) -> Vec<Track> {
     ui.st.borrow().lists.get(list).cloned().unwrap_or_default()
 }
 
@@ -646,17 +649,27 @@ pub fn track_activate(ui: &Rc<Ui>, list: &str, index: usize) {
 }
 
 pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
+    // Queue entries: the index is the entry's id.
+    if list == "queue" {
+        return crate::plugin_menu::queue_action(ui, index as u64, action);
+    }
     let tracks = list_tracks(ui, list);
     let Some(tr) = tracks.get(index).cloned() else {
         return;
     };
     let ctl = &ui.ctx.ctl;
-    // Plugin tracks have no album or artist page and no folder; their
-    // favourite lives on the service.
+    // Entries of a plugin playlist, edited on the service.
+    if list == "browse" && matches!(action, "pl-remove" | "pl-up" | "pl-down") {
+        return crate::plugins::entry_action(ui, index, action);
+    }
+    // Plugin tracks have no folder; their album and artist open from the
+    // plugin, and their favourite lives on the service.
     if tr.is_plugin() {
         match action {
-            "album" | "artist" | "folder" => return,
-            "fav" => return crate::plugins::favorite_track(ui, &tr),
+            "album" | "artist" => return crate::plugin_menu::track_nav(ui, &tr, action == "album"),
+            "folder" => return,
+            "fav" => return crate::plugin_favs::toggle(ui, &tr.path),
+            "radio" => return crate::details::track_radio(ui, list, index),
             _ => {}
         }
     }
@@ -707,6 +720,9 @@ pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
 
 /// Append tracks (library files, or plugin tracks with their metadata).
 pub fn add_to_playlist(ui: &Rc<Ui>, target: &str, tracks: &[Track]) {
+    if let Some(t) = target.strip_prefix(crate::plugins::PL_TARGET) {
+        return crate::plugins::add_to_playlist(ui, t, tracks);
+    }
     let lib = &ui.ctx.lib;
     let id = if target == "new" {
         // The dialog just created it: the most recent playlist.
@@ -779,6 +795,7 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
     let lib = ui.ctx.lib.clone();
     let ctl = &ui.ctx.ctl;
     match action {
+        "artist-radio" => return crate::details::artist_radio(ui),
         "artist-play" | "artist-shuffle" => {
             let (own, appears) = lib.artist_albums(id);
             let mut tracks: Vec<Track> = own.iter().flat_map(|a| lib.album_tracks(&a.id)).collect();

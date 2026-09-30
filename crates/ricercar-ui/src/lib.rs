@@ -4,11 +4,14 @@ slint::include_modules!();
 
 mod app;
 mod dac;
+mod details;
 mod diag;
 mod extras;
 mod images;
 mod merge;
 mod player;
+mod plugin_favs;
+mod plugin_menu;
 mod plugin_settings;
 mod plugins;
 mod profile;

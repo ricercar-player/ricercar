@@ -277,5 +277,19 @@
 "Reset to defaults": "Rétablir les valeurs par défaut",
 "Plugin settings": "Réglages du plugin",
 "Plugin settings (available while the plugin runs)": "Réglages du plugin (disponibles quand le plugin est lancé)",
-"Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar.": "Réalisée avec la boîte à outils Slint, utilisée sous sa licence libre de redevances. Les licences des composants tiers sont installées avec ricercar."
+"Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar.": "Réalisée avec la boîte à outils Slint, utilisée sous sa licence libre de redevances. Les licences des composants tiers sont installées avec ricercar.",
+"Remove from the queue": "Retirer de la file d'attente",
+"Go to label": "Aller au label",
+"Move up": "Monter",
+"Move down": "Descendre",
+"Create in": "Créer dans",
+"The playlist is deleted from {}. This cannot be undone.": "La playlist est supprimée de {}. Cette action est irréversible.",
+"Start radio": "Lancer une radio",
+"Starting radio…": "Lancement de la radio…",
+"Read more": "Lire la suite",
+"Show less": "Réduire",
+"Source: {}": "Source : {}",
+"Continuous playback": "Lecture continue",
+"When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin.": "Quand la file se termine sur un titre d'un plugin qui le propose, continuer avec des titres proches fournis par ce plugin.",
+"Finding more tracks…": "Recherche d'autres titres…"
 }

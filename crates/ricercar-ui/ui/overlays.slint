@@ -1,7 +1,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { App, QueueRow, MenuEntry, Page } from "state.slint";
+import { App, QueueRow, MenuEntry, ItemAction, Page } from "state.slint";
 import { Icon, IconButton, Button, Cover, Segmented, TextField, NowBars, Badge } from "widgets.slint";
 import { TrackMenu } from "lists.slint";
 
@@ -14,7 +14,8 @@ component QueueLine inherits Rectangle {
     out property <bool> dragging: grip.pressed;
     // the remove button takes the hover from `ta` when pointed at
     private property <bool> btn-hot;
-    private property <bool> hot: ta.has-hover || grip.has-hover || btn-hot;
+    private property <bool> more-hot;
+    private property <bool> hot: ta.has-hover || grip.has-hover || btn-hot || more-hot;
     callback drop-at(int, int);
     height: row-h;
     border-radius: Theme.r-md;
@@ -30,6 +31,20 @@ component QueueLine inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { App.queue-play(root.item.id); }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                root.open-menu(root.absolute-position.x + self.mouse-x, root.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+    // The entry's menu (go to its album or artist, remove it).
+    function open-menu(x: length, y: length) {
+        TrackMenu.list = "queue";
+        TrackMenu.track-plugin = false;
+        TrackMenu.index = root.item.id;
+        TrackMenu.x = x;
+        TrackMenu.y = y;
+        TrackMenu.serial += 1;
     }
     HorizontalLayout {
         padding-left: 6px;
@@ -68,20 +83,45 @@ component QueueLine inherits Rectangle {
             Text { text: item.title; font-size: Theme.fs-md; font-weight: 500; color: item.current ? Theme.accent : Theme.text; overflow: elide; }
             Text { text: item.artist; font-size: Theme.fs-sm; color: Theme.text2; overflow: elide; }
         }
-        if !hot || item.current: Text {
-            text: item.dur;
-            font-size: Theme.fs-sm;
-            color: Theme.text3;
-            vertical-alignment: center;
-        }
-        if hot && !item.current: IconButton {
-            y: (parent.height - self.height) / 2;
-            size: 28px;
-            icon-size: 15px;
-            icon: Icons.x;
-            tooltip: @tr("Remove");
-            changed has-hover => { root.btn-hot = self.has-hover; }
-            clicked => { App.queue-remove(root.item.id); }
+        // The duration and, while hovered, the buttons share one fixed slot:
+        // nothing moves under the pointer, and the buttons always exist so
+        // moving onto them never makes them flicker away.
+        Rectangle {
+            width: 68px;
+            Text {
+                visible: !hot;
+                width: parent.width;
+                height: parent.height;
+                text: item.dur;
+                font-size: Theme.fs-sm;
+                color: Theme.text3;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+            HorizontalLayout {
+                visible: hot;
+                alignment: end;
+                spacing: 4px;
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    size: 32px;
+                    icon-size: 16px;
+                    icon: Icons.ellipsis;
+                    tooltip: @tr("More");
+                    changed has-hover => { root.more-hot = self.has-hover; }
+                    clicked => { root.open-menu(self.absolute-position.x, self.absolute-position.y + self.height); }
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    visible: !item.current;
+                    size: 32px;
+                    icon-size: 16px;
+                    icon: Icons.x;
+                    tooltip: @tr("Remove");
+                    changed has-hover => { root.btn-hot = self.has-hover; }
+                    clicked => { App.queue-remove(root.item.id); }
+                }
+            }
         }
     }
 }
@@ -128,6 +168,15 @@ export component QueueList inherits Rectangle {
                 index: q.index;
                 drop-at(from, to) => { App.queue-move(from, max(first-upcoming, min(last-index, to))); }
             }
+        }
+        // Continuous playback is asking the plugin for what comes next.
+        if App.queue-radio-pending: Text {
+            text: @tr("Finding more tracks…");
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            height: 32px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
         }
     }
     if App.queue.length == 0 && !App.queue-has-now: VerticalLayout {
@@ -184,6 +233,15 @@ component LyricsView inherits Rectangle {
             flick.content-y = min(0, -(root.target-y - flick.height * 0.36));
         }
     }
+    private property <bool> opening;
+    Timer {
+        interval: 60ms;
+        running: root.opening;
+        triggered => {
+            root.opening = false;
+            root.recenter();
+        }
+    }
     flick := Flickable {
         y: 0;
         height: root.height - root.source-h;
@@ -199,6 +257,18 @@ component LyricsView inherits Rectangle {
                     if self.is-current {
                         root.target-y = self.y;
                         root.recenter();
+                    }
+                }
+                // Opened mid-song: the current line is already set, so no
+                // change fires; centre it once the layout is known.
+                init => {
+                    if self.is-current {
+                        root.opening = true;
+                    }
+                }
+                changed y => {
+                    if self.is-current {
+                        root.target-y = self.y;
                     }
                 }
                 text: l.text == "" ? "♪" : l.text;
@@ -448,6 +518,85 @@ component MenuLine inherits Rectangle {
     }
 }
 
+// ---- plugin actions (`Item.actions`), below the host's entries
+
+component ItemActionLine inherits Rectangle {
+    in property <ItemAction> action;
+    // its tracks are being read
+    in property <bool> busy;
+    in property <bool> enabled: true;
+    callback run(bool /* append */);
+    height: 34px;
+    border-radius: Theme.r-sm;
+    background: enabled && ta.has-hover ? Theme.hover : transparent;
+    accessible-role: button;
+    accessible-label: action.label;
+    accessible-enabled: enabled;
+    accessible-action-default => { if enabled { run(false); } }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.run(false); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: action.play ? 4px : 10px;
+        spacing: 12px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            source: busy ? Icons.clock : action.play ? Icons.play : Icons.chevron-right;
+            size: 16px;
+            tint: enabled || busy ? Theme.text2 : Theme.text3;
+        }
+        Text {
+            text: action.label;
+            font-size: Theme.fs-base;
+            color: enabled ? Theme.text : Theme.text3;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        // play actions: add to the queue instead of replacing it
+        if action.play: IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 26px;
+            icon-size: 15px;
+            icon: Icons.list-end;
+            tooltip: @tr("Add to queue");
+            enabled: root.enabled;
+            clicked => { root.run(true); }
+        }
+    }
+}
+
+/// The plugin's own actions on the item under the menu, after a divider.
+/// A "play" action keeps the menu open while its tracks are read.
+component ItemActions inherits VerticalLayout {
+    callback done();
+    private property <bool> waiting;
+    private property <int> w-busy: App.action-busy;
+    changed w-busy => {
+        if w-busy < 0 && waiting {
+            waiting = false;
+            root.done();
+        }
+    }
+    if App.menu-actions.length > 0: Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+    for a[i] in App.menu-actions: ItemActionLine {
+        action: a;
+        busy: App.action-busy == i;
+        enabled: App.action-busy < 0;
+        run(append) => {
+            App.item-action(i, append);
+            if a.play && App.action-busy == i {
+                root.waiting = true;
+            } else {
+                root.done();
+            }
+        }
+    }
+}
+
 /// Context menu for tracks and albums, drawn as an overlay (window coords).
 export component ContextMenu inherits Rectangle {
     in property <bool> is-album;
@@ -457,8 +606,12 @@ export component ContextMenu inherits Rectangle {
     callback new-playlist-for(bool);
     private property <bool> playlists-mode;
     private property <length> menu-w: 236px;
-    // Lists from a plugin: no album or artist page, no folder.
+    // Items from a plugin: no folder; their album and artist open when the
+    // plugin tells enough (App.menu-album-nav / menu-artist-nav).
     private property <bool> plugin-list: is-album ? TrackMenu.album-plugin : TrackMenu.track-plugin;
+    // an entry of the queue (TrackMenu.index is its id)
+    private property <bool> queue-entry: !is-album && TrackMenu.list == "queue";
+    private property <bool> can-radio: plugin-list && App.can-radio(is-album, TrackMenu.list, TrackMenu.index, TrackMenu.album-id);
     TouchArea {
         clicked => { root.dismiss(); }
         pointer-event(e) => {
@@ -481,30 +634,75 @@ export component ContextMenu inherits Rectangle {
         lay := VerticalLayout {
             padding: 5px;
             spacing: 0;
-            if !playlists-mode: VerticalLayout {
+            if !playlists-mode && queue-entry: VerticalLayout {
+                if App.menu-album-nav: MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
+                if App.menu-artist-nav: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
+                MenuLine { text: @tr("Remove from the queue"); icon: Icons.x; clicked => { act("remove"); } }
+                ItemActions { done => { root.close(); } }
+            }
+            if !playlists-mode && !queue-entry: VerticalLayout {
                 MenuLine { text: @tr("Play"); icon: Icons.play; clicked => { act("play"); } }
                 if is-album: MenuLine { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { act("shuffle"); } }
                 MenuLine { text: @tr("Play next"); icon: Icons.list-plus; clicked => { act("next"); } }
                 MenuLine { text: @tr("Add to queue"); icon: Icons.list-end; clicked => { act("queue"); } }
-                MenuLine { text: @tr("Add to playlist"); icon: Icons.list-music; submenu: true; clicked => { root.playlists-mode = true; } }
+                MenuLine {
+                    text: @tr("Add to playlist");
+                    icon: Icons.list-music;
+                    submenu: true;
+                    clicked => {
+                        App.playlist-targets(root.is-album ? 2 : 1);
+                        root.playlists-mode = true;
+                    }
+                }
+                // Plugin tracks, albums and artists whose plugin offers a radio.
+                if can-radio: MenuLine { text: @tr("Start radio"); icon: Icons.radio; clicked => { act("radio"); } }
                 Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
-                if !is-album && !plugin-list: MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
-                if !plugin-list: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
+                if !is-album && (!plugin-list || App.menu-album-nav): MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
+                if !plugin-list || App.menu-artist-nav: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
                 MenuLine { text: @tr("Favorite / unfavorite"); icon: Icons.heart; clicked => { act("fav"); } }
                 if !plugin-list: MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
                 if !is-album && TrackMenu.list == "playlist": MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
+                // A plugin playlist the user owns: its entries are edited on the service.
+                if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && TrackMenu.index > 0: MenuLine { text: @tr("Move up"); icon: Icons.chevron-up; clicked => { act("pl-up"); } }
+                if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && (TrackMenu.index < App.br-tracks.length - 1 || App.br-more): MenuLine { text: @tr("Move down"); icon: Icons.chevron-down; clicked => { act("pl-down"); } }
+                if !is-album && TrackMenu.list == "browse" && App.br-editable: MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
+                // Keep last: the plugin's actions come after the host's.
+                ItemActions { done => { root.close(); } }
             }
             if playlists-mode: VerticalLayout {
                 MenuLine { text: @tr("Back"); icon: Icons.chevron-left; clicked => { root.playlists-mode = false; } }
                 Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
                 MenuLine { text: @tr("New playlist…"); icon: Icons.plus; clicked => { root.playlists-mode = false; root.new-playlist-for(root.is-album); } }
-                for p in App.playlists: MenuLine {
-                    text: p.name;
-                    icon: Icons.list-music;
-                    clicked => { act("pl:" + p.id); }
+                // Local playlists, then the editable ones of the plugin the
+                // items come from, under each source's name.
+                for p in App.pl-targets: VerticalLayout {
+                    if p.header: HorizontalLayout {
+                        height: 28px;
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        padding-bottom: 4px;
+                        Text {
+                            text: p.name.to-uppercase();
+                            font-size: Theme.fs-xs;
+                            font-weight: 700;
+                            letter-spacing: 0.6px;
+                            color: Theme.text3;
+                            vertical-alignment: bottom;
+                            overflow: elide;
+                        }
+                    }
+                    if !p.header: MenuLine {
+                        text: p.name;
+                        icon: Icons.list-music;
+                        clicked => { act("pl:" + p.key); }
+                    }
                 }
             }
         }
+    }
+    function close() {
+        root.playlists-mode = false;
+        root.dismiss();
     }
     function act(a: string) {
         root.playlists-mode = false;
@@ -526,12 +724,19 @@ export component Dialog inherits Rectangle {
     in property <bool> with-input;
     in property <bool> danger;
     in-out property <string> value;
+    // A choice under the field (where a new playlist goes), shown when
+    // there are several options.
+    in property <string> choice-label;
+    in property <[string]> choices;
+    in-out property <int> choice;
     callback confirm(string);
     callback cancel();
     background: Theme.scrim;
     TouchArea { clicked => { root.cancel(); } }
+    // The field, or Cancel when there is none (a confirmation: the keyboard
+    // then has to move to the other button on purpose).
     public function focus-input() {
-        if with-input { field.focus-field(); }
+        if with-input { field.focus-field(); } else { cancel-button.focus(); }
     }
     Rectangle {
         width: 420px;
@@ -556,11 +761,23 @@ export component Dialog inherits Rectangle {
                 accepted(t) => { root.confirm(t); }
                 escape => { root.cancel(); }
             }
+            if root.choices.length > 1: VerticalLayout {
+                spacing: 8px;
+                Text { text: root.choice-label; font-size: Theme.fs-sm; font-weight: 600; color: Theme.text2; }
+                HorizontalLayout {
+                    alignment: start;
+                    Segmented {
+                        options: root.choices;
+                        selected <=> root.choice;
+                        label: root.choice-label;
+                    }
+                }
+            }
             HorizontalLayout {
                 alignment: end;
                 spacing: 10px;
                 padding-top: 6px;
-                Button { text: @tr("Cancel"); clicked => { root.cancel(); } }
+                cancel-button := Button { text: @tr("Cancel"); clicked => { root.cancel(); } }
                 Button {
                     text: root.confirm-text;
                     primary: !root.danger;

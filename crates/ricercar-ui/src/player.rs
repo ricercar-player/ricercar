@@ -92,6 +92,14 @@ pub fn wire(ui: &Rc<Ui>) {
     app.on_toggle_fav(|| {
         with_ui(|ui| {
             let path = ui.st.borrow().now_path.clone();
+            // Plugin tracks: their favourite on the service, when known.
+            let uri = ui.ctx.ctl.lock().current_uri();
+            if path.is_none()
+                && let Some(uri) = uri.filter(|u| ricercar_core::plugin::is_plugin_uri(u))
+            {
+                crate::plugin_favs::toggle_now(ui, &uri);
+                return;
+            }
             if let Some(p) = path {
                 let fav = !ui.ctx.lib.is_favorite(&p);
                 ui.ctx.lib.set_favorite(&p, fav);
@@ -112,8 +120,11 @@ pub fn wire(ui: &Rc<Ui>) {
             let id = ui.app().get_album_id();
             if !id.is_empty() {
                 ui.navigate(Page::Album, &id, true);
-            } else if let Some(info) = ui.ctx.ctl.lock().track() {
-                crate::plugins::open_track_album(ui, &info);
+                return;
+            }
+            let info = ui.ctx.ctl.lock().track();
+            if let Some(info) = info {
+                crate::plugin_menu::go_to_album(ui, &info);
             }
         })
     });
@@ -121,12 +132,7 @@ pub fn wire(ui: &Rc<Ui>) {
         with_ui(|ui| {
             let info = ui.ctx.ctl.lock().track();
             if let Some(i) = info {
-                if i.path.is_some() {
-                    let name = i.album_artist.or(i.artist).unwrap_or_default();
-                    ui.navigate(Page::Artist, &name, true);
-                } else {
-                    crate::plugins::open_track_artist(ui, &i);
-                }
+                crate::plugin_menu::go_to_artist(ui, &i);
             }
         })
     });
@@ -200,6 +206,7 @@ fn tick_inner(ui: &Rc<Ui>) {
         Repeat::One => 2,
     });
     app.set_can_next(st.has_next());
+    app.set_queue_radio_pending(st.radio_pending);
 
     let item = st.current_item().cloned();
     let now_id = item.as_ref().map(|q| q.id);
@@ -371,10 +378,10 @@ fn on_track_changed(ui: &Rc<Ui>, st: &CtlState, info: Option<&TrackInfo>) {
         _ => context_label(ui, &st.context),
     };
     app.set_context_label(context.into());
-    let fav = info
-        .path
-        .as_ref()
-        .is_some_and(|p| ui.ctx.lib.is_favorite(p));
+    let fav = match &info.path {
+        Some(p) => ui.ctx.lib.is_favorite(p),
+        None => crate::plugin_favs::known(&info.uri).unwrap_or(false),
+    };
     app.set_fav(fav);
 
     let same_track = ui.st.borrow().now_path.as_deref() == info.path.as_deref()
@@ -493,14 +500,15 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     let c = &chain;
     let fmt = c.format;
     let sig = format!(
-        "{:?}{:?}{}{}{}{}{:?}",
+        "{:?}{:?}{}{}{}{}{:?}{:?}",
         fmt,
         c.container,
         c.bit_perfect,
         st.volume,
         st.muted,
         c.device,
-        info.as_ref().map(|i| &i.uri)
+        info.as_ref().map(|i| &i.uri),
+        st.delivery
     );
     if ui.player.borrow().chain_sig == sig {
         return;
@@ -539,10 +547,21 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     let mut hops = Vec::new();
     // A plugin hands over a URL; what follows is decoded and played as is.
     let plugin = ui.ctx.ctl.plugin_name(&info.uri);
+    // The plugin may relay the stream itself: the original codec,
+    // unchanged, so bit-perfect still holds; say so all the same.
+    let relayed = st.delivery == Some(ricercar_core::plugin::Delivery::Proxied);
     if let Some(name) = &plugin {
         hops.push(ChainHop {
             label: t("Source").into(),
-            value: format!("{name} · {}", t("plugin")).into(),
+            value: if relayed {
+                format!(
+                    "{name} ({})",
+                    t("relayed locally, original codec unchanged")
+                )
+            } else {
+                format!("{name} · {}", t("plugin"))
+            }
+            .into(),
             state: 0,
         });
     }
@@ -625,7 +644,12 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         .iter()
         .map(|name| ChainHop {
             label: "".into(),
-            value: name.clone().into(),
+            value: if relayed {
+                format!("{name} · {}", t("relayed"))
+            } else {
+                name.clone()
+            }
+            .into(),
             state: 0,
         })
         .collect();
@@ -762,6 +786,22 @@ fn plain_lines(text: &str) -> Vec<Line> {
         .collect()
 }
 
+/// Source line of lyrics found for a plugin track: "Lyrics from <plugin
+/// name>" when the plugin gave them, else the usual online source.
+fn plugin_lyrics_label(host: &ricercar_core::plugin::PluginHost, source: &LyricsSource) -> String {
+    match source {
+        LyricsSource::Plugin(id) => {
+            let name = host
+                .status(id)
+                .map(|s| s.name)
+                .unwrap_or_else(|| id.clone());
+            format!("{} {name}", t("Lyrics from"))
+        }
+        LyricsSource::Lrclib => t("Lyrics from lrclib.net").to_string(),
+        _ => t("Lyrics from the file").to_string(),
+    }
+}
+
 fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
     set_lyrics(ui, Vec::new(), false, t("Searching for lyrics…"), "");
     let online = ui.ctx.config.read().unwrap().online.lyrics;
@@ -782,8 +822,11 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
     let dur = (info.duration_ms > 0).then_some((info.duration_ms / 1000) as u32);
     let uri = info.uri.clone();
     let cache_dir = ricercar_core::config::cache_dir().join("lyrics");
+    // Plugin tracks: the plugin first (when it declares `lyrics`), then LRCLIB.
+    let plugin =
+        ricercar_core::plugin::is_plugin_uri(&uri).then(|| (ui.ctx.plugins.clone(), info.clone()));
     std::thread::spawn(move || {
-        let mut found: Option<(Vec<Line>, bool, &'static str)> = None;
+        let mut found: Option<(Vec<Line>, bool, String)> = None;
         if let Some(p) = &path {
             let p = std::path::Path::new(p);
             if let Some(text) = ricercar_core::meta::local_lyrics(p) {
@@ -794,6 +837,7 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
                 } else {
                     "Lyrics from the file"
                 };
+                let src = t(src).to_string();
                 found = Some(if synced.is_empty() {
                     (plain_lines(&text), false, src)
                 } else {
@@ -802,7 +846,22 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
             }
         }
         let mut status = "No lyrics for this track";
-        if found.is_none() {
+        if let Some((host, info)) = &plugin {
+            match ricercar_daemon::lyrics::for_plugin_track(host, &cache_dir, info, online) {
+                Ok(Some(l)) if l.instrumental => status = "Instrumental",
+                Ok(Some(l)) => {
+                    let src = plugin_lyrics_label(host, &l.source);
+                    found = match (l.synced, l.plain) {
+                        (Some(s), _) if !s.is_empty() => Some((s, true, src)),
+                        (_, Some(p)) => Some((plain_lines(&p), false, src)),
+                        _ => None,
+                    };
+                }
+                Ok(None) if !online => status = "Online lyrics are turned off in Settings",
+                Ok(None) => {}
+                Err(e) => tracing::debug!("lyrics: {e}"),
+            }
+        } else if found.is_none() {
             match (&artist, online) {
                 (Some(a), true) => {
                     let cache = ricercar_online::lyrics::LyricsCache::new(cache_dir);
@@ -815,10 +874,11 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
                     ) {
                         Ok(Some(l)) if l.instrumental => status = "Instrumental",
                         Ok(Some(l)) => {
-                            let src = match l.source {
+                            let src = t(match l.source {
                                 LyricsSource::Lrclib => "Lyrics from lrclib.net",
                                 _ => "Lyrics from the file",
-                            };
+                            })
+                            .to_string();
                             found = match (l.synced, l.plain) {
                                 (Some(s), _) if !s.is_empty() => Some((s, true, src)),
                                 (_, Some(p)) => Some((plain_lines(&p), false, src)),
@@ -839,7 +899,7 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
                 return;
             }
             match found {
-                Some((lines, synced, src)) => set_lyrics(ui, lines, synced, "", t(src)),
+                Some((lines, synced, src)) => set_lyrics(ui, lines, synced, "", &src),
                 None => set_lyrics(ui, Vec::new(), false, t(status), ""),
             }
         });

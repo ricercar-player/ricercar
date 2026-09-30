@@ -21,6 +21,10 @@ msgid "The playlist is removed; your music files are not touched."
 msgstr "La playlist est supprimée ; vos fichiers audio ne sont pas modifiés."
 
 msgctxt "MainWindow"
+msgid "The playlist is deleted from {}. This cannot be undone."
+msgstr "La playlist est supprimée de {}. Cette action est irréversible."
+
+msgctxt "MainWindow"
 msgid "Create"
 msgstr "Créer"
 
@@ -31,6 +35,10 @@ msgstr "Renommer"
 msgctxt "MainWindow"
 msgid "Delete"
 msgstr "Supprimer"
+
+msgctxt "MainWindow"
+msgid "Create in"
+msgstr "Créer dans"
 
 msgctxt "MainWindow"
 msgid "Installing…"
@@ -214,6 +222,18 @@ msgctxt "PlayerBar"
 msgid "Queue"
 msgstr "File d'attente"
 
+msgctxt "Biography"
+msgid "Show less"
+msgstr "Réduire"
+
+msgctxt "Biography"
+msgid "Read more"
+msgstr "Lire la suite"
+
+msgctxt "Biography"
+msgid "Source: {}"
+msgstr "Source : {}"
+
 msgctxt "TrackHeader"
 msgid "Title"
 msgstr "Titre"
@@ -377,6 +397,14 @@ msgstr "Reprendre là où je m'étais arrêté"
 msgctxt "SettingsPage"
 msgid "Restore the queue and position at startup (paused)."
 msgstr "Restaure la file et la position au démarrage (en pause)."
+
+msgctxt "SettingsPage"
+msgid "Continuous playback"
+msgstr "Lecture continue"
+
+msgctxt "SettingsPage"
+msgid "When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin."
+msgstr "Quand la file se termine sur un titre d'un plugin qui le propose, continuer avec des titres proches fournis par ce plugin."
 
 msgctxt "SettingsPage"
 msgid "Library"
@@ -723,6 +751,10 @@ msgid "Copy diagnostic report"
 msgstr "Copier le rapport de diagnostic"
 
 msgctxt "QueueLine"
+msgid "More"
+msgstr "Plus"
+
+msgctxt "QueueLine"
 msgid "Remove"
 msgstr "Retirer"
 
@@ -733,6 +765,10 @@ msgstr "En cours de lecture"
 msgctxt "QueueList"
 msgid "Next up"
 msgstr "À suivre"
+
+msgctxt "QueueList"
+msgid "Finding more tracks…"
+msgstr "Recherche d'autres titres…"
 
 msgctxt "QueueList"
 msgid "The queue is empty"
@@ -794,6 +830,22 @@ msgctxt "NowPlayingView"
 msgid "Close"
 msgstr "Fermer"
 
+msgctxt "ItemActionLine"
+msgid "Add to queue"
+msgstr "Ajouter à la file"
+
+msgctxt "ContextMenu"
+msgid "Go to album"
+msgstr "Aller à l'album"
+
+msgctxt "ContextMenu"
+msgid "Go to artist"
+msgstr "Aller à l'artiste"
+
+msgctxt "ContextMenu"
+msgid "Remove from the queue"
+msgstr "Retirer de la file d'attente"
+
 msgctxt "ContextMenu"
 msgid "Play"
 msgstr "Lecture"
@@ -815,12 +867,8 @@ msgid "Add to playlist"
 msgstr "Ajouter à une playlist"
 
 msgctxt "ContextMenu"
-msgid "Go to album"
-msgstr "Aller à l'album"
-
-msgctxt "ContextMenu"
-msgid "Go to artist"
-msgstr "Aller à l'artiste"
+msgid "Start radio"
+msgstr "Lancer une radio"
 
 msgctxt "ContextMenu"
 msgid "Favorite / unfavorite"
@@ -833,6 +881,14 @@ msgstr "Afficher dans le dossier"
 msgctxt "ContextMenu"
 msgid "Remove from playlist"
 msgstr "Retirer de la playlist"
+
+msgctxt "ContextMenu"
+msgid "Move up"
+msgstr "Monter"
+
+msgctxt "ContextMenu"
+msgid "Move down"
+msgstr "Descendre"
 
 msgctxt "ContextMenu"
 msgid "Back"
@@ -1041,6 +1097,10 @@ msgid "NOT SUPPORTED BY THE DAC"
 msgstr "NON SUPPORTÉ PAR LE DAC"
 
 msgctxt "AlbumPage"
+msgid "Go to label"
+msgstr "Aller au label"
+
+msgctxt "AlbumPage"
 msgid "More by {}"
 msgstr "Plus de {}"
 
@@ -1069,6 +1129,18 @@ msgid "{n} track"
 msgid_plural "{n} tracks"
 msgstr[0] "{n} titre"
 msgstr[1] "{n} titres"
+
+msgctxt "ArtistPage"
+msgid "Favorite"
+msgstr "Favori"
+
+msgctxt "ArtistPage"
+msgid "Starting radio…"
+msgstr "Lancement de la radio…"
+
+msgctxt "ArtistPage"
+msgid "Start radio"
+msgstr "Lancer une radio"
 
 msgctxt "ArtistPage"
 msgid "Discography"
@@ -1247,6 +1319,18 @@ msgstr "Lecture"
 msgctxt "BrowsePage"
 msgid "Shuffle"
 msgstr "Aléatoire"
+
+msgctxt "BrowsePage"
+msgid "Rename"
+msgstr "Renommer"
+
+msgctxt "BrowsePage"
+msgid "Delete playlist"
+msgstr "Supprimer la playlist"
+
+msgctxt "BrowsePage"
+msgid "More"
+msgstr "Plus"
 
 msgctxt "SignInDialog"
 msgid "Asking the plugin for a sign-in address…"

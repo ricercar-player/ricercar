@@ -44,7 +44,7 @@ export struct ArtistCard {
     tracks: int,
     cover: image,
     ckey: string,
-    // plugins it also comes from, "Jellyfin · a streaming service" ("" local only)
+    // names of the plugins it also comes from, joined by " · " ("" local only)
     source: string,
 }
 
@@ -189,11 +189,29 @@ export struct HomeShelf {
     cards: [AlbumCard],
 }
 
+// A shelf of a plugin's details ("Similar artists", "Top tracks"…): its
+// items split by kind; `list` names its tracks for activation and menus.
+export struct DetailShelf {
+    title: string,
+    list: string,
+    cards: [AlbumCard],
+    artists: [ArtistCard],
+    tracks: [TrackRow],
+}
+
 export struct ChainHop {
     label: string,
     value: string,
     // 0 = untouched, 1 = altered (not bit-perfect), 2 = unknown
     state: int,
+}
+
+// "Add to playlist" entry: a playlist, or a source's name heading its own
+export struct PlaylistTarget {
+    // after "pl:": a local playlist id, or a plugin playlist
+    key: string,
+    name: string,
+    header: bool,
 }
 
 export struct MenuEntry {
@@ -202,6 +220,14 @@ export struct MenuEntry {
     icon: image,
     separator: bool,
     danger: bool,
+}
+
+// An action a plugin offers on an item (`Item.actions`); the label is
+// plain text from the plugin.
+export struct ItemAction {
+    label: string,
+    // "play": its tracks go to the queue; otherwise it opens a page
+    play: bool,
 }
 
 export global App {
@@ -265,6 +291,8 @@ export global App {
     in property <bool> queue-has-now;
     in property <int> queue-current;
     in property <string> queue-meta;
+    // continuous playback is asking the plugin for more tracks
+    in property <bool> queue-radio-pending;
     callback queue-play(int);
     callback queue-remove(int);
     callback queue-move(int, int);
@@ -286,6 +314,17 @@ export global App {
     callback album-action(string, string);
     callback artist-activate(string);
     in property <[MenuEntry]> track-menu;
+    // The plugin item under the open context menu (set by `menu-opened`):
+    // its own actions, shown below the host's, and whether "Go to album"
+    // and "Go to artist" lead somewhere.
+    callback menu-opened(bool /* album */);
+    in property <[ItemAction]> menu-actions;
+    in property <bool> menu-album-nav;
+    in property <bool> menu-artist-nav;
+    // run menu-actions[i]; true: add to the queue instead of replacing it
+    callback item-action(int, bool);
+    // the "play" action whose tracks are being read, -1 when none
+    in property <int> action-busy: -1;
     in property <[PlaylistItem]> playlists;
 
     // ---------------------------------------------------------------- home
@@ -343,6 +382,9 @@ export global App {
     in property <bool> al-hires;
     // the album comes from a plugin
     in property <bool> al-plugin;
+    // plugin album: browse arguments of its artist and label ("" if none)
+    in property <string> al-artist-arg;
+    in property <string> al-label-arg;
     // a rate of this album is refused by the active output
     in property <bool> al-dac-unsupported;
     in property <bool> al-fav;
@@ -350,6 +392,9 @@ export global App {
     in property <string> al-path;
     in property <[TrackRow]> al-tracks;
     in property <[AlbumCard]> al-more;
+    // plugin details (item.details), filled after the page shows
+    in property <string> al-facts;
+    in property <[DetailShelf]> al-related;
 
     // ---------------------------------------------------------------- artist page
     in property <string> ar-name;
@@ -360,6 +405,24 @@ export global App {
     in property <[TrackRow]> ar-top;
     in property <[AlbumCard]> ar-own;
     in property <[AlbumCard]> ar-appears;
+    // Heart of a plugin artist whose favourite state is known.
+    in property <bool> ar-fav-shown;
+    in property <bool> ar-fav;
+    callback ar-toggle-fav();
+    // plugin details (item.details), filled after the page shows
+    in property <string> ar-bio;
+    in property <string> ar-bio-source;
+    in property <string> ar-facts;
+    in property <[DetailShelf]> ar-related;
+    // a plugin that knows this artist can start a radio from it
+    in property <bool> ar-radio;
+
+    // ---------------------------------------------------------------- radio
+    // "Start radio" (plugins with `radio`): whether a menu's item can start
+    // one (album menu, track list, track index, album id)…
+    pure callback can-radio(bool, string, int, string) -> bool;
+    // …and a radio being started.
+    in property <bool> radio-busy;
 
     // ---------------------------------------------------------------- genre / favorites / playlist
     in property <string> ge-name;
@@ -378,6 +441,15 @@ export global App {
     callback playlist-play(int, bool);
     callback playlist-export(int);
     callback playlist-import();
+    // "Add to playlist" list and new-playlist locations for what a menu
+    // acts on: 0 nothing (sidebar), 1 its track, 2 its album
+    callback playlist-targets(int);
+    in property <[PlaylistTarget]> pl-targets;
+    // "Library", then the plugins that can take the new playlist
+    in property <[string]> new-pl-locations;
+    in-out property <int> new-pl-location;
+    // location (1…), name, what to add then (0 nothing, 1 track, 2 album)
+    callback plugin-playlist-create(int, string, int);
 
     // ---------------------------------------------------------------- search
     in-out property <string> search-text;
@@ -427,6 +499,7 @@ export global App {
     callback rescan();
     in-out property <bool> watch-library;
     in-out property <bool> restore-session;
+    in-out property <bool> continuous-playback;
     in-out property <string> renderer-name;
     in-out property <bool> renderer-enabled;
     in-out property <bool> server-enabled;
@@ -540,9 +613,18 @@ export global App {
     in property <bool> br-more;
     in property <string> br-error;
     in property <bool> br-auth;
+    // card id of the item on the browse page when it has plugin actions
+    // (its menu button), else ""
+    in property <string> br-menu-id;
     callback br-load-more();
     callback br-sign-in();
     callback br-play(bool);
+    // the list is a plugin playlist the user owns (rename, delete, remove
+    // entries), and its entries can be moved
+    in property <bool> br-editable;
+    in property <bool> br-can-move;
+    callback br-playlist-rename(string);
+    callback br-playlist-delete();
     // plugins still searching ("Jellyfin, Demo"), and their errors
     in property <string> search-pending;
     in property <string> search-errors;

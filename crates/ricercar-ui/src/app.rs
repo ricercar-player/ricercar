@@ -362,6 +362,7 @@ impl Ui {
                 }
                 _ => {}
             }
+            crate::details::patch_cover(self, key, *size, &img);
         }
         drop(loader);
         crate::extras::refill_station_covers(self);
@@ -535,6 +536,8 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     crate::player::wire(&ui);
     crate::extras::wire(&ui);
     crate::plugins::wire(&ui);
+    crate::plugin_menu::wire(&ui);
+    crate::details::wire(&ui);
     crate::updates::wire(&ui);
     let snapshot_mode = snapshot.is_some();
     // The screenshot and perf tours start from a known state; the state
@@ -790,7 +793,11 @@ pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
                 album: t.album.clone().unwrap_or_default().into(),
                 album_id: t.album_id.clone().into(),
                 dur: crate::text::mmss(t.duration_ms).into(),
-                fav: t.favorite,
+                fav: if t.is_plugin() {
+                    crate::plugin_favs::known(&t.path).unwrap_or(false)
+                } else {
+                    t.favorite
+                },
                 playing: now.as_deref() == Some(t.path.as_str()),
                 hires: t.is_hires(),
                 fmt: {

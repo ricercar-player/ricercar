@@ -2,8 +2,9 @@ import { ScrollView, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, AlbumCard, TrackRow } from "state.slint";
-import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile, EmptyState } from "widgets.slint";
+import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile, EmptyState, FocusRing } from "widgets.slint";
 import { TrackTable, TrackListView, AlbumShelf, AlbumGrid, AlbumFlow, TrackMenu, BrowseContent } from "lists.slint";
+import { Biography, DetailShelves } from "details.slint";
 
 /// Top bar with history arrows and a title that appears once scrolled.
 export component TopBar inherits Rectangle {
@@ -394,6 +395,54 @@ export component AlbumsPage inherits Rectangle {
 
 // ------------------------------------------------------------------ album
 
+/// Text that opens a page (a plugin album's label): styled as a link,
+/// reached with Tab and opened with Enter or Space.
+component TextLink inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    callback clicked();
+    private property <bool> hot: ta.has-hover || fs.has-focus;
+    width: lay.preferred-width;
+    height: lay.preferred-height;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    lay := HorizontalLayout {
+        spacing: 6px;
+        Icon { y: (parent.height - self.height) / 2; source: root.icon; size: 14px; tint: Theme.accent; }
+        VerticalLayout {
+            label := Text {
+                text: root.text;
+                font-size: Theme.fs-sm;
+                font-weight: 600;
+                color: Theme.accent;
+            }
+            Rectangle { height: 1px; background: hot ? Theme.accent : transparent; }
+        }
+    }
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: Theme.r-sm;
+    }
+}
+
 export component AlbumPage inherits PageScroll {
     title: App.al-title;
     fade-at: 250px;
@@ -444,7 +493,14 @@ export component AlbumPage inherits PageScroll {
                         color: art.has-hover ? Theme.accent : Theme.text;
                         art := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => { App.artist-activate(App.al-artist); }
+                            clicked => {
+                                // a plugin album's artist, when the plugin gave its ref
+                                if App.al-plugin && App.al-artist-arg != "" {
+                                    App.navigate(Page.browse, App.al-artist-arg);
+                                } else {
+                                    App.artist-activate(App.al-artist);
+                                }
+                            }
                         }
                     }
                     Text {
@@ -465,6 +521,23 @@ export component AlbumPage inherits PageScroll {
                     text: App.al-quality + (App.al-genre != "" ? " · " + App.al-genre : "");
                     font-size: Theme.fs-sm;
                     color: Theme.text3;
+                }
+                if App.al-plugin && App.al-label-arg != "": HorizontalLayout {
+                    alignment: start;
+                    TextLink {
+                        text: @tr("Go to label");
+                        icon: Icons.tag;
+                        clicked => { App.navigate(Page.browse, App.al-label-arg); }
+                    }
+                }
+                // Facts from the plugin ("Label: …", "Released: …").
+                if App.al-facts != "": Text {
+                    text: App.al-facts;
+                    font-size: Theme.fs-sm;
+                    color: Theme.text3;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    max-height: 34px;
                 }
             }
         }
@@ -515,6 +588,7 @@ export component AlbumPage inherits PageScroll {
         }
         AlbumShelf { albums: App.al-more; playing-album: App.album-id; tile: 160px; }
     }
+    if App.al-related.length > 0: DetailShelves { shelves: App.al-related; }
 }
 
 // ------------------------------------------------------------------ artists
@@ -618,11 +692,43 @@ export component ArtistPage inherits PageScroll {
             font-size: Theme.fs-md;
             color: Theme.text2;
         }
-        ActionBar {
+        if App.ar-facts != "": Text {
+            text: App.ar-facts;
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
             padding-top: 10px;
-            show-extra: false;
-            play => { App.album-action(App.ar-name, "artist-play"); }
-            shuffle => { App.album-action(App.ar-name, "artist-shuffle"); }
+            spacing: 10px;
+            alignment: start;
+            ActionBar {
+                show-extra: false;
+                play => { App.album-action(App.ar-name, "artist-play"); }
+                shuffle => { App.album-action(App.ar-name, "artist-shuffle"); }
+            }
+            if App.ar-fav-shown: IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: App.ar-fav ? Icons.heart-fill : Icons.heart;
+                tint: App.ar-fav ? Theme.accent : Theme.text2;
+                tooltip: @tr("Favorite");
+                clicked => { App.ar-toggle-fav(); }
+            }
+            // A radio from the artist, when a plugin that knows it offers one.
+            if App.ar-radio: Button {
+                icon: Icons.radio;
+                text: App.radio-busy ? @tr("Starting radio…") : @tr("Start radio");
+                enabled: !App.radio-busy;
+                clicked => { App.album-action(App.ar-name, "artist-radio"); }
+            }
+        }
+        if App.ar-bio != "": VerticalLayout {
+            padding-top: 14px;
+            Biography {
+                max-width: 760px;
+                text: App.ar-bio;
+                source: App.ar-bio-source;
+            }
         }
     }
     if App.ar-own.length > 0: VerticalLayout {
@@ -649,6 +755,7 @@ export component ArtistPage inherits PageScroll {
         SectionTitle { text: @tr("Also appears on"); }
         AlbumFlow { albums: App.ar-appears; playing-album: App.album-id; }
     }
+    if App.ar-related.length > 0: DetailShelves { shelves: App.ar-related; }
 }
 
 // ------------------------------------------------------------------ tracks

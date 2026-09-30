@@ -6,13 +6,16 @@ import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App } from "state.slint";
 import { Button, IconButton, TextField, Toggle, Segmented, SectionTitle } from "widgets.slint";
-import { BrowseContent } from "lists.slint";
+import { BrowseContent, TrackMenu } from "lists.slint";
 import { PageScroll } from "pages.slint";
 
 /// A list from a plugin (sidebar section, album, playlist, folder).
 export component BrowsePage inherits PageScroll {
     title: App.br-title;
     fade-at: 40px;
+    // a playlist the user owns on the service
+    callback rename();
+    callback delete();
     VerticalLayout {
         padding-left: 32px;
         padding-right: 32px;
@@ -32,13 +35,32 @@ export component BrowsePage inherits PageScroll {
             color: Theme.text2;
             overflow: elide;
         }
-        if App.br-tracks.length > 0: HorizontalLayout {
+        if App.br-tracks.length > 0 || App.br-menu-id != "" || App.br-editable: HorizontalLayout {
             spacing: 10px;
             alignment: start;
             padding-top: 8px;
             padding-bottom: 8px;
-            Button { text: @tr("Play"); icon: Icons.play-fill; primary: true; clicked => { App.br-play(false); } }
-            Button { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { App.br-play(true); } }
+            if App.br-tracks.length > 0: Button { text: @tr("Play"); icon: Icons.play-fill; primary: true; clicked => { App.br-play(false); } }
+            if App.br-tracks.length > 0: Button { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { App.br-play(true); } }
+            if App.br-tracks.length > 0 && App.br-editable: Rectangle { width: 6px; }
+            if App.br-editable: IconButton { size: 36px; icon-size: 18px; icon: Icons.pencil; tooltip: @tr("Rename"); clicked => { root.rename(); } }
+            if App.br-editable: IconButton { size: 36px; icon-size: 18px; icon: Icons.trash; tooltip: @tr("Delete playlist"); clicked => { root.delete(); } }
+            // the item's menu, with the plugin's actions
+            if App.br-menu-id != "": VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: Icons.ellipsis;
+                    size: 36px;
+                    tooltip: @tr("More");
+                    clicked => {
+                        TrackMenu.album-id = App.br-menu-id;
+                        TrackMenu.album-plugin = true;
+                        TrackMenu.x = self.absolute-position.x;
+                        TrackMenu.y = self.absolute-position.y + self.height;
+                        TrackMenu.album-serial += 1;
+                    }
+                }
+            }
         }
         BrowseContent {
             cards: App.br-cards;
@@ -169,6 +191,8 @@ component CommitField inherits TextField {
 /// The settings a plugin declares, grouped by section. Each change applies
 /// at once; refused values say why under their line.
 export component PluginSettingsDialog inherits Rectangle {
+    // Width of the rows (the dialog less its padding).
+    private property <length> body-width: 512px;
     background: Theme.scrim;
     TouchArea { clicked => { App.psettings-close(); } }
     forward-focus: keys;
@@ -182,7 +206,7 @@ export component PluginSettingsDialog inherits Rectangle {
             reject
         }
         Rectangle {
-            width: 560px;
+            width: root.body-width + 48px;
             height: lay.preferred-height;
             border-radius: Theme.r-lg;
             background: Theme.overlay;
@@ -210,22 +234,24 @@ export component PluginSettingsDialog inherits Rectangle {
                                 color: Theme.text2;
                                 height: self.preferred-height + (i > 0 ? 18px : 6px);
                                 vertical-alignment: bottom;
-                                overflow: elide;
+                                wrap: word-wrap;
                             }
                             if r.kind != 0: HorizontalLayout {
                                 padding-top: 8px;
                                 padding-bottom: 8px;
                                 spacing: 16px;
                                 min-height: 52px;
+                                // An explicit width: wrapped text then gets the
+                                // height of all its lines (long descriptions).
                                 VerticalLayout {
+                                    width: max(160px, root.body-width - ctl.preferred-width - 16px);
                                     alignment: center;
                                     spacing: 2px;
-                                    horizontal-stretch: 1;
                                     Text { text: r.label; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; wrap: word-wrap; }
                                     if r.description != "": Text { text: r.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
                                     if r.restart: Text { text: @tr("Restarts the plugin when changed."); font-size: Theme.fs-xs; color: Theme.text3; wrap: word-wrap; }
                                 }
-                                VerticalLayout {
+                                ctl := VerticalLayout {
                                     alignment: center;
                                     HorizontalLayout {
                                         alignment: end;

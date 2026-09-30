@@ -1,0 +1,147 @@
+// Details a plugin gives about an artist or an album (item.details):
+// biography, related shelves and facts.
+
+import { Theme } from "theme.slint";
+import { App, DetailShelf } from "state.slint";
+import { SectionTitle, ArtistTile, FocusRing } from "widgets.slint";
+import { AlbumShelf, TrackTable } from "lists.slint";
+
+/// A text button ("Read more"): Tab reaches it, Space or Enter presses it.
+component TextLink inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    width: label.preferred-width;
+    height: label.preferred-height + 4px;
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { clicked(); }
+    label := Text {
+        text: root.text;
+        font-size: Theme.fs-sm;
+        font-weight: 600;
+        color: ta.has-hover ? Theme.text : Theme.accent;
+    }
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if fs.has-focus: FocusRing {
+        x: -4px;
+        y: -2px;
+        width: parent.width + 8px;
+        height: parent.height + 4px;
+        border-radius: Theme.r-sm;
+    }
+}
+
+/// Plain-text biography, folded to its first lines until "Read more".
+export component Biography inherits Rectangle {
+    in property <string> text;
+    in property <string> source;
+    in property <int> folded-lines: 4;
+    private property <bool> expanded;
+    private property <length> line-h: probe.preferred-height;
+    private property <length> folded-h: line-h * folded-lines;
+    private property <bool> long: body.preferred-height > folded-h + 1px;
+    private property <bool> footer: long || source != "";
+    // One line of the body's font, to measure its line height.
+    probe := Text {
+        visible: false;
+        text: "X";
+        font-size: Theme.fs-md;
+    }
+    // The text wraps to the page's width: only heights come from it.
+    VerticalLayout {
+        spacing: 6px;
+        text-box := Rectangle {
+            height: expanded || !long ? body.preferred-height : folded-h;
+            clip: true;
+            body := Text {
+                y: 0;
+                width: parent.width;
+                height: self.preferred-height;
+                text: root.text;
+                font-size: Theme.fs-md;
+                color: Theme.text2;
+                wrap: word-wrap;
+            }
+        }
+        Rectangle { height: footer ? 22px : 0px; }
+    }
+    // "Read more" and the source, under the text (outside the layout, so
+    // whether the text is long never feeds back into the page's width).
+    if footer: Rectangle {
+        x: 0;
+        y: text-box.height + 6px;
+        width: root.width;
+        height: 22px;
+        HorizontalLayout {
+            spacing: 16px;
+            alignment: start;
+            if long: TextLink {
+                y: (parent.height - self.height) / 2;
+                text: expanded ? @tr("Show less") : @tr("Read more");
+                clicked => { root.expanded = !root.expanded; }
+            }
+            if source != "": Text {
+                text: @tr("Source: {}", root.source);
+                font-size: Theme.fs-sm;
+                color: Theme.text3;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+/// The related shelves of a plugin item: albums and playlists as tiles,
+/// artists as round tiles, tracks as a short table.
+export component DetailShelves inherits VerticalLayout {
+    in property <[DetailShelf]> shelves;
+    spacing: 0;
+    for s in shelves: VerticalLayout {
+        padding-top: 28px;
+        spacing: 8px;
+        HorizontalLayout { padding-left: 32px; padding-right: 32px; SectionTitle { text: s.title; } }
+        if s.cards.length > 0: HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            AlbumShelf { albums: s.cards; playing-album: App.album-id; tile: 160px; }
+        }
+        if s.artists.length > 0: HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            Flickable {
+                height: 208px;
+                content-width: s.artists.length * 170px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for a in s.artists: ArtistTile {
+                        size: 160px;
+                        cover: a.cover;
+                        name: a.name;
+                        subtitle: a.source;
+                        open => { App.artist-activate(a.name); }
+                    }
+                }
+            }
+        }
+        if s.tracks.length > 0: HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            TrackTable { rows: s.tracks; list: s.list; show-cover: true; header: false; }
+        }
+    }
+}

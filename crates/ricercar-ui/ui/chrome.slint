@@ -4,6 +4,41 @@ import { Icons } from "icons.slint";
 import { App, Page, ChainHop } from "state.slint";
 import { Icon, IconButton, Cover, SeekBar, TextField, Badge, FocusRing } from "widgets.slint";
 
+// One line of text that, when wider than its box, scrolls to its end after
+// a short pause.
+component MarqueeLine inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size;
+    in property <int> font-weight;
+    in property <color> text-color;
+    clip: true;
+    private property <length> overflow: max(0px, line.preferred-width - root.width);
+    private property <bool> go;
+    Timer {
+        interval: 500ms;
+        running: !root.go && root.overflow > 0px;
+        triggered => { root.go = true; }
+    }
+    line := Text {
+        x: 0px;
+        width: self.preferred-width;
+        height: root.height;
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        color: root.text-color;
+        vertical-alignment: center;
+    }
+    states [
+        moving when root.go: {
+            line.x: -root.overflow;
+            in {
+                animate line.x { duration: max(1s, root.overflow / 40px * 1s); easing: linear; }
+            }
+        }
+    ]
+}
+
 component NavItem inherits Rectangle {
     in property <image> icon;
     in property <string> text;
@@ -29,14 +64,22 @@ component NavItem inherits Rectangle {
             size: 18px;
             tint: active ? Theme.accent : ta.has-hover ? Theme.text : Theme.text2;
         }
-        Text {
-            text: root.text;
-            font-size: Theme.fs-md;
-            font-weight: active ? 600 : 500;
-            color: active || ta.has-hover ? Theme.text : Theme.text2;
-            vertical-alignment: center;
-            overflow: elide;
+        // Elided here; while hovered, a long name shows whole over the row.
+        clip-box := Rectangle {
             horizontal-stretch: 1;
+            min-width: 0px;
+            clip: true;
+            label := Text {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                text: root.text;
+                font-size: Theme.fs-md;
+                font-weight: active ? 600 : 500;
+                color: active || ta.has-hover ? Theme.text : Theme.text2;
+                vertical-alignment: center;
+                overflow: elide;
+            }
         }
         if trailing != "": Text {
             text: root.trailing;
@@ -58,6 +101,20 @@ component NavItem inherits Rectangle {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
+        }
+    }
+    // A name cut short: shown whole over the row (trailing label included)
+    // while hovered, scrolling when it is still too long.
+    if ta.has-hover && label.preferred-width > clip-box.width + 0.5px: Rectangle {
+        x: 42px;
+        width: root.width - 54px;
+        background: Theme.panel;
+        Rectangle { background: root.background; }
+        MarqueeLine {
+            text: root.text;
+            font-size: Theme.fs-md;
+            font-weight: root.active ? 600 : 500;
+            text-color: Theme.text;
         }
     }
     ta := TouchArea {

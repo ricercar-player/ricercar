@@ -404,6 +404,12 @@ export component SettingsPage inherits PageScroll {
                 hint: @tr("Restore the queue and position at startup (paused).");
                 Toggle { checked <=> App.restore-session; toggled => { App.settings-changed(); } }
             }
+            Divider { }
+            Row {
+                label: @tr("Continuous playback");
+                hint: @tr("When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin.");
+                Toggle { label: @tr("Continuous playback"); checked <=> App.continuous-playback; toggled => { App.settings-changed(); } }
+            }
         }
 
         Group {

@@ -593,11 +593,85 @@ fn perf_search(ui: &Rc<Ui>) {
 
 // ------------------------------------------------------------------ plugins tour
 
+/// Open the context menu of a track (`list`, `index`) or, with `album`,
+/// of the album page, as a right click would.
+fn open_menu(ui: &Ui, album: bool, list: &str, index: i32) {
+    let tm = ui.window.global::<crate::TrackMenu>();
+    tm.set_x(620.0);
+    tm.set_y(430.0);
+    if album {
+        tm.set_album_id(ui.app().get_al_id());
+        tm.set_album_plugin(ui.app().get_al_plugin());
+        tm.set_album_serial(tm.get_album_serial() + 1);
+    } else {
+        tm.set_list(list.into());
+        tm.set_index(index);
+        tm.set_track_plugin(list != "queue");
+        tm.set_serial(tm.get_serial() + 1);
+    }
+}
+
+/// Close an open context menu: a click beside it.
+fn close_menu(ui: &Ui) {
+    click(ui, 1200.0, 200.0);
+}
+
+/// Where the rename and delete buttons of a plugin playlist's header sit
+/// (window coordinates, the page scrolled to the top).
+const PL_RENAME: (f32, f32) = (511.0, 167.0);
+const PL_DELETE: (f32, f32) = (557.0, 167.0);
+
+/// A click of the left button at window coordinates.
+fn click(ui: &Ui, x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let w = ui.window.window();
+    let position = slint::LogicalPosition::new(x, y);
+    let button = PointerEventButton::Left;
+    w.dispatch_event(WindowEvent::PointerMoved { position });
+    w.dispatch_event(WindowEvent::PointerPressed { position, button });
+    w.dispatch_event(WindowEvent::PointerReleased { position, button });
+    w.dispatch_event(WindowEvent::PointerExited);
+}
+
+/// Keys typed into the focused element.
+fn type_text(ui: &Ui, text: &str) {
+    use slint::platform::WindowEvent;
+    let w = ui.window.window();
+    for c in text.chars() {
+        let text = slint::SharedString::from(c.to_string());
+        w.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        w.dispatch_event(WindowEvent::KeyReleased { text });
+    }
+}
+
+/// The context menu of track `index` of `list`, as a right click opens it.
+fn open_track_menu(ui: &Ui, list: &str, index: i32, x: f32, y: f32) {
+    let m = ui.window.global::<crate::TrackMenu>();
+    m.set_list(list.into());
+    m.set_index(index);
+    m.set_track_plugin(true);
+    m.set_x(x);
+    m.set_y(y);
+    m.set_serial(m.get_serial() + 1);
+}
+
 /// `RICERCAR_SNAPSHOT_TOUR=plugins`: declares the reference plugin
 /// (`ricercar-demo-plugin`, next to this binary; build it with
 /// `cargo build -p ricercar-core --bin ricercar-demo-plugin`), then captures
 /// the sign-in dialog, the browse pages, a playing plugin track, the
 /// plugin search tab and the plugin's settings dialog.
+/// Scroll the page under the middle of the window down by `dy` pixels.
+fn scroll_page(ui: &Ui, dy: f32) {
+    use slint::platform::WindowEvent;
+    ui.window
+        .window()
+        .dispatch_event(WindowEvent::PointerScrolled {
+            position: slint::LogicalPosition::new(700.0, 400.0),
+            delta_x: 0.0,
+            delta_y: -dy,
+        });
+}
+
 fn plugins_tour(dir: std::path::PathBuf) {
     let bin = std::env::current_exe()
         .ok()
@@ -704,15 +778,43 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            // Its heart, filled at once (favourite state of the plugin).
+            "plugin-album-fav",
+            (
+                200,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.invoke_album_action(app.get_al_id(), "fav".into());
+                }),
+            ),
+        ),
+        (
+            // Go to album / artist and the plugin's actions on a track.
+            "plugin-track-menu",
+            (600, Box::new(|ui| open_menu(ui, false, "album", 0))),
+        ),
+        (
+            // The album's own menu (More button): its actions.
+            "plugin-album-menu",
+            (
+                200,
+                Box::new(|ui| {
+                    close_menu(ui);
+                    open_menu(ui, true, "", 0);
+                }),
+            ),
+        ),
+        (
             "plugin-signal-path",
             (
                 1500,
                 Box::new(|ui| {
+                    close_menu(ui);
                     let tracks = ui
                         .st
                         .borrow()
                         .lists
-                        .get("browse")
+                        .get("album")
                         .cloned()
                         .unwrap_or_default();
                     let infos: Vec<ricercar_core::TrackInfo> =
@@ -727,10 +829,39 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            // A queue entry's menu, in the now-playing view.
+            "plugin-queue-menu",
+            (
+                300,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_np_tab(1);
+                    app.set_now_playing_open(true);
+                    // The album's tracks, with their refs, in the queue.
+                    let tracks = ui
+                        .st
+                        .borrow()
+                        .lists
+                        .get("album")
+                        .cloned()
+                        .unwrap_or_default();
+                    let infos = tracks.iter().map(ricercar_core::TrackInfo::from).collect();
+                    let ctl = ui.ctx.ctl.clone();
+                    ctl.play_tracks(infos, 0, ricercar_core::PlayContext::None);
+                    let first = ctl.lock().queue.first().map(|q| q.id);
+                    slint::Timer::single_shot(Duration::from_millis(400), move || ctl.pause());
+                    if let Some(id) = first {
+                        open_menu(ui, false, "queue", id as i32);
+                    }
+                }),
+            ),
+        ),
+        (
             "plugin-now-album",
             (
                 600,
                 Box::new(|ui| {
+                    close_menu(ui);
                     let app = ui.app();
                     app.set_now_playing_open(false);
                     // The bar's title of a playing plugin track.
@@ -739,10 +870,68 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            // Lyrics given by the plugin (its first album).
+            "plugin-lyrics",
+            (
+                600,
+                Box::new(move |ui| {
+                    let id = format!(
+                        "{}{}",
+                        crate::plugins::ALBUM_CARD,
+                        album("album/1", "Demo Sessions")
+                    );
+                    ui.navigate(Page::Album, &id, true);
+                    slint::Timer::single_shot(Duration::from_millis(700), || {
+                        with_ui(|ui| {
+                            // Only the track with synced lyrics: the demo
+                            // tracks last a second.
+                            let first: Vec<ricercar_core::TrackInfo> = ui
+                                .st
+                                .borrow()
+                                .lists
+                                .get("album")
+                                .and_then(|l| l.iter().find(|t| t.title == "Opening"))
+                                .map(ricercar_core::TrackInfo::from)
+                                .into_iter()
+                                .collect();
+                            let ctl = ui.ctx.ctl.clone();
+                            ctl.play_tracks(first, 0, ricercar_core::PlayContext::None);
+                            slint::Timer::single_shot(Duration::from_millis(200), move || {
+                                ctl.pause()
+                            });
+                            let app = ui.app();
+                            app.set_np_tab(0);
+                            app.set_now_playing_open(true);
+                        })
+                    });
+                }),
+            ),
+        ),
+        (
+            "plugin-artist",
+            (400, Box::new(|ui| ui.app().invoke_go_to_artist())),
+        ),
+        (
+            // A plugin artist (its artist_ref) with its actions menu.
+            "plugin-artist-menu",
+            (
+                1200,
+                Box::new(move |ui| {
+                    let tm = ui.window.global::<crate::TrackMenu>();
+                    tm.set_album_id(ui.app().get_br_menu_id());
+                    tm.set_album_plugin(true);
+                    tm.set_x(300.0);
+                    tm.set_y(200.0);
+                    tm.set_album_serial(tm.get_album_serial() + 1);
+                }),
+            ),
+        ),
+        (
             "plugin-home",
             (
                 600,
                 Box::new(|ui| {
+                    close_menu(ui);
                     ui.app().set_now_playing_open(false);
                     ui.navigate(Page::Home, "", true);
                 }),
@@ -774,6 +963,199 @@ fn plugins_tour(dir: std::path::PathBuf) {
                     app.set_search_kind(0);
                     app.set_search_scope(1);
                     app.invoke_search_scope_changed();
+                }),
+            ),
+        ),
+        // Playlist editing on the service (the demo's "Demo mix" is the
+        // user's, "Followed picks" is followed).
+        (
+            "plugin-playlist",
+            (
+                600,
+                Box::new(move |ui| {
+                    ui.app().set_search_scope(0);
+                    if ui.ctx.lib.playlists().is_empty() {
+                        ui.ctx.lib.create_playlist("Late night");
+                        crate::views::refresh_playlists(ui);
+                    }
+                    ui.navigate(Page::Browse, &album("playlist/1", "Demo mix"), true);
+                }),
+            ),
+        ),
+        (
+            "plugin-playlist-menu",
+            (
+                200,
+                Box::new(|ui| open_track_menu(ui, "browse", 1, 700.0, 300.0)),
+            ),
+        ),
+        (
+            "plugin-playlist-moved",
+            (
+                200,
+                Box::new(|ui| {
+                    // Dismiss the menu, then move the first entry down.
+                    click(ui, 1400.0, 880.0);
+                    crate::plugins::entry_action(ui, 0, "pl-down");
+                }),
+            ),
+        ),
+        (
+            "plugin-add-to-playlist",
+            (
+                200,
+                Box::new(|ui| {
+                    open_track_menu(ui, "browse", 0, 700.0, 300.0);
+                    // "Add to playlist", the fourth line of a track's menu.
+                    let ui = ui.clone();
+                    slint::Timer::single_shot(Duration::from_millis(200), move || {
+                        click(&ui, 760.0, 300.0 + 5.0 + 3.0 * 34.0 + 17.0)
+                    });
+                }),
+            ),
+        ),
+        (
+            "plugin-new-playlist",
+            (
+                200,
+                Box::new(|ui| {
+                    // "New playlist…", under "Back" and a separator.
+                    click(ui, 760.0, 300.0 + 5.0 + 34.0 + 9.0 + 17.0);
+                    let ui = ui.clone();
+                    slint::Timer::single_shot(Duration::from_millis(200), move || {
+                        ui.app().set_new_pl_location(1);
+                        type_text(&ui, "Road trip");
+                    });
+                }),
+            ),
+        ),
+        (
+            "plugin-playlist-created",
+            (
+                200,
+                // Create it on the service with the track.
+                Box::new(|ui| type_text(ui, &char::from(slint::platform::Key::Return).to_string())),
+            ),
+        ),
+        (
+            "plugin-playlist-new-page",
+            (
+                200,
+                Box::new(move |ui| {
+                    ui.navigate(Page::Browse, &album("playlist/3", "Road trip"), true)
+                }),
+            ),
+        ),
+        (
+            "plugin-playlist-renamed",
+            (
+                200,
+                Box::new(|ui| {
+                    click(ui, PL_RENAME.0, PL_RENAME.1);
+                    let ui = ui.clone();
+                    slint::Timer::single_shot(Duration::from_millis(200), move || {
+                        let enter = char::from(slint::platform::Key::Return);
+                        let end = char::from(slint::platform::Key::End);
+                        type_text(&ui, &format!("{end} 2{enter}"));
+                    });
+                }),
+            ),
+        ),
+        (
+            "plugin-playlist-delete",
+            (200, Box::new(|ui| click(ui, PL_DELETE.0, PL_DELETE.1))),
+        ),
+        (
+            "plugin-playlist-deleted",
+            (
+                200,
+                // From Cancel (focused first) to Delete.
+                Box::new(|ui| {
+                    let enter = char::from(slint::platform::Key::Return);
+                    type_text(ui, &format!("\t{enter}"));
+                }),
+            ),
+        ),
+        (
+            "plugin-playlist-followed",
+            (
+                200,
+                Box::new(move |ui| {
+                    ui.navigate(Page::Browse, &album("playlist/2", "Followed picks"), true);
+                }),
+            ),
+        ),
+        (
+            "plugin-artist-details",
+            (
+                600,
+                Box::new(|ui| ui.navigate(Page::Artist, "Demo Ensemble", true)),
+            ),
+        ),
+        (
+            "plugin-artist-related",
+            (200, Box::new(|ui| scroll_page(ui, 560.0))),
+        ),
+        (
+            "plugin-album-details",
+            (
+                1200,
+                Box::new(move |ui| {
+                    let id = format!(
+                        "{}{}",
+                        crate::plugins::ALBUM_CARD,
+                        album("album/1", "Demo Sessions")
+                    );
+                    ui.navigate(Page::Album, &id, true)
+                }),
+            ),
+        ),
+        (
+            "plugin-radio-menu",
+            (
+                600,
+                Box::new(|ui| {
+                    // The context menu of the album's first track.
+                    let m = ui.window.global::<crate::TrackMenu>();
+                    m.set_list("album".into());
+                    m.set_index(0);
+                    m.set_track_plugin(true);
+                    m.set_x(900.0);
+                    m.set_y(420.0);
+                    m.set_serial(m.get_serial() + 1);
+                }),
+            ),
+        ),
+        (
+            "plugin-radio-queue",
+            (
+                300,
+                Box::new(|ui| {
+                    // "Start radio" in that menu: a click outside closes it.
+                    use slint::platform::{PointerEventButton, WindowEvent};
+                    let w = ui.window.window();
+                    let position = slint::LogicalPosition::new(400.0, 700.0);
+                    let button = PointerEventButton::Left;
+                    w.dispatch_event(WindowEvent::PointerPressed { position, button });
+                    w.dispatch_event(WindowEvent::PointerReleased { position, button });
+                    // The toast counts the tracks queued (the demo's
+                    // one-second tracks are over by the capture).
+                    crate::views::track_action(ui, "album", 0, "radio");
+                    ui.app().set_queue_open(true);
+                }),
+            ),
+        ),
+        (
+            "settings-playback",
+            (
+                600,
+                Box::new(|ui| {
+                    ui.app().set_queue_open(false);
+                    ui.navigate(Page::Settings, "", true);
+                    // Down to the end of "Audio output", past the devices.
+                    slint::Timer::single_shot(Duration::from_millis(400), || {
+                        with_ui(|ui| scroll_page(ui, 520.0))
+                    });
                 }),
             ),
         ),

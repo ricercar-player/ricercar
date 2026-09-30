@@ -10,7 +10,7 @@ import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays
 import { BrowsePage, SignInDialog, PluginSettingsDialog, PluginsPage } from "plugins.slint";
 
 export { App, Page, Theme, TrackMenu }
-export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, MenuEntry } from "state.slint";
+export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, PlaylistTarget, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, MenuEntry, ItemAction } from "state.slint";
 
 export component MainWindow inherits Window {
     title: App.has-track ? App.title + " — " + App.artist : "ricercar";
@@ -24,7 +24,8 @@ export component MainWindow inherits Window {
     default-font-size: Theme.fs-base;
     forward-focus: keys;
 
-    // dialogs: 0 none, 1 new playlist, 2 rename playlist, 3 delete playlist
+    // dialogs: 0 none, 1 new playlist, 2 rename playlist, 3 delete playlist,
+    // 4 rename a plugin playlist, 5 delete a plugin playlist (on the service)
     private property <int> dialog;
     private property <string> dialog-value;
     // a new playlist created from a menu receives the menu's item
@@ -42,10 +43,12 @@ export component MainWindow inherits Window {
     private property <bool> w-theme-dark: App.theme-dark;
     changed w-menu-serial => {
         menu-album = false;
+        App.menu-opened(false);
         menu-open = true;
     }
     changed w-album-serial => {
         menu-album = true;
+        App.menu-opened(true);
         menu-open = true;
     }
     changed w-toast-serial => {
@@ -72,6 +75,13 @@ export component MainWindow inherits Window {
 
     keys := FocusScope {
         key-pressed(e) => {
+            // Escape leaves a playlist dialog whose focus is on a button.
+            if dialog != 0 && e.text == Key.Escape {
+                pending-add = 0;
+                dialog = 0;
+                keys.focus();
+                return accept;
+            }
             if dialog != 0 || App.signin-open || App.install-open || App.root-path-open || App.psettings-open { return reject; }
             if e.text == " " {
                 App.play-pause();
@@ -131,6 +141,7 @@ export component MainWindow inherits Window {
                 vertical-stretch: 1;
                 sidebar := Sidebar {
                     new-playlist => {
+                        App.playlist-targets(0);
                         pending-add = 0;
                         dialog-value = "";
                         dialog = 1;
@@ -158,7 +169,13 @@ export component MainWindow inherits Window {
                     if App.page == Page.search: SearchPage { }
                     if App.page == Page.radio: RadioPage { }
                     if App.page == Page.settings: SettingsPage { }
-                    if App.page == Page.browse: BrowsePage { }
+                    if App.page == Page.browse: BrowsePage {
+                        rename => {
+                            dialog-value = App.br-title;
+                            dialog = 4;
+                        }
+                        delete => { dialog = 5; }
+                    }
                     if App.page == Page.plugins: PluginsPage { }
                 }
                 if App.queue-open && !App.now-playing-open: QueuePanel { }
@@ -193,6 +210,7 @@ export component MainWindow inherits Window {
             win-h: root.height;
             dismiss => { menu-open = false; }
             new-playlist-for(album) => {
+                menu-open = false;
                 pending-add = album ? 2 : 1;
                 dialog-value = "";
                 dialog = 1;
@@ -209,18 +227,27 @@ export component MainWindow inherits Window {
         }
 
         if dialog != 0: dlg := Dialog {
-            title: dialog == 1 ? @tr("New playlist") : dialog == 2 ? @tr("Rename playlist") : @tr("Delete “{}”?", App.pl-name);
-            body: dialog == 3 ? @tr("The playlist is removed; your music files are not touched.") : "";
-            with-input: dialog != 3;
-            danger: dialog == 3;
-            confirm-text: dialog == 1 ? @tr("Create") : dialog == 2 ? @tr("Rename") : @tr("Delete");
+            title: dialog == 1 ? @tr("New playlist") : dialog == 2 || dialog == 4 ? @tr("Rename playlist") : @tr("Delete “{}”?", dialog == 5 ? App.br-title : App.pl-name);
+            body: dialog == 3 ? @tr("The playlist is removed; your music files are not touched.") : dialog == 5 ? @tr("The playlist is deleted from {}. This cannot be undone.", App.br-sub) : "";
+            with-input: dialog != 3 && dialog != 5;
+            danger: dialog == 3 || dialog == 5;
+            confirm-text: dialog == 1 ? @tr("Create") : dialog == 2 || dialog == 4 ? @tr("Rename") : @tr("Delete");
+            choice-label: @tr("Create in");
+            choices: dialog == 1 ? App.new-pl-locations : [];
+            choice <=> App.new-pl-location;
             value <=> dialog-value;
             init => { self.focus-input(); }
             confirm(v) => {
-                if dialog == 1 {
+                if dialog == 1 && App.new-pl-location > 0 {
+                    App.plugin-playlist-create(App.new-pl-location, v, pending-add);
+                } else if dialog == 1 {
                     App.playlist-create(v);
                     if pending-add == 1 { App.track-action(TrackMenu.list, TrackMenu.index, "pl:new"); }
                     if pending-add == 2 { App.album-action(TrackMenu.album-id, "pl:new"); }
+                } else if dialog == 4 {
+                    App.br-playlist-rename(v);
+                } else if dialog == 5 {
+                    App.br-playlist-delete();
                 } else if dialog == 2 {
                     App.playlist-rename(App.pl-id, v);
                 } else {

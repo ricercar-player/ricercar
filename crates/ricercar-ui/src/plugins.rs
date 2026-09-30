@@ -12,7 +12,7 @@ use ricercar_core::plugin::{
     AuthState, Item, ItemKind, PluginError, PluginStatus, RunState, catalog,
 };
 use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
-use slint::{Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use crate::app::{RowOpts, TILE, Ui, post, set_rows, track_rows, with_ui};
 use crate::images::Source;
@@ -48,7 +48,12 @@ pub struct PluginsView {
     signin_url: String,
     /// Browse page: plugin id, ref, next offset.
     browse: Option<(String, String, usize)>,
-    browse_serial: u64,
+    pub browse_serial: u64,
+    /// Entry ids of the browse page's tracks (a plugin playlist), in the
+    /// order of its track list.
+    browse_entries: Vec<Option<String>>,
+    /// Plugins offered by the new-playlist dialog after "Library" (index 1…).
+    new_locations: Vec<String>,
     /// Plugin ids behind the search scopes after "Everything" and "My
     /// library" (index 2…).
     scope_ids: Vec<String>,
@@ -78,6 +83,41 @@ pub struct PluginsView {
     loading_home: std::collections::HashSet<String>,
     /// The settings dialog, when open.
     pub settings: Option<crate::plugin_settings::Open>,
+    /// Items seen in lists that carry refs or actions, by (plugin id, ref):
+    /// what the context menus and the queue need once the item became a
+    /// plain track or card (see `plugin_menu`).
+    pub known: HashMap<(String, String), Item>,
+    /// The plugin item under the open context menu, and the serial of the
+    /// "play" action being read for it.
+    pub menu: Option<(String, Item)>,
+    pub action_serial: u64,
+    /// Details on the artist and album pages, radios.
+    pub details: crate::details::DetailsView,
+}
+
+impl PluginsView {
+    /// A plugin item seen this session: remembered from a list, else in
+    /// the plugin's library, sidebar sections or search results.
+    pub fn lookup(&self, id: &str, reference: &str) -> Option<Item> {
+        let hit = |list: &[Item]| list.iter().find(|i| i.reference == reference).cloned();
+        if let Some(it) = self.known.get(&(id.to_string(), reference.to_string())) {
+            return Some(it.clone());
+        }
+        let lib = self.libs.iter().filter(|l| l.id == id).find_map(|l| {
+            hit(&l.albums)
+                .or_else(|| hit(&l.artists))
+                .or_else(|| hit(&l.tracks))
+                .or_else(|| hit(&l.playlists))
+        });
+        lib.or_else(|| self.sections.get(id).and_then(|s| hit(s)))
+            .or_else(|| {
+                self.search.iter().filter(|p| p.id == id).find_map(|p| {
+                    hit(&p.artists)
+                        .or_else(|| hit(&p.albums))
+                        .or_else(|| hit(&p.playlists))
+                })
+            })
+    }
 }
 
 /// A Home shelf from a plugin: plugin id, title, cards.
@@ -152,7 +192,7 @@ pub fn browse_arg(id: &str, reference: &str, title: &str) -> String {
     format!("{id}{SEP}{reference}{SEP}{title}")
 }
 
-fn parse_arg(arg: &str) -> Option<(String, String, String)> {
+pub fn parse_arg(arg: &str) -> Option<(String, String, String)> {
     let mut it = arg.splitn(3, SEP);
     Some((
         it.next()?.to_string(),
@@ -161,12 +201,12 @@ fn parse_arg(arg: &str) -> Option<(String, String, String)> {
     ))
 }
 
-fn host(ui: &Ui) -> ricercar_core::plugin::PluginHost {
+pub fn host(ui: &Ui) -> ricercar_core::plugin::PluginHost {
     ui.ctx.plugins.clone()
 }
 
 /// Plain-text message for an error (never the plugin's markup).
-fn error_text(name: &str, e: &PluginError) -> String {
+pub fn error_text(name: &str, e: &PluginError) -> String {
     match e {
         PluginError::AuthRequired => format!("{} {name}", t("Sign in to")),
         PluginError::NotFound => t("Not found").into(),
@@ -184,7 +224,12 @@ fn error_text(name: &str, e: &PluginError) -> String {
     }
 }
 
-fn name_of(ui: &Ui, id: &str) -> String {
+/// Plain-text message for an error of plugin `id`.
+pub fn error_message(ui: &Ui, id: &str, e: &PluginError) -> String {
+    error_text(&name_of(ui, id), e)
+}
+
+pub fn name_of(ui: &Ui, id: &str) -> String {
     host(ui)
         .status(id)
         .map(|s| s.name)
@@ -358,6 +403,8 @@ pub fn load_home_shelves(ui: &Rc<Ui>) {
                         return;
                     }
                 };
+                crate::plugin_favs::remember(ui, &id, &items);
+                crate::plugin_menu::remember(ui, &id, &items);
                 let cards: Vec<AlbumCard> = items
                     .iter()
                     .filter(|i| i.kind != ItemKind::Track && i.is_browsable())
@@ -729,13 +776,18 @@ pub fn load_browse(ui: &Rc<Ui>, arg: &str) {
     };
     app.set_br_title(title.into());
     app.set_br_sub(name_of(ui, &id).into());
+    app.set_br_editable(false);
+    app.set_br_can_move(false);
     let serial = {
         let mut pv = ui.plugins.borrow_mut();
         pv.browse_serial += 1;
         pv.browse = Some((id.clone(), reference.clone(), 0));
+        pv.browse_entries.clear();
         pv.browse_serial
     };
-    fetch_page(ui, serial, id, reference, 0);
+    crate::plugin_menu::browse_opened(ui, &id, &reference, serial);
+    check_editable(ui, serial, &id, &reference);
+    fetch_page(ui, serial, id, reference, 0, false);
 }
 
 fn reload_browse(ui: &Rc<Ui>) {
@@ -745,11 +797,19 @@ fn reload_browse(ui: &Rc<Ui>) {
     }
 }
 
-fn fetch_page(ui: &Ui, serial: u64, id: String, reference: String, offset: usize) {
+/// Read a page of the browse list from `offset`. `replace`: read the list
+/// again from the start (as much as was shown, a page at least) and swap it
+/// in at once, keeping the page in place (after a playlist edit).
+fn fetch_page(ui: &Ui, serial: u64, id: String, reference: String, offset: usize, replace: bool) {
+    let limit = if replace {
+        ui.models.br_tracks.row_count().clamp(PAGE, 200)
+    } else {
+        PAGE
+    };
     ui.app().set_br_loading(true);
     let h = host(ui);
     std::thread::spawn(move || {
-        let r = h.browse_list(&id, &reference, offset, PAGE);
+        let r = h.browse_list(&id, &reference, offset, limit);
         post(move |ui| {
             if ui.plugins.borrow().browse_serial != serial {
                 return;
@@ -758,17 +818,32 @@ fn fetch_page(ui: &Ui, serial: u64, id: String, reference: String, offset: usize
             app.set_br_loading(false);
             match r {
                 Ok((items, _, more)) => {
+                    crate::plugin_favs::remember(ui, &id, &items);
+                    crate::plugin_menu::remember(ui, &id, &items);
                     let cards: Vec<AlbumCard> = items
                         .iter()
                         .filter(|i| i.kind != ItemKind::Track && i.is_browsable())
                         .map(|i| card(ui, &id, i))
                         .collect();
-                    ui.models.br_cards.extend(cards);
                     let tracks = tracks_of(&id, &items);
-                    let rows = track_rows(ui, &tracks, row_opts(ui.models.br_tracks.row_count()));
-                    ui.models.br_tracks.extend(rows);
-                    if let Some(list) = ui.st.borrow_mut().lists.get_mut("browse") {
-                        list.extend(tracks);
+                    let entries = items
+                        .iter()
+                        .filter(|i| i.kind == ItemKind::Track)
+                        .map(|i| i.entry_id.clone());
+                    if replace {
+                        set_rows(&ui.models.br_cards, cards);
+                        set_rows(&ui.models.br_tracks, track_rows(ui, &tracks, row_opts(0)));
+                        ui.plugins.borrow_mut().browse_entries = entries.collect();
+                        ui.st.borrow_mut().lists.insert("browse".into(), tracks);
+                    } else {
+                        ui.models.br_cards.extend(cards);
+                        let rows =
+                            track_rows(ui, &tracks, row_opts(ui.models.br_tracks.row_count()));
+                        ui.models.br_tracks.extend(rows);
+                        ui.plugins.borrow_mut().browse_entries.extend(entries);
+                        if let Some(list) = ui.st.borrow_mut().lists.get_mut("browse") {
+                            list.extend(tracks);
+                        }
                     }
                     app.set_br_more(more);
                     if let Some(b) = ui.plugins.borrow_mut().browse.as_mut() {
@@ -791,7 +866,7 @@ fn load_more(ui: &Ui) {
         (pv.browse_serial, pv.browse.clone())
     };
     if let Some((id, reference, offset)) = b {
-        fetch_page(ui, serial, id, reference, offset);
+        fetch_page(ui, serial, id, reference, offset, false);
     }
 }
 
@@ -825,7 +900,11 @@ pub fn card_action(ui: &Rc<Ui>, arg: &str, action: &str) {
     };
     match action {
         "open" => ui.navigate(Page::Browse, arg, true),
-        "fav" => favorite(ui, &id, &reference, true),
+        "artist" => return crate::plugin_menu::card_artist(ui, &id, &reference),
+        "fav" => {
+            crate::plugin_favs::toggle(ui, &ricercar_core::plugin::plugin_uri(&id, &reference))
+        }
+        "radio" => return crate::details::item_radio(ui, &id, &reference),
         "play" | "shuffle" | "next" | "queue" => {}
         a if a.starts_with("pl:") => {}
         _ => return,
@@ -878,13 +957,6 @@ pub fn favorite(ui: &Ui, id: &str, reference: &str, on: bool) {
     });
 }
 
-/// Favourite toggle on a plugin track of any list.
-pub fn favorite_track(ui: &Ui, tr: &Track) {
-    if let Some((id, reference)) = ricercar_core::plugin::parse_plugin_uri(&tr.path) {
-        favorite(ui, &id, &reference, true);
-    }
-}
-
 fn play_page(ui: &Rc<Ui>, shuffle: bool) {
     let tracks = ui
         .st
@@ -902,6 +974,438 @@ fn play_page(ui: &Rc<Ui>, shuffle: bool) {
     } else {
         ui.ctx.ctl.play_tracks(infos, 0, PlayContext::None);
     }
+}
+
+// ------------------------------------------------------------ playlist editing
+
+/// Prefix of a plugin playlist among the "Add to playlist" targets (after
+/// `pl:`), followed by `<plugin id>SEP<ref>`. Local targets are playlist ids.
+pub const PL_TARGET: &str = "plugin-pl\u{1f}";
+
+/// Whether items from `sources` (`None`: a local file, `Some(id)`: a track of
+/// plugin `id`) may go to a playlist of `target` (`None`: a local one).
+/// Local playlists take anything; a plugin playlist takes the tracks of that
+/// same plugin only. No items (a playlist created on its own) fit anywhere.
+pub fn target_fits(sources: &[Option<&str>], target: Option<&str>) -> bool {
+    match target {
+        None => true,
+        Some(p) => sources.iter().all(|s| *s == Some(p)),
+    }
+}
+
+/// An entry of the "Add to playlist" list: a playlist (`key` goes after
+/// `pl:`), or the name of a source heading its playlists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub key: String,
+    pub name: String,
+    pub header: bool,
+}
+
+/// A plugin that edits its playlists: id, name, editable playlists (ref,
+/// title).
+type EditSource = (String, String, Vec<(String, String)>);
+
+/// The "Add to playlist" list for items from `sources`: local playlists,
+/// then the editable playlists of each plugin that takes those items, under
+/// the plugin's name. The local ones get a heading only when plugin
+/// playlists follow.
+pub fn playlist_targets(
+    local_name: &str,
+    local: &[(i64, String)],
+    plugins: &[EditSource],
+    sources: &[Option<&str>],
+) -> Vec<Target> {
+    let groups: Vec<&EditSource> = plugins
+        .iter()
+        .filter(|(id, _, pls)| !pls.is_empty() && target_fits(sources, Some(id)))
+        .collect();
+    let mut out = Vec::new();
+    if !groups.is_empty() && !local.is_empty() {
+        out.push(Target {
+            key: String::new(),
+            name: local_name.to_string(),
+            header: true,
+        });
+    }
+    out.extend(local.iter().map(|(id, name)| Target {
+        key: id.to_string(),
+        name: name.clone(),
+        header: false,
+    }));
+    for (id, name, pls) in groups {
+        out.push(Target {
+            key: String::new(),
+            name: name.clone(),
+            header: true,
+        });
+        out.extend(pls.iter().map(|(r, title)| Target {
+            key: target_key(id, r),
+            name: title.clone(),
+            header: false,
+        }));
+    }
+    out
+}
+
+fn target_key(id: &str, reference: &str) -> String {
+    format!("{PL_TARGET}{id}{SEP}{reference}")
+}
+
+/// Signed-in plugins declaring `playlist_edit`, with the playlists they mark
+/// editable (from their library list).
+fn edit_sources(ui: &Ui) -> Vec<EditSource> {
+    let pv = ui.plugins.borrow();
+    host(ui)
+        .statuses()
+        .into_iter()
+        .filter(|s| s.signed_in() && s.caps.playlist_edit)
+        .map(|s| {
+            let pls = pv
+                .libs
+                .iter()
+                .find(|l| l.id == s.id)
+                .map(|l| {
+                    l.playlists
+                        .iter()
+                        .filter(|p| p.kind == ItemKind::Playlist && p.editable)
+                        .map(|p| (p.reference.clone(), p.title.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (s.id, s.name, pls)
+        })
+        .collect()
+}
+
+/// Plugin of a track (`None`: a local file).
+fn track_source(tr: &Track) -> Option<String> {
+    ricercar_core::plugin::parse_plugin_uri(&tr.path).map(|(id, _)| id)
+}
+
+/// Sources of what the menu acts on: `what` 0 nothing (the sidebar's
+/// button), 1 the menu's track, 2 the menu's album or plugin card.
+fn menu_sources(ui: &Ui, what: i32) -> Vec<Option<String>> {
+    let menu = ui.window.global::<crate::TrackMenu>();
+    match what {
+        1 => crate::views::list_tracks(ui, &menu.get_list())
+            .get(menu.get_index().max(0) as usize)
+            .map(|tr| vec![track_source(tr)])
+            .unwrap_or_default(),
+        2 => {
+            let id = menu.get_album_id();
+            vec![card_target(&id).and_then(|(arg, _)| parse_arg(arg).map(|(p, _, _)| p))]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Fill the "Add to playlist" list and the new-playlist locations with the
+/// playlists and plugins that fit what the menu acts on (see
+/// [`menu_sources`]).
+pub fn show_playlist_targets(ui: &Ui, what: i32) {
+    let sources = menu_sources(ui, what);
+    let sources: Vec<Option<&str>> = sources.iter().map(Option::as_deref).collect();
+    let local: Vec<(i64, String)> = ui
+        .ctx
+        .lib
+        .playlists()
+        .into_iter()
+        .map(|p| (p.id, p.name))
+        .collect();
+    let plugins = edit_sources(ui);
+    let rows: Vec<crate::PlaylistTarget> =
+        playlist_targets(t("Library"), &local, &plugins, &sources)
+            .into_iter()
+            .map(|t| crate::PlaylistTarget {
+                key: t.key.into(),
+                name: t.name.into(),
+                header: t.header,
+            })
+            .collect();
+    let fitting: Vec<&EditSource> = plugins
+        .iter()
+        .filter(|(id, _, _)| target_fits(&sources, Some(id)))
+        .collect();
+    let mut names: Vec<slint::SharedString> = vec![t("Library").into()];
+    names.extend(fitting.iter().map(|(_, n, _)| n.as_str().into()));
+    ui.plugins.borrow_mut().new_locations = fitting.iter().map(|(id, _, _)| id.clone()).collect();
+    let app = ui.app();
+    app.set_pl_targets(ModelRc::new(VecModel::from(rows)));
+    app.set_new_pl_locations(ModelRc::new(VecModel::from(names)));
+    app.set_new_pl_location(0);
+}
+
+/// The plugin's playlists as read again after an edit: the sidebar and the
+/// "Add to playlist" list follow.
+fn apply_playlists(ui: &Ui, id: &str, playlists: Option<Vec<Item>>) {
+    let Some(list) = playlists else { return };
+    if let Some(l) = ui.plugins.borrow_mut().libs.iter_mut().find(|l| l.id == id) {
+        l.playlists = list;
+    }
+    rebuild_nav(ui);
+}
+
+/// The browse page shows this plugin playlist.
+fn browsing(ui: &Ui, id: &str, reference: &str) -> bool {
+    ui.app().get_page() == Page::Browse
+        && ui
+            .plugins
+            .borrow()
+            .browse
+            .as_ref()
+            .is_some_and(|b| b.0 == id && b.1 == reference)
+}
+
+/// Read the open playlist again, in place.
+fn refresh_browse(ui: &Ui) {
+    let (serial, b) = {
+        let pv = ui.plugins.borrow();
+        (pv.browse_serial, pv.browse.clone())
+    };
+    if let Some((id, reference, _)) = b {
+        fetch_page(ui, serial, id, reference, 0, true);
+    }
+}
+
+/// Whether the browse page's list is a playlist the user may edit, and
+/// whether its entries can be moved.
+fn check_editable(ui: &Ui, serial: u64, id: &str, reference: &str) {
+    if !host(ui).status(id).is_some_and(|s| s.caps.playlist_edit) {
+        return;
+    }
+    let (h, id, reference) = (host(ui), id.to_string(), reference.to_string());
+    std::thread::spawn(move || {
+        let editable = h.playlist_editable(&id, &reference);
+        let movable = editable && h.playlist_move_supported(&id);
+        post(move |ui| {
+            if ui.plugins.borrow().browse_serial == serial {
+                ui.app().set_br_editable(editable);
+                ui.app().set_br_can_move(movable);
+            }
+        });
+    });
+}
+
+/// The playlist on the browse page, when it is editable.
+fn edited_playlist(ui: &Ui) -> Option<(String, String)> {
+    if !ui.app().get_br_editable() {
+        return None;
+    }
+    ui.plugins
+        .borrow()
+        .browse
+        .as_ref()
+        .map(|b| (b.0.clone(), b.1.clone()))
+}
+
+/// Create a playlist on the plugin at `location` of the new-playlist
+/// dialog (1…); `pending` 1 or 2 then adds the menu's track or album to it.
+pub fn create_playlist(ui: &Ui, location: i32, name: &str, pending: i32) {
+    let Some(id) = ui
+        .plugins
+        .borrow()
+        .new_locations
+        .get((location - 1).max(0) as usize)
+        .cloned()
+    else {
+        return;
+    };
+    let menu = ui.window.global::<crate::TrackMenu>();
+    let track = (pending == 1)
+        .then(|| {
+            crate::views::list_tracks(ui, &menu.get_list())
+                .get(menu.get_index().max(0) as usize)
+                .cloned()
+        })
+        .flatten();
+    let album = (pending == 2).then(|| menu.get_album_id().to_string());
+    let (h, name) = (host(ui), name.trim().to_string());
+    std::thread::spawn(move || {
+        let r = h.playlist_create(&id, &name, None, None);
+        post(move |ui| match r {
+            Ok(ed) => {
+                apply_playlists(ui, &id, ed.playlists);
+                ui.toast(t("Playlist created"), false);
+                let key = target_key(&id, &ed.value.reference);
+                if let Some(tr) = track {
+                    crate::views::add_to_playlist(ui, &key, std::slice::from_ref(&tr));
+                } else if let Some(album) = album {
+                    crate::views::album_action(ui, &album, &format!("pl:{key}"));
+                }
+            }
+            Err(e) => ui.toast(error_text(&name_of(ui, &id), &e), true),
+        });
+    });
+}
+
+/// Append tracks to a plugin playlist (`target`: `<id>SEP<ref>`). Only
+/// tracks of that plugin go there.
+pub fn add_to_playlist(ui: &Ui, target: &str, tracks: &[Track]) {
+    let Some((id, reference)) = target.split_once(SEP) else {
+        return;
+    };
+    let sources: Vec<Option<String>> = tracks.iter().map(track_source).collect();
+    let sources: Vec<Option<&str>> = sources.iter().map(Option::as_deref).collect();
+    if tracks.is_empty() || !target_fits(&sources, Some(id)) {
+        ui.toast(
+            t("Only tracks from the same service can go to this playlist"),
+            true,
+        );
+        return;
+    }
+    let uris: Vec<String> = tracks.iter().map(|t| t.path.clone()).collect();
+    let (h, id, reference) = (host(ui), id.to_string(), reference.to_string());
+    std::thread::spawn(move || {
+        let mut r = Err(PluginError::NotFound);
+        for chunk in uris.chunks(500) {
+            r = h.playlist_add(&id, &reference, chunk);
+            if r.is_err() {
+                break;
+            }
+        }
+        post(move |ui| match r {
+            Ok(ed) => {
+                apply_playlists(ui, &id, ed.playlists);
+                if browsing(ui, &id, &reference) {
+                    refresh_browse(ui);
+                }
+                let name = ui
+                    .plugins
+                    .borrow()
+                    .libs
+                    .iter()
+                    .find(|l| l.id == id)
+                    .and_then(|l| l.playlists.iter().find(|p| p.reference == reference))
+                    .map(|p| p.title.clone())
+                    .unwrap_or_default();
+                ui.toast(format!("+ {name}"), false);
+            }
+            Err(e) => ui.toast(error_text(&name_of(ui, &id), &e), true),
+        });
+    });
+}
+
+/// Remove (`pl-remove`) or move (`pl-up`, `pl-down`) the entry at `index`
+/// of the playlist on the browse page.
+pub fn entry_action(ui: &Ui, index: usize, action: &str) {
+    let Some((id, reference)) = edited_playlist(ui) else {
+        return;
+    };
+    let Some(entry) = ui
+        .plugins
+        .borrow()
+        .browse_entries
+        .get(index)
+        .cloned()
+        .flatten()
+    else {
+        ui.toast(t("This track cannot be changed in the playlist"), true);
+        return;
+    };
+    let to = match action {
+        "pl-up" if index > 0 => Some(index - 1),
+        "pl-down" => Some(index + 1),
+        "pl-remove" => None,
+        _ => return,
+    };
+    let (h, action) = (host(ui), action.to_string());
+    std::thread::spawn(move || {
+        let r = match to {
+            Some(to) => h.playlist_move(&id, &reference, &entry, to),
+            None => h.playlist_remove(&id, &reference, std::slice::from_ref(&entry)),
+        };
+        let movable = to.is_none() || h.playlist_move_supported(&id);
+        post(move |ui| match r {
+            Ok(ed) => {
+                apply_playlists(ui, &id, ed.playlists);
+                if browsing(ui, &id, &reference) {
+                    refresh_browse(ui);
+                }
+                if action == "pl-remove" {
+                    ui.toast(t("Removed from the playlist"), false);
+                }
+            }
+            Err(e) => {
+                if !movable {
+                    ui.app().set_br_can_move(false);
+                }
+                ui.toast(error_text(&name_of(ui, &id), &e), true);
+            }
+        });
+    });
+}
+
+/// Rename the playlist on the browse page.
+fn rename_playlist(ui: &Ui, name: &str) {
+    let Some((id, reference)) = edited_playlist(ui) else {
+        return;
+    };
+    let (h, name) = (host(ui), name.trim().to_string());
+    if name.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let r = h.playlist_rename(&id, &reference, &name);
+        post(move |ui| match r {
+            Ok(ed) => {
+                // The service may adjust the name: show the one it keeps.
+                let title = ed
+                    .playlists
+                    .as_ref()
+                    .and_then(|l| l.iter().find(|p| p.reference == reference))
+                    .map_or(name, |p| p.title.clone());
+                apply_playlists(ui, &id, ed.playlists);
+                if !browsing(ui, &id, &reference) {
+                    return;
+                }
+                let arg = browse_arg(&id, &reference, &title);
+                let app = ui.app();
+                app.set_br_title(title.into());
+                app.set_br_arg(arg.clone().into());
+                let mut st = ui.st.borrow_mut();
+                let pos = st.hist_pos;
+                if let Some(h) = st.history.get_mut(pos) {
+                    h.1 = arg;
+                }
+            }
+            Err(e) => ui.toast(error_text(&name_of(ui, &id), &e), true),
+        });
+    });
+}
+
+/// Delete the playlist on the browse page from the service (the dialog
+/// asked first).
+fn delete_playlist(ui: &Ui) {
+    let Some((id, reference)) = edited_playlist(ui) else {
+        return;
+    };
+    let h = host(ui);
+    std::thread::spawn(move || {
+        let r = h.playlist_delete(&id, &reference);
+        post(move |ui| match r {
+            Ok(ed) => {
+                let playlists = ed.playlists.or_else(|| {
+                    // Not read again: drop it from the list as known.
+                    let pv = ui.plugins.borrow();
+                    let l = pv.libs.iter().find(|l| l.id == id)?;
+                    Some(
+                        l.playlists
+                            .iter()
+                            .filter(|p| p.reference != reference)
+                            .cloned()
+                            .collect(),
+                    )
+                });
+                apply_playlists(ui, &id, playlists);
+                ui.toast(t("Playlist deleted"), false);
+                if browsing(ui, &id, &reference) {
+                    ui.navigate(Page::Home, "", true);
+                }
+            }
+            Err(e) => ui.toast(error_text(&name_of(ui, &id), &e), true),
+        });
+    });
 }
 
 // ------------------------------------------------------------ search
@@ -1011,7 +1515,9 @@ pub fn run_search(ui: &Rc<Ui>, q: &str, local: LocalResults) {
                     match r {
                         Ok(groups) => {
                             let items: Vec<Item> = groups.into_iter().flat_map(|g| g.1).collect();
+                            crate::plugin_favs::remember(ui, &id, &items);
                             fill_part(part, &items);
+                            crate::plugin_menu::remember_in(&mut pv.known, &id, &items);
                         }
                         Err(e) => part.error = Some(error_text(&part.name, &e)),
                     }
@@ -1276,7 +1782,7 @@ pub fn open_track_album(ui: &Rc<Ui>, info: &TrackInfo) {
     });
 }
 
-fn open_plugin_album(ui: &Rc<Ui>, id: &str, it: &Item) {
+pub fn open_plugin_album(ui: &Rc<Ui>, id: &str, it: &Item) {
     let arg = format!("{ALBUM_CARD}{}", browse_arg(id, &it.reference, &it.title));
     ui.navigate(Page::Album, &arg, true);
 }
@@ -1361,6 +1867,9 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                             lib.artists.len(),
                             lib.tracks.len()
                         );
+                        for list in [&lib.albums, &lib.artists, &lib.tracks] {
+                            crate::plugin_favs::remember(ui, &id, list);
+                        }
                         let order: Vec<String> =
                             host(ui).statuses().into_iter().map(|s| s.id).collect();
                         let mut pv = ui.plugins.borrow_mut();
@@ -1503,7 +2012,8 @@ pub fn load_album_page(ui: &Rc<Ui>, card_id: &str, arg: &str) {
         .libs
         .iter()
         .find(|l| l.id == id)
-        .and_then(|l| l.albums.iter().find(|a| a.reference == reference).cloned());
+        .and_then(|l| l.albums.iter().find(|a| a.reference == reference).cloned())
+        .or_else(|| crate::plugin_menu::find_item(ui, &id, &reference));
     app.set_al_id(card_id.into());
     app.set_al_plugin(true);
     app.set_al_title(title.into());
@@ -1517,14 +2027,17 @@ pub fn load_album_page(ui: &Rc<Ui>, card_id: &str, arg: &str) {
     app.set_al_dac_unsupported(false);
     app.set_al_fav(false);
     app.set_al_path(name.into());
+    app.set_al_artist_arg("".into());
+    app.set_al_label_arg("".into());
     app.set_al_cover(slint::Image::default());
     ui.plugins.borrow_mut().album_art = None;
     set_rows(&ui.models.al_tracks, Vec::new());
     set_rows(&ui.models.al_more, Vec::new());
     ui.st.borrow_mut().lists.insert("album".into(), Vec::new());
     if let Some(item) = &known {
-        album_header(ui, item);
+        album_header(ui, &id, item);
     }
+    crate::plugin_favs::show_album(ui, &id, &reference);
     let serial = {
         let mut pv = ui.plugins.borrow_mut();
         pv.browse_serial += 1;
@@ -1562,8 +2075,13 @@ pub fn load_album_page(ui: &Rc<Ui>, card_id: &str, arg: &str) {
                 return;
             }
             if let Some(h) = &head {
-                album_header(ui, h);
+                crate::plugin_menu::remember(ui, &id, std::slice::from_ref(h));
+                album_header(ui, &id, h);
+                crate::plugin_favs::remember(ui, &id, std::slice::from_ref(h));
             }
+            crate::plugin_favs::remember(ui, &id, &items);
+            crate::plugin_menu::remember(ui, &id, &items);
+            crate::plugin_favs::show_album(ui, &id, &reference);
             if let Some(e) = err {
                 ui.toast(error_text(&name_of(ui, &id), &e), true);
             }
@@ -1590,15 +2108,20 @@ pub fn load_album_page(ui: &Rc<Ui>, card_id: &str, arg: &str) {
             };
             set_rows(&ui.models.al_tracks, track_rows(ui, &tracks, o));
             ui.st.borrow_mut().lists.insert("album".into(), tracks);
+            // Details come after the tracks, never before the page.
+            crate::details::load_album(ui, &card_id, &id, &reference);
         });
     });
 }
 
-fn album_header(ui: &Ui, it: &Item) {
+fn album_header(ui: &Ui, id: &str, it: &Item) {
     let app = ui.app();
     if let Some(a) = it.artist.clone().or(it.album_artist.clone()) {
         app.set_al_artist(a.into());
     }
+    let (artist, label) = crate::plugin_menu::album_links(id, it);
+    app.set_al_artist_arg(artist.into());
+    app.set_al_label_arg(label.into());
     app.set_al_year(it.year.map(|y| y.to_string()).unwrap_or_default().into());
     app.set_al_genre(it.genre.clone().unwrap_or_default().into());
     if let Some(f) = &it.format {
@@ -1622,6 +2145,7 @@ fn album_header(ui: &Ui, it: &Item) {
 
 /// On an artist page, the albums plugins have under the same name.
 pub fn add_artist_albums(ui: &Rc<Ui>, name: &str) {
+    crate::plugin_favs::reset_artist(ui);
     let refs: Vec<(String, String, String)> = ui
         .plugins
         .borrow()
@@ -1670,19 +2194,18 @@ pub fn add_artist_albums(ui: &Rc<Ui>, name: &str) {
 fn artist_albums(ui: &Ui, id: String, pname: String, name: String, reference: Option<String>) {
     let h = host(ui);
     std::thread::spawn(move || {
+        // Found by the search: the artist item, for its favourite state.
+        let mut found: Option<Item> = None;
         let reference = reference.or_else(|| {
             let wanted = name.trim().to_lowercase();
-            h.search(&id, &name, 0, 20).ok().and_then(|groups| {
-                groups
-                    .into_iter()
-                    .flat_map(|g| g.1)
-                    .find(|i| {
-                        i.kind == ItemKind::Artist
-                            && i.is_browsable()
-                            && i.title.trim().to_lowercase() == wanted
-                    })
-                    .map(|i| i.reference)
-            })
+            found = h.search(&id, &name, 0, 20).ok().and_then(|groups| {
+                groups.into_iter().flat_map(|g| g.1).find(|i| {
+                    i.kind == ItemKind::Artist
+                        && i.is_browsable()
+                        && i.title.trim().to_lowercase() == wanted
+                })
+            });
+            found.as_ref().map(|i| i.reference.clone())
         });
         let Some(reference) = reference else { return };
         let r = h.browse_list(&id, &reference, 0, 200);
@@ -1690,7 +2213,13 @@ fn artist_albums(ui: &Ui, id: String, pname: String, name: String, reference: Op
             if ui.app().get_ar_name() != name.as_str() {
                 return;
             }
+            if let Some(it) = &found {
+                crate::plugin_favs::remember(ui, &id, std::slice::from_ref(it));
+            }
+            crate::plugin_favs::offer_artist(ui, &id, &reference);
+            crate::details::artist_found(ui, &id, &reference, &name);
             let Ok((items, _, _)) = r else { return };
+            crate::plugin_menu::remember(ui, &id, &items);
             let cards: Vec<AlbumCard> = items
                 .iter()
                 .filter(|i| i.kind == ItemKind::Album)
@@ -2019,6 +2548,7 @@ pub fn push_output(ui: &Ui) {
 
 pub fn wire(ui: &Rc<Ui>) {
     let app = ui.app();
+    app.on_ar_toggle_fav(|| with_ui(|ui| crate::plugin_favs::toggle_artist(ui)));
     app.on_plugin_toggle(|id, on| {
         with_ui(|ui| {
             let id = id.to_string();
@@ -2061,6 +2591,12 @@ pub fn wire(ui: &Rc<Ui>) {
         })
     });
     app.on_br_play(|shuffle| with_ui(|ui| play_page(ui, shuffle)));
+    app.on_br_playlist_rename(|name| with_ui(|ui| rename_playlist(ui, &name)));
+    app.on_br_playlist_delete(|| with_ui(|ui| delete_playlist(ui)));
+    app.on_playlist_targets(|what| with_ui(|ui| show_playlist_targets(ui, what)));
+    app.on_plugin_playlist_create(|location, name, pending| {
+        with_ui(|ui| create_playlist(ui, location, &name, pending))
+    });
     app.on_plugin_update(|id| with_ui(|ui| confirm_install(ui, &id, true)));
     app.on_plugin_remove(|id| with_ui(|ui| remove(ui, &id)));
     app.on_catalog_install(|id| with_ui(|ui| confirm_install(ui, &id, false)));
@@ -2111,6 +2647,59 @@ mod tests {
             interleave(vec![vec![1, 2, 3], vec![], vec![10, 20]]),
             [1, 10, 2, 20, 3]
         );
+    }
+
+    #[test]
+    fn playlist_targets_follow_the_source_rule() {
+        // Local playlists take anything; a plugin's only its own tracks.
+        assert!(target_fits(&[None, Some("a")], None));
+        assert!(target_fits(&[Some("a"), Some("a")], Some("a")));
+        assert!(!target_fits(&[Some("b")], Some("a")));
+        assert!(!target_fits(&[None], Some("a")));
+        // A mixed selection only fits local playlists.
+        assert!(!target_fits(&[Some("a"), None], Some("a")));
+        assert!(!target_fits(&[Some("a"), Some("b")], Some("b")));
+        // Nothing to add (a playlist created on its own): anywhere.
+        assert!(target_fits(&[], Some("a")));
+
+        let local = [(1, "Late night".to_string())];
+        let pls = |t: &str| vec![(format!("playlist/{t}"), t.to_string())];
+        let plugins = [
+            ("a".to_string(), "Service A".to_string(), pls("Mix")),
+            ("b".to_string(), "Service B".to_string(), pls("Picks")),
+            ("c".to_string(), "Service C".to_string(), Vec::new()),
+        ];
+        let view = |sources: &[Option<&str>]| -> Vec<(String, bool)> {
+            playlist_targets("Library", &local, &plugins, sources)
+                .into_iter()
+                .map(|t| (t.name, t.header))
+                .collect()
+        };
+        let row = |n: &str, h: bool| (n.to_string(), h);
+        // A local track: local playlists only, no headings.
+        assert_eq!(view(&[None]), [row("Late night", false)]);
+        // A track of plugin a: local ones, then a's under its name.
+        assert_eq!(
+            view(&[Some("a")]),
+            [
+                row("Library", true),
+                row("Late night", false),
+                row("Service A", true),
+                row("Mix", false)
+            ]
+        );
+        assert_eq!(view(&[Some("a"), None]), [row("Late night", false)]);
+        let keys = playlist_targets("Library", &local, &plugins, &[Some("b")]);
+        assert_eq!(keys[1].key, "1");
+        assert_eq!(keys[3].key, target_key("b", "playlist/Picks"));
+        assert_eq!(
+            keys[3].key.strip_prefix(PL_TARGET),
+            Some("b\u{1f}playlist/Picks")
+        );
+        // No local playlist: no "Library" heading either.
+        let only = playlist_targets("Library", &[], &plugins, &[Some("a")]);
+        assert_eq!(only.len(), 2);
+        assert!(only[0].header && only[0].name == "Service A");
     }
 
     #[test]

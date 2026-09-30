@@ -68,6 +68,12 @@ pub fn t(en: &'static str) -> &'static str {
         "Removed from favorites" => "Retiré des favoris",
         "Playlist created" => "Playlist créée",
         "Playlist deleted" => "Playlist supprimée",
+        "Only tracks from the same service can go to this playlist" => {
+            "Seuls les titres du même service peuvent aller dans cette playlist"
+        }
+        "This track cannot be changed in the playlist" => {
+            "Ce titre ne peut pas être modifié dans la playlist"
+        }
         "Playlist exported to" => "Playlist exportée dans",
         "Playlist imported" => "Playlist importée",
         "Could not open the file" => "Impossible d'ouvrir le fichier",
@@ -88,6 +94,11 @@ pub fn t(en: &'static str) -> &'static str {
         "Lyrics from lrclib.net" => "Paroles : lrclib.net",
         "Lyrics from the file" => "Paroles : fichier",
         "Lyrics from the .lrc file" => "Paroles : fichier .lrc",
+        "Lyrics from" => "Paroles :",
+        "relayed locally, original codec unchanged" => {
+            "relayé localement, codec d'origine inchangé"
+        }
+        "relayed" => "relayé",
         "Top stations" => "Stations populaires",
         "Stations" => "Stations",
         "Radio Browser is unreachable" => "Radio Browser est injoignable",
@@ -151,6 +162,9 @@ pub fn t(en: &'static str) -> &'static str {
             "Pas encore connecté. Vérifiez le code et réessayez."
         }
         "Nothing playable here" => "Rien de lisible ici",
+        "Album" => "Album",
+        "Artist" => "Artiste",
+        "Label" => "Label",
         "This plugin has no favourites" => "Ce plugin ne gère pas les favoris",
         "No results" => "Aucun résultat",
         "plugin" => "plugin",
@@ -211,6 +225,8 @@ pub fn t(en: &'static str) -> &'static str {
         "characters" => "caractères",
         "Enter a number" => "Saisissez un nombre",
         "This value is not accepted" => "Cette valeur n'est pas acceptée",
+        "Starting radio…" => "Lancement de la radio…",
+        "Radio started" => "Radio lancée",
         _ => en,
     }
 }
