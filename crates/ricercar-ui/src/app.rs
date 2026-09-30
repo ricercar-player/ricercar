@@ -723,7 +723,8 @@ pub struct RowOpts {
 }
 
 pub fn track_rows(ui: &Ui, tracks: &[Track], o: RowOpts) -> Vec<TrackRow> {
-    let now = ui.st.borrow().now_path.clone();
+    // The playing row's key: a file path, or a plugin track's URI.
+    let now = ui.st.borrow().marked_playing.clone();
     // Plugin names, looked up once per list (and only when needed).
     let names = if tracks.iter().any(Track::is_plugin) {
         crate::plugins::names(ui)

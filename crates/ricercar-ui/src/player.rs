@@ -389,7 +389,12 @@ fn on_track_changed(ui: &Rc<Ui>, st: &CtlState, info: Option<&TrackInfo>) {
         && ui.player.borrow().now_id.is_some()
         && live_title.is_some();
     ui.st.borrow_mut().now_path = info.path.clone();
-    mark_playing(ui, info.path.as_deref());
+    // Rows are keyed by file path, or by `plugin://` URI for plugin tracks.
+    let row_key = info
+        .path
+        .clone()
+        .or_else(|| ricercar_core::plugin::is_plugin_uri(&info.uri).then(|| info.uri.clone()));
+    mark_playing(ui, row_key.as_deref());
 
     // Covers: small one through the shared loader; large/backdrop/accent here.
     let src = cover_source(info);
