@@ -586,6 +586,9 @@ export component PlayerBar inherits Rectangle {
                             }
                             Text {
                                 text: hop.value;
+                                // long device names are cut, not spilled
+                                max-width: 220px;
+                                overflow: elide;
                                 font-size: Theme.fs-xs;
                                 font-weight: i == 0 ? 700 : 500;
                                 color: hop.state == 1 ? Theme.warn : i == 0 ? Theme.text : Theme.text2;
@@ -624,9 +627,21 @@ export component PlayerBar inherits Rectangle {
             IconButton {
                 y: (parent.height - self.height) / 2;
                 icon: Icons.list-music;
-                active: App.queue-open;
+                active: App.now-playing-open ? App.np-tab == 1 : App.queue-open;
                 tooltip: @tr("Queue");
-                clicked => { App.queue-open = !App.queue-open; }
+                // In the expanded view, the Queue tab (like Lyrics);
+                // otherwise the queue drawer.
+                clicked => {
+                    if App.now-playing-open {
+                        if App.np-tab == 1 {
+                            App.now-playing-open = false;
+                        } else {
+                            App.np-tab = 1;
+                        }
+                    } else {
+                        App.queue-open = !App.queue-open;
+                    }
+                }
             }
             VolumeControl { }
         }
