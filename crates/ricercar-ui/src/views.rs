@@ -104,6 +104,7 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
                 .lists
                 .insert("home-tracks".into(), tracks);
             refresh_stats(ui);
+            crate::plugins::request_home_covers(ui);
         }
         Page::Albums => load_albums(ui),
         Page::Album => load_album(ui, arg),
@@ -569,6 +570,10 @@ pub fn visible(ui: &Rc<Ui>, list: &str, first: usize, last: usize) {
     ui.loader.borrow_mut().cancel_pending();
     for (k, size) in keys {
         ui.request_cover(&k, size);
+    }
+    // Home's plugin shelves are not rebuilt: ask again for what was dropped.
+    if ui.app().get_page() == Page::Home {
+        crate::plugins::request_home_covers(ui);
     }
 }
 

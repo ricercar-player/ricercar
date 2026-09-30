@@ -371,6 +371,30 @@ pub fn load_home_shelves(ui: &Rc<Ui>) {
     }
 }
 
+/// Covers of the plugin Home shelves that never arrived: their requests
+/// were dropped by `Loader::cancel_pending` (navigation, scrolling) before
+/// they were fetched, and the shelves are built only once. Ask again; the
+/// loader skips covers already cached, in flight or known missing.
+pub fn request_home_covers(ui: &Ui) {
+    use crate::app::Row;
+    let keys: Vec<String> = ui
+        .plugins
+        .borrow()
+        .home_shelves
+        .iter()
+        .flat_map(|s| {
+            (0..s.cards.row_count())
+                .filter_map(|i| s.cards.row_data(i))
+                .filter(|c| c.cover_missing())
+                .map(|c| c.ckey().to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for k in keys {
+        ui.request_cover(&k, TILE);
+    }
+}
+
 fn show_home_shelves(ui: &Ui) {
     let pv = ui.plugins.borrow();
     let shelves: Vec<crate::HomeShelf> = pv
@@ -384,6 +408,8 @@ fn show_home_shelves(ui: &Ui) {
         .collect();
     ui.app()
         .set_home_shelves(ModelRc::new(VecModel::from(shelves)));
+    drop(pv);
+    request_home_covers(ui);
 }
 
 /// Sidebar: each signed-in plugin that browses, with its `browse.root`.
