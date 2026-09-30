@@ -1,11 +1,11 @@
 [package]
 name = "ricercar-mpris"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 license.workspace = true
 
 [dependencies]
-ricercar-audio = { version = "0.5.1", path = "../ricercar-audio" }
+ricercar-audio = { version = "0.5.2", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
