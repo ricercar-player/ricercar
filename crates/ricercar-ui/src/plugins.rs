@@ -16,7 +16,7 @@ use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecM
 
 use crate::app::{RowOpts, TILE, Ui, post, set_rows, track_rows, with_ui};
 use crate::images::Source;
-use crate::text::t;
+use crate::text::{t, tf};
 use crate::{AlbumCard, ArtistCard, CatalogRow, Page, PluginNav, PluginRow};
 
 /// Separates the parts of a browse argument / plugin card id.
@@ -2433,9 +2433,9 @@ pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
     let app = ui.app();
     app.set_install_title(
         if update {
-            format!("{} {}?", t("Update"), e.name)
+            tf("Update {name}?", &[("name", &e.name)])
         } else {
-            format!("{} {}?", t("Install"), e.name)
+            tf("Install {name}?", &[("name", &e.name)])
         }
         .into(),
     );
@@ -2490,7 +2490,7 @@ pub fn do_install(ui: &Ui) {
                             }
                             None => c.plugins.push(cfg.clone()),
                         });
-                    ui.toast(format!("{} {}", t("Installed"), e.name), false);
+                    ui.toast(tf("{name} installed", &[("name", &e.name)]), false);
                 }
                 Err(err) => ui.toast(format!("{}: {err}", e.name), true),
             }
@@ -2526,7 +2526,7 @@ fn remove(ui: &Ui, id: &str) {
             }
         });
     }
-    ui.toast(format!("{} {}", t("Removed"), name_of(ui, id)), false);
+    ui.toast(tf("{name} removed", &[("name", &name_of(ui, id))]), false);
     ui.plugins.borrow_mut().rev = None;
     refresh_catalog_rows(ui);
 }

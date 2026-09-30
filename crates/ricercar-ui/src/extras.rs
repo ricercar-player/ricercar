@@ -9,7 +9,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::app::{THUMB, Ui, post, with_ui};
 use crate::images::Source;
-use crate::text::t;
+use crate::text::{t, tf};
 use crate::{DeviceRow, StationRow};
 
 pub const ACCENTS: [&str; 7] = [
@@ -369,11 +369,13 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_notifications(cfg.ui.notifications);
     app.set_close_to_tray(cfg.ui.close_to_tray);
     app.set_theme_dark(cfg.ui.theme == ThemeCfg::Dark);
-    app.set_ui_language(match cfg.ui.language.as_str() {
-        "en" => 1,
-        "fr" => 2,
-        _ => 0,
-    });
+    // 0 is "System", then text::LANGUAGES in order.
+    app.set_ui_language(
+        crate::text::LANGUAGES
+            .iter()
+            .position(|(code, _)| *code == cfg.ui.language)
+            .map_or(0, |i| i as i32 + 1),
+    );
     app.set_adaptive_colors(cfg.ui.adaptive_colors);
     app.set_accent_choice(
         ACCENTS
@@ -436,7 +438,9 @@ pub fn refresh_network_status(ui: &Ui) {
         ),
         NetworkStatus::Starting => t("Starting…").into(),
         NetworkStatus::Off => t("Network sharing is off").into(),
-        NetworkStatus::InterfaceMissing(i) => t("Interface {} is not available").replace("{}", &i),
+        NetworkStatus::InterfaceMissing(i) => {
+            tf("Interface {name} is not available", &[("name", &i)])
+        }
         NetworkStatus::Failed(e) => format!("{}: {e}", t("Network unavailable")),
     };
     ui.app().set_network_status(text.into());
@@ -746,7 +750,13 @@ fn settings_changed(ui: &Rc<Ui>) {
         };
         c.ui.adaptive_colors = app.get_adaptive_colors();
         c.ui.accent = accent.into();
-        c.ui.language = ["", "en", "fr"][app.get_ui_language().clamp(0, 2) as usize].into();
+        c.ui.language = match app.get_ui_language() {
+            i @ 1.. => crate::text::LANGUAGES
+                .get(i as usize - 1)
+                .map_or("", |(code, _)| code),
+            _ => "",
+        }
+        .into();
     });
     // Language, live: the .slint side switches at once; strings built on
     // the Rust side come back with the page and the settings.

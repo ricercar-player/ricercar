@@ -1,0 +1,1455 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ja\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgctxt "MainWindow"
+msgid "New playlist"
+msgstr "新規プレイリスト"
+
+msgctxt "MainWindow"
+msgid "Rename playlist"
+msgstr "プレイリスト名を変更"
+
+msgctxt "MainWindow"
+msgid "Delete “{}”?"
+msgstr "「{}」を削除しますか？"
+
+msgctxt "MainWindow"
+msgid "The playlist is removed; your music files are not touched."
+msgstr "プレイリストは削除されますが、音楽ファイルはそのまま残ります。"
+
+msgctxt "MainWindow"
+msgid "The playlist is deleted from {}. This cannot be undone."
+msgstr "プレイリストは {} から削除されます。この操作は元に戻せません。"
+
+msgctxt "MainWindow"
+msgid "Create"
+msgstr "作成"
+
+msgctxt "MainWindow"
+msgid "Rename"
+msgstr "名前を変更"
+
+msgctxt "MainWindow"
+msgid "Delete"
+msgstr "削除"
+
+msgctxt "MainWindow"
+msgid "Create in"
+msgstr "作成先"
+
+msgctxt "MainWindow"
+msgid "Installing…"
+msgstr "インストール中…"
+
+msgctxt "MainWindow"
+msgid "Install"
+msgstr "インストール"
+
+msgctxt "MainWindow"
+msgid "Add a music folder"
+msgstr "音楽フォルダを追加"
+
+msgctxt "MainWindow"
+msgid "No folder picker is available on this desktop (is xdg-desktop-portal installed?). Type the folder's path instead."
+msgstr "このデスクトップではフォルダ選択ダイアログを利用できません（xdg-desktop-portal はインストールされていますか？）。代わりにフォルダのパスを入力してください。"
+
+msgctxt "MainWindow"
+msgid "Add"
+msgstr "追加"
+
+msgctxt "Sidebar"
+msgid "Search"
+msgstr "検索"
+
+msgctxt "Sidebar"
+msgid "Home"
+msgstr "ホーム"
+
+msgctxt "Sidebar"
+msgid "Albums"
+msgstr "アルバム"
+
+msgctxt "Sidebar"
+msgid "Artists"
+msgstr "アーティスト"
+
+msgctxt "Sidebar"
+msgid "Tracks"
+msgstr "曲"
+
+msgctxt "Sidebar"
+msgid "Genres"
+msgstr "ジャンル"
+
+msgctxt "Sidebar"
+msgid "Favorites"
+msgstr "お気に入り"
+
+msgctxt "Sidebar"
+msgid "Radio"
+msgstr "ラジオ"
+
+msgctxt "Sidebar"
+msgid "Plugins"
+msgstr "プラグイン"
+
+msgctxt "Sidebar"
+msgid "{n} update available"
+msgid_plural "{n} updates available"
+msgstr[0] "{n} 件のアップデートがあります"
+
+msgctxt "Sidebar"
+msgid "Playlists"
+msgstr "プレイリスト"
+
+msgctxt "Sidebar"
+msgid "New playlist"
+msgstr "新規プレイリスト"
+
+msgctxt "Sidebar"
+msgid "No playlists yet"
+msgstr "プレイリストはまだありません"
+
+msgctxt "Sidebar"
+msgid "ricercar {} is available"
+msgstr "ricercar {} が利用可能です"
+
+msgctxt "Sidebar"
+msgid "Update now"
+msgstr "今すぐアップデート"
+
+msgctxt "Sidebar"
+msgid "What's new"
+msgstr "新機能"
+
+msgctxt "Sidebar"
+msgid "Close"
+msgstr "閉じる"
+
+msgctxt "Sidebar"
+msgid "Indexing {} / {}"
+msgstr "インデックス作成中 {} / {}"
+
+msgctxt "Sidebar"
+msgid "Scanning library…"
+msgstr "ライブラリをスキャン中…"
+
+msgctxt "Sidebar"
+msgid "Settings"
+msgstr "設定"
+
+msgctxt "ChainPanel"
+msgid "Signal path"
+msgstr "信号経路"
+
+msgctxt "ChainPanel"
+msgid "Bit-perfect"
+msgstr "Bit-perfect"
+
+msgctxt "ChainPanel"
+msgid "Altered signal path"
+msgstr "信号が変更されています"
+
+msgctxt "ChainPanel"
+msgid "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing."
+msgstr "サンプルは手を加えられずにデバイスへ届いています。ネイティブのレートで、リサンプリング、ミキサー、音量処理はありません。"
+
+msgctxt "ChainPanel"
+msgid "Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback."
+msgstr "経路のどこかでサンプルが変更されています（音量、ReplayGain、ミュート、またはミキシングを行うデバイス）。bit-perfect 再生には、音量を100 %にして hw: デバイスを使用してください。"
+
+msgctxt "VolumeControl"
+msgid "Mute"
+msgstr "ミュート"
+
+msgctxt "VolumeControl"
+msgid "Volume"
+msgstr "音量"
+
+msgctxt "PlayerBar"
+msgid "Nothing playing"
+msgstr "再生していません"
+
+msgctxt "PlayerBar"
+msgid "Favorite"
+msgstr "お気に入り"
+
+msgctxt "PlayerBar"
+msgid "Shuffle"
+msgstr "シャッフル"
+
+msgctxt "PlayerBar"
+msgid "Previous"
+msgstr "前へ"
+
+msgctxt "PlayerBar"
+msgid "Pause"
+msgstr "一時停止"
+
+msgctxt "PlayerBar"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "PlayerBar"
+msgid "Next"
+msgstr "次へ"
+
+msgctxt "PlayerBar"
+msgid "Repeat"
+msgstr "リピート"
+
+msgctxt "PlayerBar"
+msgid "Position"
+msgstr "再生位置"
+
+msgctxt "PlayerBar"
+msgid "LIVE"
+msgstr "ライブ"
+
+msgctxt "PlayerBar"
+msgid "Loading…"
+msgstr "読み込み中…"
+
+msgctxt "PlayerBar"
+msgid "Lyrics"
+msgstr "歌詞"
+
+msgctxt "PlayerBar"
+msgid "Queue"
+msgstr "再生キュー"
+
+msgctxt "Biography"
+msgid "Show less"
+msgstr "折りたたむ"
+
+msgctxt "Biography"
+msgid "Read more"
+msgstr "続きを読む"
+
+msgctxt "Biography"
+msgid "Source: {}"
+msgstr "出典: {}"
+
+msgctxt "TrackHeader"
+msgid "Title"
+msgstr "タイトル"
+
+msgctxt "TrackHeader"
+msgid "Album"
+msgstr "アルバム"
+
+msgctxt "TrackHeader"
+msgid "Plays"
+msgstr "再生回数"
+
+msgctxt "TrackHeader"
+msgid "Format"
+msgstr "フォーマット"
+
+msgctxt "TrackHeader"
+msgid "Length"
+msgstr "時間"
+
+msgctxt "TrackLine"
+msgid "Favorite"
+msgstr "お気に入り"
+
+msgctxt "BrowseContent"
+msgid "Loading…"
+msgstr "読み込み中…"
+
+msgctxt "BrowseContent"
+msgid "Sign in to see this"
+msgstr "表示するにはサインインしてください"
+
+msgctxt "BrowseContent"
+msgid "Could not load this list"
+msgstr "このリストを読み込めませんでした"
+
+msgctxt "BrowseContent"
+msgid "Sign in"
+msgstr "サインイン"
+
+msgctxt "BrowseContent"
+msgid "Nothing here"
+msgstr "何もありません"
+
+msgctxt "BrowseContent"
+msgid "This list is empty."
+msgstr "このリストは空です。"
+
+msgctxt "BrowseContent"
+msgid "Show more"
+msgstr "さらに表示"
+
+msgctxt "DeviceCaps"
+msgid "Sample rates"
+msgstr "サンプルレート"
+
+msgctxt "DeviceCaps"
+msgid "Containers"
+msgstr "コンテナ"
+
+msgctxt "DeviceCaps"
+msgid "Channels"
+msgstr "チャンネル"
+
+msgctxt "StationLine"
+msgid "Favorite"
+msgstr "お気に入り"
+
+msgctxt "RadioPage"
+msgid "Radio"
+msgstr "ラジオ"
+
+msgctxt "RadioPage"
+msgid "Thousands of internet stations from the community-run Radio Browser directory."
+msgstr "コミュニティが運営する Radio Browser ディレクトリから、数千のインターネットラジオ局を聴けます。"
+
+msgctxt "RadioPage"
+msgid "Station, genre, country…"
+msgstr "局名、ジャンル、国…"
+
+msgctxt "RadioPage"
+msgid "Your stations"
+msgstr "マイステーション"
+
+msgctxt "SettingsPage"
+msgid "Settings"
+msgstr "設定"
+
+msgctxt "SettingsPage"
+msgid "Audio output"
+msgstr "オーディオ出力"
+
+msgctxt "SettingsPage"
+msgid "Hardware devices (hw:) are opened exclusively: no mixer, no resampling, native sample rate for every track."
+msgstr "ハードウェアデバイス（hw:）は排他モードで開かれます。ミキサーもリサンプリングもなく、曲ごとにネイティブのサンプルレートで再生します。"
+
+msgctxt "SettingsPage"
+msgid "BIT-PERFECT"
+msgstr "BIT-PERFECT"
+
+msgctxt "SettingsPage"
+msgid "SHARED"
+msgstr "共有"
+
+msgctxt "SettingsPage"
+msgid "Hide capabilities"
+msgstr "対応仕様を隠す"
+
+msgctxt "SettingsPage"
+msgid "Show capabilities"
+msgstr "対応仕様を表示"
+
+msgctxt "SettingsPage"
+msgid "Rescan devices"
+msgstr "デバイスを再検出"
+
+msgctxt "SettingsPage"
+msgid "After plugging in a USB DAC."
+msgstr "USB DAC を接続したあとに。"
+
+msgctxt "SettingsPage"
+msgid "Refresh"
+msgstr "更新"
+
+msgctxt "SettingsPage"
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
+msgctxt "SettingsPage"
+msgid "Evens out loudness between tracks. Any gain makes playback non bit-perfect."
+msgstr "曲ごとの音量差をそろえます。ゲインをかけると bit-perfect 再生ではなくなります。"
+
+msgctxt "SettingsPage"
+msgid "Off"
+msgstr "オフ"
+
+msgctxt "SettingsPage"
+msgid "Track"
+msgstr "トラック"
+
+msgctxt "SettingsPage"
+msgid "Album"
+msgstr "アルバム"
+
+msgctxt "SettingsPage"
+msgid "Auto"
+msgstr "自動"
+
+msgctxt "SettingsPage"
+msgid "Preamp: {} dB"
+msgstr "プリアンプ: {} dB"
+
+msgctxt "SettingsPage"
+msgid "Added to the ReplayGain value."
+msgstr "ReplayGain の値に加算されます。"
+
+msgctxt "SettingsPage"
+msgid "Resume where I left off"
+msgstr "前回の続きから再生"
+
+msgctxt "SettingsPage"
+msgid "Restore the queue and position at startup (paused)."
+msgstr "起動時に再生キューと再生位置を復元します（一時停止状態）。"
+
+msgctxt "SettingsPage"
+msgid "Continuous playback"
+msgstr "連続再生"
+
+msgctxt "SettingsPage"
+msgid "When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin."
+msgstr "キューがこの機能に対応したプラグインの曲で終わったとき、そのプラグインから似た曲を続けて再生します。"
+
+msgctxt "SettingsPage"
+msgid "Library"
+msgstr "ライブラリ"
+
+msgctxt "SettingsPage"
+msgid "Folders ricercar indexes. Files are only read, never modified."
+msgstr "ricercar がインデックスするフォルダです。ファイルは読み取るだけで、変更することはありません。"
+
+msgctxt "SettingsPage"
+msgid "Remove folder"
+msgstr "フォルダを削除"
+
+msgctxt "SettingsPage"
+msgid "No music folder yet"
+msgstr "音楽フォルダはまだありません"
+
+msgctxt "SettingsPage"
+msgid "{n} track indexed"
+msgid_plural "{n} tracks indexed"
+msgstr[0] "{n} 曲をインデックスしました"
+
+msgctxt "SettingsPage"
+msgid "Indexing {} / {}"
+msgstr "インデックス作成中 {} / {}"
+
+msgctxt "SettingsPage"
+msgid "Rescan"
+msgstr "再スキャン"
+
+msgctxt "SettingsPage"
+msgid "Add folder"
+msgstr "フォルダを追加"
+
+msgctxt "SettingsPage"
+msgid "Watch folders for changes"
+msgstr "フォルダの変更を監視"
+
+msgctxt "SettingsPage"
+msgid "New and edited files appear automatically."
+msgstr "追加・編集されたファイルが自動的に反映されます。"
+
+msgctxt "SettingsPage"
+msgid "Import a playlist"
+msgstr "プレイリストを読み込む"
+
+msgctxt "SettingsPage"
+msgid "M3U or M3U8 file; tracks outside your library are skipped."
+msgstr "M3U または M3U8 ファイル。ライブラリにない曲はスキップされます。"
+
+msgctxt "SettingsPage"
+msgid "Import"
+msgstr "読み込む"
+
+msgctxt "SettingsPage"
+msgid "Network"
+msgstr "ネットワーク"
+
+msgctxt "SettingsPage"
+msgid "Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library."
+msgstr "スマートフォンのアプリ（BubbleUPnP、Symfonium、mConnect…）から、このコンピュータで再生したり、ライブラリをブラウズしたりできます。"
+
+msgctxt "SettingsPage"
+msgid "Device name"
+msgstr "デバイス名"
+
+msgctxt "SettingsPage"
+msgid "Play from other apps (UPnP / OpenHome renderer)"
+msgstr "他のアプリから再生（UPnP / OpenHome レンダラー）"
+
+msgctxt "SettingsPage"
+msgid "Share my library (UPnP media server)"
+msgstr "ライブラリを共有（UPnP メディアサーバー）"
+
+msgctxt "SettingsPage"
+msgid "Network interface"
+msgstr "ネットワークインターフェース"
+
+msgctxt "SettingsPage"
+msgid "Where phones and other apps can reach ricercar. With a VPN or containers, pick your home network."
+msgstr "スマートフォンや他のアプリが ricercar に接続する経路です。VPN やコンテナを使っている場合は、自宅のネットワークを選んでください。"
+
+msgctxt "SettingsPage"
+msgid "Plugins"
+msgstr "プラグイン"
+
+msgctxt "SettingsPage"
+msgid "Plugins add catalogues from other sources. Each one is a separate program running with your permissions: install only plugins you trust."
+msgstr "プラグインは他のソースのカタログを追加します。各プラグインはあなたの権限で動作する独立したプログラムです。信頼できるプラグインのみインストールしてください。"
+
+msgctxt "SettingsPage"
+msgid "Installed plugins and community catalogue"
+msgstr "インストール済みプラグインとコミュニティカタログ"
+
+msgctxt "SettingsPage"
+msgid "None installed"
+msgstr "インストールされていません"
+
+msgctxt "SettingsPage"
+msgid "{n} plugin"
+msgid_plural "{n} plugins"
+msgstr[0] "{n} 個のプラグイン"
+
+msgctxt "SettingsPage"
+msgid "Open"
+msgstr "開く"
+
+msgctxt "SettingsPage"
+msgid "Scrobbling"
+msgstr "Scrobble"
+
+msgctxt "SettingsPage"
+msgid "A track counts as played after half its length or four minutes."
+msgstr "曲の長さの半分、または4分間再生すると再生済みとしてカウントされます。"
+
+msgctxt "SettingsPage"
+msgid "User token"
+msgstr "ユーザートークン"
+
+msgctxt "SettingsPage"
+msgid "Save"
+msgstr "保存"
+
+msgctxt "SettingsPage"
+msgid "API key"
+msgstr "API キー"
+
+msgctxt "SettingsPage"
+msgid "Shared secret"
+msgstr "共有シークレット"
+
+msgctxt "SettingsPage"
+msgid "Connect"
+msgstr "接続"
+
+msgctxt "SettingsPage"
+msgid "I approved it"
+msgstr "承認しました"
+
+msgctxt "SettingsPage"
+msgid "Disconnect"
+msgstr "接続解除"
+
+msgctxt "SettingsPage"
+msgid "Online extras"
+msgstr "オンライン機能"
+
+msgctxt "SettingsPage"
+msgid "Synced lyrics"
+msgstr "同期歌詞"
+
+msgctxt "SettingsPage"
+msgid "Look up lyrics on lrclib.net when a track has none (.lrc files and embedded lyrics are always used)."
+msgstr "歌詞のない曲は lrclib.net で歌詞を検索します（.lrc ファイルと埋め込み歌詞は常に使用されます）。"
+
+msgctxt "SettingsPage"
+msgid "Missing album art"
+msgstr "アルバムアートの補完"
+
+msgctxt "SettingsPage"
+msgid "Fetch covers from MusicBrainz / Cover Art Archive for albums without art."
+msgstr "アートワークのないアルバムのジャケットを MusicBrainz / Cover Art Archive から取得します。"
+
+msgctxt "SettingsPage"
+msgid "Plugin catalogue"
+msgstr "プラグインカタログ"
+
+msgctxt "SettingsPage"
+msgid "Read the list of community plugins from GitHub when you open the Plugins page."
+msgstr "プラグインページを開いたときに、GitHub からコミュニティプラグインの一覧を読み込みます。"
+
+msgctxt "SettingsPage"
+msgid "Updates"
+msgstr "アップデート"
+
+msgctxt "SettingsPage"
+msgid "Once a day at startup, ask GitHub whether a new ricercar is out, and check installed plugins against the catalogue. Nothing is installed without you."
+msgstr "1日1回、起動時に ricercar の新しいバージョンがあるかを GitHub に確認し、インストール済みのプラグインをカタログと照合します。あなたの操作なしに何かがインストールされることはありません。"
+
+msgctxt "SettingsPage"
+msgid "Appearance"
+msgstr "外観"
+
+msgctxt "SettingsPage"
+msgid "Language"
+msgstr "言語"
+
+msgctxt "SettingsPage"
+msgid "System"
+msgstr "システム"
+
+msgctxt "SettingsPage"
+msgid "Theme"
+msgstr "テーマ"
+
+msgctxt "SettingsPage"
+msgid "Dark"
+msgstr "ダーク"
+
+msgctxt "SettingsPage"
+msgid "Light"
+msgstr "ライト"
+
+msgctxt "SettingsPage"
+msgid "Accent colour"
+msgstr "アクセントカラー"
+
+msgctxt "SettingsPage"
+msgid "Colours from the album cover"
+msgstr "ジャケットの色を使う"
+
+msgctxt "SettingsPage"
+msgid "Tint the interface with the playing album's colours."
+msgstr "再生中のアルバムの色でインターフェイスを彩ります。"
+
+msgctxt "SettingsPage"
+msgid "Keep playing in the tray when the window is closed"
+msgstr "ウインドウを閉じてもトレイで再生を続ける"
+
+msgctxt "SettingsPage"
+msgid "Track change notifications"
+msgstr "曲の切り替え時に通知"
+
+msgctxt "SettingsPage"
+msgid "Keyboard"
+msgstr "キーボード"
+
+msgctxt "SettingsPage"
+msgid "Play / pause"
+msgstr "再生 / 一時停止"
+
+msgctxt "SettingsPage"
+msgid "Space"
+msgstr "スペース"
+
+msgctxt "SettingsPage"
+msgid "Next / previous track"
+msgstr "次の曲 / 前の曲"
+
+msgctxt "SettingsPage"
+msgid "Seek 10 seconds"
+msgstr "10秒スキップ / 戻る"
+
+msgctxt "SettingsPage"
+msgid "Volume"
+msgstr "音量"
+
+msgctxt "SettingsPage"
+msgid "Search"
+msgstr "検索"
+
+msgctxt "SettingsPage"
+msgid "Now playing / lyrics"
+msgstr "再生中 / 歌詞"
+
+msgctxt "SettingsPage"
+msgid "Queue"
+msgstr "再生キュー"
+
+msgctxt "SettingsPage"
+msgid "About"
+msgstr "ricercar について"
+
+msgctxt "SettingsPage"
+msgid "A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service."
+msgstr "Linux 向けの bit-perfect な音楽プレーヤー兼ネットワークレシーバーです。MIT ライセンス。いかなるレコードレーベルやストリーミングサービスとも提携していません。"
+
+msgctxt "SettingsPage"
+msgid "User interface"
+msgstr "ユーザーインターフェース"
+
+msgctxt "SettingsPage"
+msgid "Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar."
+msgstr "Slint ツールキットを使用しています（ロイヤリティフリーライセンス）。サードパーティのライセンスは ricercar と一緒にインストールされます。"
+
+msgctxt "SettingsPage"
+msgid "Software update"
+msgstr "ソフトウェアアップデート"
+
+msgctxt "SettingsPage"
+msgid "Checking…"
+msgstr "確認中…"
+
+msgctxt "SettingsPage"
+msgid "ricercar is up to date."
+msgstr "ricercar は最新です。"
+
+msgctxt "SettingsPage"
+msgid "ricercar {} is available."
+msgstr "ricercar {} が利用可能です。"
+
+msgctxt "SettingsPage"
+msgid "ricercar {} is available. Download it from its release page."
+msgstr "ricercar {} が利用可能です。リリースページからダウンロードしてください。"
+
+msgctxt "SettingsPage"
+msgid "Downloading and installing ricercar {}…"
+msgstr "ricercar {} をダウンロードしてインストール中…"
+
+msgctxt "SettingsPage"
+msgid "ricercar {} is installed. Restart ricercar to use it."
+msgstr "ricercar {} をインストールしました。使用するには ricercar を再起動してください。"
+
+msgctxt "SettingsPage"
+msgid "Ask GitHub whether a newer ricercar is out."
+msgstr "ricercar の新しいバージョンがあるか GitHub に確認します。"
+
+msgctxt "SettingsPage"
+msgid "What's new"
+msgstr "新機能"
+
+msgctxt "SettingsPage"
+msgid "Update now"
+msgstr "今すぐアップデート"
+
+msgctxt "SettingsPage"
+msgid "Download"
+msgstr "ダウンロード"
+
+msgctxt "SettingsPage"
+msgid "Restart"
+msgstr "再起動"
+
+msgctxt "SettingsPage"
+msgid "Check for updates"
+msgstr "アップデートを確認"
+
+msgctxt "SettingsPage"
+msgid "Diagnostic report"
+msgstr "診断レポート"
+
+msgctxt "SettingsPage"
+msgid "For compatibility reports. Secrets are hidden."
+msgstr "互換性の報告用です。秘密情報は伏せられます。"
+
+msgctxt "SettingsPage"
+msgid "Open logs folder"
+msgstr "ログフォルダを開く"
+
+msgctxt "SettingsPage"
+msgid "Copy diagnostic report"
+msgstr "診断レポートをコピー"
+
+msgctxt "QueueLine"
+msgid "More"
+msgstr "その他"
+
+msgctxt "QueueLine"
+msgid "Remove"
+msgstr "削除"
+
+msgctxt "QueueList"
+msgid "Now playing"
+msgstr "再生中"
+
+msgctxt "QueueList"
+msgid "Next up"
+msgstr "次はこちら"
+
+msgctxt "QueueList"
+msgid "Finding more tracks…"
+msgstr "他の曲を探しています…"
+
+msgctxt "QueueList"
+msgid "The queue is empty"
+msgstr "再生キューは空です"
+
+msgctxt "QueueList"
+msgid "Play an album or add tracks with “Add to queue”."
+msgstr "アルバムを再生するか、「キューに追加」で曲を追加してください。"
+
+msgctxt "QueuePanel"
+msgid "Queue"
+msgstr "再生キュー"
+
+msgctxt "QueuePanel"
+msgid "Clear"
+msgstr "消去"
+
+msgctxt "QueuePanel"
+msgid "Close"
+msgstr "閉じる"
+
+msgctxt "ChainView"
+msgid "Signal path"
+msgstr "信号経路"
+
+msgctxt "ChainView"
+msgid "Bit-perfect"
+msgstr "Bit-perfect"
+
+msgctxt "ChainView"
+msgid "Altered signal path"
+msgstr "信号が変更されています"
+
+msgctxt "ChainView"
+msgid "Every sample reaches the DAC exactly as it is in the file."
+msgstr "すべてのサンプルがファイルのままの状態で DAC に届きます。"
+
+msgctxt "ChainView"
+msgid "Volume below 100 %, ReplayGain, mute or a shared (non hw:) device alters the samples."
+msgstr "100 %未満の音量、ReplayGain、ミュート、または共有デバイス（hw: 以外）はサンプルを変更します。"
+
+msgctxt "NowPlayingView"
+msgid "bit-perfect"
+msgstr "bit-perfect"
+
+msgctxt "NowPlayingView"
+msgid "Lyrics"
+msgstr "歌詞"
+
+msgctxt "NowPlayingView"
+msgid "Queue"
+msgstr "再生キュー"
+
+msgctxt "NowPlayingView"
+msgid "Signal path"
+msgstr "信号経路"
+
+msgctxt "NowPlayingView"
+msgid "Close"
+msgstr "閉じる"
+
+msgctxt "ItemActionLine"
+msgid "Add to queue"
+msgstr "キューに追加"
+
+msgctxt "ContextMenu"
+msgid "Go to album"
+msgstr "アルバムへ移動"
+
+msgctxt "ContextMenu"
+msgid "Go to artist"
+msgstr "アーティストへ移動"
+
+msgctxt "ContextMenu"
+msgid "Remove from the queue"
+msgstr "キューから削除"
+
+msgctxt "ContextMenu"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "ContextMenu"
+msgid "Shuffle"
+msgstr "シャッフル"
+
+msgctxt "ContextMenu"
+msgid "Play next"
+msgstr "次に再生"
+
+msgctxt "ContextMenu"
+msgid "Add to queue"
+msgstr "キューに追加"
+
+msgctxt "ContextMenu"
+msgid "Add to playlist"
+msgstr "プレイリストに追加"
+
+msgctxt "ContextMenu"
+msgid "Start radio"
+msgstr "ラジオを開始"
+
+msgctxt "ContextMenu"
+msgid "Favorite / unfavorite"
+msgstr "お気に入りに追加 / 解除"
+
+msgctxt "ContextMenu"
+msgid "Show in folder"
+msgstr "フォルダで表示"
+
+msgctxt "ContextMenu"
+msgid "Remove from playlist"
+msgstr "プレイリストから削除"
+
+msgctxt "ContextMenu"
+msgid "Move up"
+msgstr "上へ移動"
+
+msgctxt "ContextMenu"
+msgid "Move down"
+msgstr "下へ移動"
+
+msgctxt "ContextMenu"
+msgid "Back"
+msgstr "戻る"
+
+msgctxt "ContextMenu"
+msgid "New playlist…"
+msgstr "新規プレイリスト…"
+
+msgctxt "Dialog"
+msgid "OK"
+msgstr "OK"
+
+msgctxt "Dialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "TopBar"
+msgid "Back"
+msgstr "戻る"
+
+msgctxt "TopBar"
+msgid "Forward"
+msgstr "進む"
+
+msgctxt "ActionBar"
+msgid "Pause"
+msgstr "一時停止"
+
+msgctxt "ActionBar"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "ActionBar"
+msgid "Shuffle"
+msgstr "シャッフル"
+
+msgctxt "ActionBar"
+msgid "Favorite"
+msgstr "お気に入り"
+
+msgctxt "ActionBar"
+msgid "Add to queue"
+msgstr "キューに追加"
+
+msgctxt "ActionBar"
+msgid "More"
+msgstr "その他"
+
+msgctxt "ListeningHero"
+msgid "Pause"
+msgstr "一時停止"
+
+msgctxt "ListeningHero"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "HomePage"
+msgid "Home"
+msgstr "ホーム"
+
+msgctxt "HomePage"
+msgid "Now playing"
+msgstr "再生中"
+
+msgctxt "HomePage"
+msgid "Paused"
+msgstr "一時停止中"
+
+msgctxt "HomePage"
+msgid "bit-perfect"
+msgstr "bit-perfect"
+
+msgctxt "HomePage"
+msgid "Open album"
+msgstr "アルバムを開く"
+
+msgctxt "HomePage"
+msgid "Lyrics"
+msgstr "歌詞"
+
+msgctxt "HomePage"
+msgid "Pick up where you left off"
+msgstr "前回の続きから"
+
+msgctxt "HomePage"
+msgid "albums"
+msgstr "アルバム"
+
+msgctxt "HomePage"
+msgid "artists"
+msgstr "アーティスト"
+
+msgctxt "HomePage"
+msgid "tracks"
+msgstr "曲"
+
+msgctxt "HomePage"
+msgid "hi-res tracks"
+msgstr "ハイレゾ曲"
+
+msgctxt "HomePage"
+msgid "of music"
+msgstr "再生時間"
+
+msgctxt "HomePage"
+msgid "Shuffle library"
+msgstr "ライブラリをシャッフル"
+
+msgctxt "HomePage"
+msgid "Recently played"
+msgstr "最近再生した項目"
+
+msgctxt "HomePage"
+msgid "Your library is empty"
+msgstr "ライブラリは空です"
+
+msgctxt "HomePage"
+msgid "Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, AAC, MP3 and Ogg Vorbis files and watches them for changes. Streams pushed from a UPnP app on your phone play here too."
+msgstr "設定で音楽の入ったフォルダを追加してください。ricercar は FLAC、WAV、AIFF、ALAC、AAC、MP3、Ogg Vorbis ファイルをインデックスし、変更を監視します。スマートフォンの UPnP アプリから送られたストリームもここで再生できます。"
+
+msgctxt "HomePage"
+msgid "Add a music folder"
+msgstr "音楽フォルダを追加"
+
+msgctxt "HomePage"
+msgid "Indexing your music…"
+msgstr "音楽をインデックス中…"
+
+msgctxt "HomePage"
+msgid "{} of {} files read"
+msgstr "{} / {} ファイルを読み込みました"
+
+msgctxt "HomePage"
+msgid "Looking for audio files"
+msgstr "オーディオファイルを検索中"
+
+msgctxt "HomePage"
+msgid "Albums played recently"
+msgstr "最近再生したアルバム"
+
+msgctxt "HomePage"
+msgid "Recently added"
+msgstr "最近追加した項目"
+
+msgctxt "HomePage"
+msgid "Show all"
+msgstr "すべて表示"
+
+msgctxt "HomePage"
+msgid "Most played"
+msgstr "よく聴く曲"
+
+msgctxt "HomePage"
+msgid "Most played albums"
+msgstr "よく聴くアルバム"
+
+msgctxt "AlbumsPage"
+msgid "Albums"
+msgstr "アルバム"
+
+msgctxt "AlbumsPage"
+msgid "A–Z"
+msgstr "名前順"
+
+msgctxt "AlbumsPage"
+msgid "Artist"
+msgstr "アーティスト"
+
+msgctxt "AlbumsPage"
+msgid "Year"
+msgstr "年"
+
+msgctxt "AlbumsPage"
+msgid "Added"
+msgstr "追加日"
+
+msgctxt "AlbumsPage"
+msgid "Hi-Res"
+msgstr "ハイレゾ"
+
+msgctxt "AlbumsPage"
+msgid "No hi-res albums"
+msgstr "ハイレゾアルバムはありません"
+
+msgctxt "AlbumsPage"
+msgid "No albums yet"
+msgstr "アルバムはまだありません"
+
+msgctxt "AlbumsPage"
+msgid "None of your albums is above 16 bit / 48 kHz."
+msgstr "16 bit / 48 kHz を超えるアルバムはありません。"
+
+msgctxt "AlbumsPage"
+msgid "Add a music folder in Settings to fill your library."
+msgstr "設定で音楽フォルダを追加して、ライブラリを作成しましょう。"
+
+msgctxt "AlbumPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} 曲"
+
+msgctxt "AlbumPage"
+msgid "NOT SUPPORTED BY THE DAC"
+msgstr "DAC 非対応"
+
+msgctxt "AlbumPage"
+msgid "Go to label"
+msgstr "レーベルへ移動"
+
+msgctxt "AlbumPage"
+msgid "More by {}"
+msgstr "{}のその他の作品"
+
+msgctxt "AlbumPage"
+msgid "Artist page"
+msgstr "アーティストページ"
+
+msgctxt "ArtistsPage"
+msgid "Artists"
+msgstr "アーティスト"
+
+msgctxt "ArtistsPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} 枚のアルバム"
+
+msgctxt "ArtistPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} 枚のアルバム"
+
+msgctxt "ArtistPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} 曲"
+
+msgctxt "ArtistPage"
+msgid "Favorite"
+msgstr "お気に入り"
+
+msgctxt "ArtistPage"
+msgid "Starting radio…"
+msgstr "ラジオを開始中…"
+
+msgctxt "ArtistPage"
+msgid "Start radio"
+msgstr "ラジオを開始"
+
+msgctxt "ArtistPage"
+msgid "Discography"
+msgstr "ディスコグラフィ"
+
+msgctxt "ArtistPage"
+msgid "Most played"
+msgstr "よく聴く曲"
+
+msgctxt "ArtistPage"
+msgid "Also appears on"
+msgstr "その他の参加作品"
+
+msgctxt "TracksPage"
+msgid "Tracks"
+msgstr "曲"
+
+msgctxt "TracksPage"
+msgid "Artist"
+msgstr "アーティスト"
+
+msgctxt "TracksPage"
+msgid "Title"
+msgstr "タイトル"
+
+msgctxt "TracksPage"
+msgid "Album"
+msgstr "アルバム"
+
+msgctxt "TracksPage"
+msgid "Length"
+msgstr "時間"
+
+msgctxt "TracksPage"
+msgid "Added"
+msgstr "追加日"
+
+msgctxt "TracksPage"
+msgid "Plays"
+msgstr "再生回数"
+
+msgctxt "GenresPage"
+msgid "Genres"
+msgstr "ジャンル"
+
+msgctxt "GenresPage"
+msgid "No genres"
+msgstr "ジャンルはありません"
+
+msgctxt "GenresPage"
+msgid "Genres come from the GENRE tag of your files."
+msgstr "ジャンルはファイルの GENRE タグから取得されます。"
+
+msgctxt "GenresPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} 枚のアルバム"
+
+msgctxt "GenrePage"
+msgid "Shuffle"
+msgstr "シャッフル"
+
+msgctxt "FavoritesPage"
+msgid "Favorites"
+msgstr "お気に入り"
+
+msgctxt "FavoritesPage"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "FavoritesPage"
+msgid "Nothing here yet"
+msgstr "まだ何もありません"
+
+msgctxt "FavoritesPage"
+msgid "Tap the heart on an album or a track to keep it here."
+msgstr "アルバムや曲のハートをタップすると、ここに保存されます。"
+
+msgctxt "FavoritesPage"
+msgid "Albums"
+msgstr "アルバム"
+
+msgctxt "FavoritesPage"
+msgid "Tracks"
+msgstr "曲"
+
+msgctxt "PlaylistPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} 曲"
+
+msgctxt "PlaylistPage"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "PlaylistPage"
+msgid "Shuffle"
+msgstr "シャッフル"
+
+msgctxt "PlaylistPage"
+msgid "Rename"
+msgstr "名前を変更"
+
+msgctxt "PlaylistPage"
+msgid "Export as M3U"
+msgstr "M3U として書き出す"
+
+msgctxt "PlaylistPage"
+msgid "Delete playlist"
+msgstr "プレイリストを削除"
+
+msgctxt "PlaylistPage"
+msgid "This playlist is empty"
+msgstr "このプレイリストは空です"
+
+msgctxt "PlaylistPage"
+msgid "Right-click any track and choose “Add to playlist”."
+msgstr "曲を右クリックして「プレイリストに追加」を選択してください。"
+
+msgctxt "SearchPage"
+msgid "Search"
+msgstr "検索"
+
+msgctxt "SearchPage"
+msgid "Results for “{}”"
+msgstr "「{}」の検索結果"
+
+msgctxt "SearchPage"
+msgid "All"
+msgstr "すべて"
+
+msgctxt "SearchPage"
+msgid "Artists"
+msgstr "アーティスト"
+
+msgctxt "SearchPage"
+msgid "Tracks"
+msgstr "曲"
+
+msgctxt "SearchPage"
+msgid "Albums"
+msgstr "アルバム"
+
+msgctxt "SearchPage"
+msgid "Playlists"
+msgstr "プレイリスト"
+
+msgctxt "SearchPage"
+msgid "Searching {}…"
+msgstr "{}を検索中…"
+
+msgctxt "SearchPage"
+msgid "No results"
+msgstr "結果なし"
+
+msgctxt "SearchPage"
+msgid "Nothing in your library matches. Check the spelling, or try fewer words."
+msgstr "ライブラリに一致する項目はありません。スペルを確認するか、キーワードを減らしてお試しください。"
+
+msgctxt "SearchPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} 枚のアルバム"
+
+msgctxt "SearchPage"
+msgid "Nothing of this kind matches."
+msgstr "この種類に一致する項目はありません。"
+
+msgctxt "BrowsePage"
+msgid "Play"
+msgstr "再生"
+
+msgctxt "BrowsePage"
+msgid "Shuffle"
+msgstr "シャッフル"
+
+msgctxt "BrowsePage"
+msgid "Rename"
+msgstr "名前を変更"
+
+msgctxt "BrowsePage"
+msgid "Delete playlist"
+msgstr "プレイリストを削除"
+
+msgctxt "BrowsePage"
+msgid "More"
+msgstr "その他"
+
+msgctxt "SignInDialog"
+msgid "Asking the plugin for a sign-in address…"
+msgstr "プラグインにサインイン用アドレスを問い合わせ中…"
+
+msgctxt "SignInDialog"
+msgid "QR code of the sign-in address"
+msgstr "サインイン用アドレスの QR コード"
+
+msgctxt "SignInDialog"
+msgid "Sign in in your browser. On another device, scan the code."
+msgstr "ブラウザでサインインしてください。別のデバイスからはコードをスキャンしてください。"
+
+msgctxt "SignInDialog"
+msgid "Open in browser"
+msgstr "ブラウザで開く"
+
+msgctxt "SignInDialog"
+msgid "This closes by itself once you are signed in. If the browser runs elsewhere, paste the address it ends on."
+msgstr "サインインが完了すると自動的に閉じます。ブラウザが別の場所で動いている場合は、最後に表示されたアドレスを貼り付けてください。"
+
+msgctxt "SignInDialog"
+msgid "Paste the address or code"
+msgstr "アドレスまたはコードを貼り付け"
+
+msgctxt "SignInDialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "SignInDialog"
+msgid "Checking…"
+msgstr "確認中…"
+
+msgctxt "SignInDialog"
+msgid "Sign in"
+msgstr "サインイン"
+
+msgctxt "PluginSettingsDialog"
+msgid "Restarts the plugin when changed."
+msgstr "変更するとプラグインが再起動します。"
+
+msgctxt "PluginSettingsDialog"
+msgid "Reset to defaults"
+msgstr "初期値に戻す"
+
+msgctxt "PluginSettingsDialog"
+msgid "Close"
+msgstr "閉じる"
+
+msgctxt "PluginsPage"
+msgid "Plugins"
+msgstr "プラグイン"
+
+msgctxt "PluginsPage"
+msgid "Plugins are programs made by other people. They run with your permissions and ricercar does not review them: install only plugins you trust, and check that they follow the terms of the service they use."
+msgstr "プラグインは第三者が作成したプログラムです。あなたの権限で動作し、ricercar による審査はありません。信頼できるプラグインのみをインストールし、利用するサービスの規約に従っているか確認してください。"
+
+msgctxt "PluginsPage"
+msgid "Installed"
+msgstr "インストール済み"
+
+msgctxt "PluginsPage"
+msgid "No plugins yet. Install one from the catalogue below, or declare it in config.toml."
+msgstr "プラグインはまだありません。下のカタログからインストールするか、config.toml で宣言してください。"
+
+msgctxt "PluginsPage"
+msgid "Sign in"
+msgstr "サインイン"
+
+msgctxt "PluginsPage"
+msgid "Sign out"
+msgstr "サインアウト"
+
+msgctxt "PluginsPage"
+msgid "Plugin settings"
+msgstr "プラグインの設定"
+
+msgctxt "PluginsPage"
+msgid "Plugin settings (available while the plugin runs)"
+msgstr "プラグインの設定（プラグインの実行中に利用可能）"
+
+msgctxt "PluginsPage"
+msgid "Update"
+msgstr "アップデート"
+
+msgctxt "PluginsPage"
+msgid "Remove"
+msgstr "削除"
+
+msgctxt "PluginsPage"
+msgid "Community catalogue"
+msgstr "コミュニティカタログ"
+
+msgctxt "PluginsPage"
+msgid "Open the hub"
+msgstr "ハブを開く"
+
+msgctxt "PluginsPage"
+msgid "Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256."
+msgstr "各項目は作者のリポジトリを指しています。ricercar は何もホストせず、確認するのはファイルの SHA-256 のみです。"
+
+msgctxt "PluginsPage"
+msgid "Filter plugins"
+msgstr "プラグインを絞り込む"
+
+msgctxt "PluginsPage"
+msgid "Repository"
+msgstr "リポジトリ"
+
+msgctxt "PluginsPage"
+msgid "Install"
+msgstr "インストール"
+
+msgctxt "PluginsPage"
+msgid "No build for this computer"
+msgstr "このコンピュータ用のビルドはありません"
+
+msgctxt ""
+msgid "Everything"
+msgstr "すべて"
+
+msgctxt ""
+msgid "My library"
+msgstr "マイライブラリ"
+
+msgctxt "PlayButton"
+msgid "Pause"
+msgstr "一時停止"
+
+msgctxt "PlayButton"
+msgid "Play"
+msgstr "再生"

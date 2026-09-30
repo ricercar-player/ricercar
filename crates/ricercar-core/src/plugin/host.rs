@@ -1595,5 +1595,9 @@ mod tests {
         assert_eq!(plugin_locale("fr", Some("en-US")), "fr");
         assert_eq!(plugin_locale("fr", Some("fr-BE")), "fr-BE");
         assert_eq!(plugin_locale("en", None), "en");
+        assert_eq!(plugin_locale("de", Some("de-AT")), "de-AT");
+        assert_eq!(plugin_locale("es", Some("fr-FR")), "es");
+        assert_eq!(plugin_locale("it", None), "it");
+        assert_eq!(plugin_locale("ja", Some("ja-JP")), "ja-JP");
     }
 }

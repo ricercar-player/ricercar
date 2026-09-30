@@ -469,6 +469,131 @@ export component Segmented inherits Rectangle {
     }
 }
 
+/// One choice among options too many for a Segmented, in a popup list.
+/// With the keyboard focus, the arrow keys pick the previous or next one and
+/// Space or Enter opens the list.
+export component Dropdown inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> selected;
+    in property <string> label;
+    callback changed(int);
+    private property <length> menu-w: max(self.width, 200px);
+    height: 32px;
+    min-width: 160px;
+    border-radius: Theme.r-md;
+    background: ta.has-hover ? Theme.raised : Theme.hover;
+    border-width: 1px;
+    border-color: Theme.line;
+    animate background { duration: Theme.quick; }
+    function pick(i: int) {
+        if i >= 0 && i < root.options.length && i != root.selected {
+            root.selected = i;
+            root.changed(i);
+        }
+    }
+    forward-focus: fs;
+    accessible-role: combobox;
+    accessible-label: label;
+    accessible-value: selected >= 0 && selected < options.length ? options[selected] : "";
+    accessible-action-default => { popup.show(); }
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.modifiers.control || e.modifiers.alt { return reject; }
+            if e.text == Key.DownArrow || e.text == Key.RightArrow {
+                pick(root.selected + 1);
+                return accept;
+            }
+            if e.text == Key.UpArrow || e.text == Key.LeftArrow {
+                pick(root.selected - 1);
+                return accept;
+            }
+            if e.text == " " || e.text == Key.Return {
+                popup.show();
+                return accept;
+            }
+            reject
+        }
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text {
+            text: root.selected >= 0 && root.selected < root.options.length ? root.options[root.selected] : "";
+            font-size: Theme.fs-sm;
+            font-weight: 600;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { source: Icons.chevron-down; size: 14px; tint: Theme.text2; }
+        }
+    }
+    popup := PopupWindow {
+        x: root.width - root.menu-w;
+        y: root.height + 4px;
+        width: root.menu-w;
+        Rectangle {
+            border-radius: Theme.r-md;
+            background: Theme.overlay;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000099;
+            VerticalLayout {
+                padding: 5px;
+                for opt[i] in root.options: Rectangle {
+                    height: 32px;
+                    border-radius: Theme.r-sm;
+                    background: item-ta.has-hover ? Theme.hover : transparent;
+                    accessible-role: list-item;
+                    accessible-label: opt;
+                    item-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.pick(i);
+                            popup.close();
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        Text {
+                            text: opt;
+                            font-size: Theme.fs-base;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        if i == root.selected: VerticalLayout {
+                            alignment: center;
+                            Icon { source: Icons.check; size: 14px; tint: Theme.accent; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component TextField inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder;

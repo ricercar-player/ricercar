@@ -64,7 +64,7 @@ current `CtlState` with `Controller::lock()` (keep the guard short).
 2. Build the component in `pages.slint` (or a new file imported from
    `app.slint`) and route it in the page switch of `app.slint`.
 3. Handle it in `views::load` and add the sidebar or navigation entry.
-4. Put every string in `@tr(...)` and add the French string (see
+4. Put every string in `@tr(...)` and add its translations (see
    *Translations*).
 5. Add a step to the tour in `snapshot.rs`.
 
@@ -197,12 +197,25 @@ cargo deny check                               # licenses / advisories
 
 ## Translations
 
-- UI strings: `@tr("English text")` in `.slint`.
-- Add the French string to `crates/ricercar-ui/tools/fr.json`, then run
-  `python3 crates/ricercar-ui/tools/gen_po.py`. The catalogs are bundled at
-  build time.
+- Languages: English (the source), French, German, Spanish, Italian and
+  Japanese. Each has one table, `crates/ricercar-ui/tools/<code>.json`, keyed
+  by the English string, which serves both sides below.
+- UI strings: `@tr("English text")` in `.slint`. Add the string to every
+  `tools/<code>.json`, then run `python3 crates/ricercar-ui/tools/gen_po.py`,
+  which writes the gettext catalogues bundled at build time. Plurals are
+  lists, one string per form (`ja` has one form).
 - Rust-side user-visible strings (toasts, statuses, chain labels) go through
-  `text::t("English")`, whose French table lives in `src/text.rs` itself.
+  `text::t("English")`. A sentence with values in it is a template,
+  `text::tf("{name} installed", &[("name", …)])`, so each language can put
+  the values where it needs them; never glue a translated word to a value.
+- `cargo test -p ricercar-ui` checks that every language has every string
+  with the same placeholders, and that every literal passed to `t` or `tf`
+  is in the tables.
+- Japanese text is drawn with a CJK font found on the system (fontconfig);
+  the bundled Inter has no CJK glyphs.
+- Adding a language: a `tools/<code>.json` with the same keys, its plural
+  rule in `gen_po.py`, and an entry in `text::LANGUAGES`, `CATALOGS` and the
+  Language list of the settings (`more.slint`).
 
 ## Git conventions
 
@@ -223,7 +236,7 @@ cargo deny check                               # licenses / advisories
 - [ ] The change does what it says; performance-sensitive changes are
       measured with `scripts/perf.sh`.
 - [ ] Tests added. fmt, clippy, test and deny are green.
-- [ ] Strings are translated (FR).
+- [ ] Strings are translated (every `tools/<code>.json`).
 - [ ] The snapshot tour covers the new UI, and the screenshots are
       regenerated if visible.
 - [ ] The README is updated for user-visible features, and the privacy table for any new

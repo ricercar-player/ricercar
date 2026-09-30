@@ -26,7 +26,7 @@ jobs:
           sudo apt-get install -y libasound2-dev libfontconfig1-dev libxkbcommon-dev pkg-config clang libclang-dev
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --check
-      - name: French catalogue up to date
+      - name: translation catalogues up to date
         run: |
           python3 crates/ricercar-ui/tools/gen_po.py
           git diff --exit-code crates/ricercar-ui/lang

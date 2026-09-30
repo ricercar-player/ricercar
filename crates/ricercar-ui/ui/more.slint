@@ -2,7 +2,7 @@ import { ScrollView, Slider, AboutSlint } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, StationRow, DeviceRow, CapChip } from "state.slint";
-import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Toggle, TextField, Badge, FocusRing } from "widgets.slint";
+import { Icon, IconButton, Button, Cover, SectionTitle, Segmented, Dropdown, Toggle, TextField, Badge, FocusRing } from "widgets.slint";
 import { PageScroll } from "pages.slint";
 
 // ------------------------------------------------------------------ settings: DAC
@@ -580,9 +580,11 @@ export component SettingsPage inherits PageScroll {
             title: @tr("Appearance");
             Row {
                 label: @tr("Language");
-                Segmented {
-                    // Language names stay in their own language.
-                    options: [@tr("System"), "English", "Français"];
+                Dropdown {
+                    label: @tr("Language");
+                    // Language names stay in their own language
+                    // (same order as text::LANGUAGES).
+                    options: [@tr("System"), "English", "Français", "Deutsch", "Español", "Italiano", "日本語"];
                     selected <=> App.ui-language;
                     changed => { App.settings-changed(); }
                 }

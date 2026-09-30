@@ -118,7 +118,8 @@ pub struct UiConfig {
     pub tray: bool,
     /// Keep running in the tray when the window is closed.
     pub close_to_tray: bool,
-    /// Interface language: "en", "fr", or empty to follow the system.
+    /// Interface language: "en", "fr", "de", "es", "it", "ja", or empty to
+    /// follow the system.
     pub language: String,
 }
 

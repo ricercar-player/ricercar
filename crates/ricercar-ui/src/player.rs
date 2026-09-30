@@ -12,7 +12,7 @@ use slint::{ModelRc, VecModel};
 
 use crate::app::{LARGE, THUMB, Ui, post, with_ui};
 use crate::images::{Lookup, Source};
-use crate::text::{khz, long_duration, mmss, quality, t};
+use crate::text::{khz, long_duration, mmss, quality, t, tf};
 use crate::{ChainHop, LyricLine, Page, QueueRow};
 
 #[derive(Default)]
@@ -589,7 +589,11 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     if let Some(f) = fmt {
         hops.push(ChainHop {
             label: t("Decoder").into(),
-            value: format!("{} {}-bit integer PCM", t("Decoded to"), f.bits).into(),
+            value: tf(
+                "Decoded to {bits}-bit integer PCM",
+                &[("bits", &f.bits.to_string())],
+            )
+            .into(),
             state: if lossy { 1 } else { 0 },
         });
     }
@@ -795,7 +799,7 @@ fn plugin_lyrics_label(host: &ricercar_core::plugin::PluginHost, source: &Lyrics
                 .status(id)
                 .map(|s| s.name)
                 .unwrap_or_else(|| id.clone());
-            format!("{} {name}", t("Lyrics from"))
+            tf("Lyrics from {name}", &[("name", &name)])
         }
         LyricsSource::Lrclib => t("Lyrics from lrclib.net").to_string(),
         _ => t("Lyrics from the file").to_string(),

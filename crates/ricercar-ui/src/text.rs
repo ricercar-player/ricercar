@@ -1,13 +1,40 @@
 //! Strings produced on the Rust side (toasts, statuses, chain labels) and
-//! small formatting helpers. The .slint side is translated through gettext.
+//! small formatting helpers. The .slint side is translated through gettext;
+//! both read their translations from `tools/<code>.json`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-static FRENCH: AtomicBool = AtomicBool::new(false);
+/// Interface languages: code and name in the language itself. The settings
+/// list them in this order after "System"; English is the source.
+pub const LANGUAGES: [(&str, &str); 6] = [
+    ("en", "English"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+    ("es", "Español"),
+    ("it", "Italiano"),
+    ("ja", "日本語"),
+];
 
-/// Pick the interface language: `pref` ("en", "fr") from the settings, or
-/// when empty the usual POSIX variables (LC_ALL > LC_MESSAGES > LANG).
-/// Applies it to both the Rust strings and the .slint side.
+/// The translations, keyed by the English string, in `LANGUAGES` order
+/// (none for English).
+const CATALOGS: [&str; 6] = [
+    "{}",
+    include_str!("../tools/fr.json"),
+    include_str!("../tools/de.json"),
+    include_str!("../tools/es.json"),
+    include_str!("../tools/it.json"),
+    include_str!("../tools/ja.json"),
+];
+
+/// Index in `LANGUAGES` of the language in use.
+static CURRENT: AtomicUsize = AtomicUsize::new(0);
+
+/// Pick the interface language: `pref` (a code from `LANGUAGES`) from the
+/// settings, or when empty the usual POSIX variables (LC_ALL > LC_MESSAGES >
+/// LANG). Unknown languages fall back to English. Applies it to both the
+/// Rust strings and the .slint side; returns the code in use.
 pub fn set_language(pref: &str) -> &'static str {
     let lang = if pref.is_empty() {
         ["LC_ALL", "LC_MESSAGES", "LANG"]
@@ -18,217 +45,67 @@ pub fn set_language(pref: &str) -> &'static str {
     } else {
         pref.to_string()
     };
-    let fr = lang.starts_with("fr");
-    FRENCH.store(fr, Ordering::Relaxed);
-    let code = if fr { "fr" } else { "en" };
+    let i = LANGUAGES
+        .iter()
+        .position(|(code, _)| lang.starts_with(code))
+        .unwrap_or(0);
+    CURRENT.store(i, Ordering::Relaxed);
+    let code = LANGUAGES[i].0;
     let _ = slint::select_bundled_translation(code);
     code
 }
 
-fn fr() -> bool {
-    FRENCH.load(Ordering::Relaxed)
+fn current() -> usize {
+    #[cfg(test)]
+    if let Some(i) = tests::LANG.get() {
+        return i;
+    }
+    CURRENT.load(Ordering::Relaxed)
 }
 
-/// Language in use ("en" or "fr").
+/// Language in use, as a code from `LANGUAGES`.
 pub fn language() -> &'static str {
-    if fr() { "fr" } else { "en" }
+    LANGUAGES[current()].0
+}
+
+fn catalog(i: usize) -> &'static HashMap<String, serde_json::Value> {
+    static TABLES: [OnceLock<HashMap<String, serde_json::Value>>; 6] =
+        [const { OnceLock::new() }; 6];
+    TABLES[i].get_or_init(|| serde_json::from_str(CATALOGS[i]).expect("bundled catalog"))
 }
 
 /// Translate a Rust-side string (English is the key).
 pub fn t(en: &'static str) -> &'static str {
-    if !fr() {
-        return en;
-    }
-    match en {
-        "Good morning" => "Bonjour",
-        "Hide window" => "Masquer la fenêtre",
-        "Decoded to" => "Décodé en",
-        "Muted" => "Sourdine",
-        "Software volume" => "Volume logiciel",
-        "ReplayGain / preamp" => "ReplayGain / préampli",
-        "exclusive, no mixer" => "exclusif, sans mixeur",
-        "shared: may resample or mix" => "partagé : peut rééchantillonner ou mixer",
-        "Null sink: audio discarded" => "Sortie nulle : audio ignoré",
-        "written to a file" => "écrit dans un fichier",
-        "Null sink" => "Sortie nulle",
-        "Discards audio (testing)" => "Ignore l'audio (tests)",
-        "Show window" => "Afficher la fenêtre",
-        "Pause" => "Pause",
-        "Play" => "Lecture",
-        "Next" => "Suivant",
-        "Previous" => "Précédent",
-        "Quit" => "Quitter",
-        "Good afternoon" => "Bon après-midi",
-        "Good evening" => "Bonsoir",
-        "Good night" => "Bonne nuit",
-        "Added to the queue" => "Ajouté à la file d'attente",
-        "Will play next" => "Sera lu ensuite",
-        "Removed from the playlist" => "Retiré de la playlist",
-        "Added to favorites" => "Ajouté aux favoris",
-        "Removed from favorites" => "Retiré des favoris",
-        "Playlist created" => "Playlist créée",
-        "Playlist deleted" => "Playlist supprimée",
-        "Only tracks from the same service can go to this playlist" => {
-            "Seuls les titres du même service peuvent aller dans cette playlist"
-        }
-        "This track cannot be changed in the playlist" => {
-            "Ce titre ne peut pas être modifié dans la playlist"
-        }
-        "Playlist exported to" => "Playlist exportée dans",
-        "Playlist imported" => "Playlist importée",
-        "Could not open the file" => "Impossible d'ouvrir le fichier",
-        "Source" => "Source",
-        "Decoder" => "Décodeur",
-        "Output format" => "Format de sortie",
-        "Device" => "Périphérique",
-        "Volume" => "Volume",
-        "Processing" => "Traitement",
-        "none" => "aucun",
-        "Searching for lyrics…" => "Recherche des paroles…",
-        "No lyrics for this track" => "Pas de paroles pour ce titre",
-        "Instrumental" => "Instrumental",
-        "Online lyrics are turned off in Settings" => {
-            "Les paroles en ligne sont désactivées dans les Réglages"
-        }
-        "Nothing is playing" => "Aucune lecture en cours",
-        "Lyrics from lrclib.net" => "Paroles : lrclib.net",
-        "Lyrics from the file" => "Paroles : fichier",
-        "Lyrics from the .lrc file" => "Paroles : fichier .lrc",
-        "Lyrics from" => "Paroles :",
-        "relayed locally, original codec unchanged" => {
-            "relayé localement, codec d'origine inchangé"
-        }
-        "relayed" => "relayé",
-        "Top stations" => "Stations populaires",
-        "Stations" => "Stations",
-        "Radio Browser is unreachable" => "Radio Browser est injoignable",
-        "Searching…" => "Recherche…",
-        "No station found" => "Aucune station trouvée",
-        "Disc" => "Disque",
-        "Playing from" => "Lecture depuis",
-        "UPnP" => "UPnP",
-        "Internet radio" => "Radio en ligne",
-        "Library mix" => "Mix de la bibliothèque",
-        "Not connected" => "Non connecté",
-        "Connected as" => "Connecté en tant que",
-        "Checking…" => "Vérification…",
-        "Invalid token" => "Jeton invalide",
-        "Approve ricercar in your browser, then click “I approved it”." => {
-            "Autorisez ricercar dans votre navigateur, puis cliquez sur « J'ai autorisé l'accès »."
-        }
-        "Authorization failed" => "Échec de l'autorisation",
-        "Visible on the network as" => "Visible sur le réseau sous le nom",
-        "port" => "port",
-        "Network sharing is off" => "Le partage réseau est désactivé",
-        "Starting…" => "Démarrage…",
-        "Network unavailable" => "Réseau indisponible",
-        "Interface {} is not available" => "L'interface {} n'est pas disponible",
-        "All interfaces" => "Toutes les interfaces",
-        "not available" => "indisponible",
-        "Reading capabilities…" => "Lecture des capacités…",
-        "In use: capabilities from the last check." => {
-            "En cours d'utilisation : capacités du dernier relevé."
-        }
-        "In use: capabilities are read once playback stops." => {
-            "En cours d'utilisation : capacités relevées à l'arrêt de la lecture."
-        }
-        "Could not read the device" => "Impossible d'interroger le périphérique",
-        "Diagnostic report copied" => "Rapport de diagnostic copié",
-        "Sign in to" => "Se connecter à",
-        "Signed in to" => "Connecté à",
-        "Not found" => "Introuvable",
-        "Not available (region, subscription or format)" => {
-            "Non disponible (région, abonnement ou format)"
-        }
-        "Too many requests, try again later" => "Trop de requêtes, réessayez plus tard",
-        "Offline: the service could not be reached" => "Hors ligne : le service est injoignable",
-        "not running" => "ne tourne pas",
-        "no answer" => "pas de réponse",
-        "Off" => "Désactivé",
-        "Restarting in" => "Redémarrage dans",
-        "Stopped" => "Arrêté",
-        "Ready" => "Prêt",
-        "Signed in" => "Connecté",
-        "Signed in as" => "Connecté en tant que",
-        "Sign-in expired" => "Connexion expirée",
-        "Signed out" => "Déconnecté",
-        "Library" => "Bibliothèque",
-        "All" => "Tout",
-        "Everything" => "Partout",
-        "My library" => "Ma bibliothèque",
-        "Playlist" => "Playlist",
-        "The plugin gave an unusable address." => "Le plugin a fourni une adresse inutilisable.",
-        "Not signed in yet. Check the code and try again." => {
-            "Pas encore connecté. Vérifiez le code et réessayez."
-        }
-        "Nothing playable here" => "Rien de lisible ici",
-        "Album" => "Album",
-        "Artist" => "Artiste",
-        "Label" => "Label",
-        "This plugin has no favourites" => "Ce plugin ne gère pas les favoris",
-        "No results" => "Aucun résultat",
-        "plugin" => "plugin",
-        "Stream" => "Flux",
-        "The community catalogue is off (Settings → Online extras)." => {
-            "Le catalogue communautaire est désactivé (Réglages → Extras en ligne)."
-        }
-        "Loading the catalogue…" => "Chargement du catalogue…",
-        "The catalogue is empty for now." => "Le catalogue est vide pour l'instant.",
-        "Could not read the catalogue" => "Impossible de lire le catalogue",
-        "sign-in" => "connexion",
-        "browse" => "navigation",
-        "search" => "recherche",
-        "favourites" => "favoris",
-        "remote control" => "contrôle à distance",
-        "by" => "par",
-        "Update" => "Mettre à jour",
-        "Install" => "Installer",
-        "Could not reach GitHub. Check the connection and try again." => {
-            "Impossible de joindre GitHub. Vérifiez la connexion et réessayez."
-        }
-        "Update cancelled." => "Mise à jour annulée.",
-        "The download does not match the release checksums; nothing was installed." => {
-            "Le téléchargement ne correspond pas aux sommes de contrôle de la version ; rien n'a été installé."
-        }
-        "The download failed. Check the connection and try again." => {
-            "Le téléchargement a échoué. Vérifiez la connexion et réessayez."
-        }
-        "The update could not be installed." => "La mise à jour n'a pas pu être installée.",
-        "Installed" => "Installé",
-        "Removed" => "Retiré",
-        "this computer" => "cet ordinateur",
-        "Report saved to" => "Rapport enregistré dans",
-        "Folder added; indexing…" => "Dossier ajouté ; indexation…",
-        "This folder does not exist." => "Ce dossier n'existe pas.",
-        "The release is not signed with the ricercar key; nothing was installed." => {
-            "La version n'est pas signée avec la clé de ricercar ; rien n'a été installé."
-        }
-        "Not authorised. Is a polkit authentication agent running?" => {
-            "Non autorisé. Un agent d'authentification polkit est-il lancé ?"
-        }
-        "Folder removed" => "Dossier retiré",
-        "Output device" => "Sortie audio",
-        "Network error" => "Erreur réseau",
-        "Unknown artist" => "Artiste inconnu",
-        "tracks" => "titres",
-        "track" => "titre",
-        "Enter the API key and shared secret of your Last.fm API account first." => {
-            "Saisissez d'abord la clé API et le secret partagé de votre compte API Last.fm."
-        }
-        "Settings for" => "Réglages de",
-        "Changes apply at once." => "Les modifications s'appliquent tout de suite.",
-        "The plugin is not running: changes apply when it starts." => {
-            "Le plugin n'est pas lancé : les modifications s'appliqueront à son démarrage."
-        }
-        "At least" => "Au moins",
-        "At most" => "Au plus",
-        "characters" => "caractères",
-        "Enter a number" => "Saisissez un nombre",
-        "This value is not accepted" => "Cette valeur n'est pas acceptée",
-        "Starting radio…" => "Lancement de la radio…",
-        "Radio started" => "Radio lancée",
+    match catalog(current()).get(en) {
+        Some(serde_json::Value::String(s)) => s,
         _ => en,
     }
+}
+
+/// Translate a template and fill its `{name}` placeholders. Values are
+/// inserted as they are, even when they contain braces.
+pub fn tf(en: &'static str, args: &[(&str, &str)]) -> String {
+    let mut rest = t(en);
+    let mut out = String::with_capacity(rest.len());
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let tail = &rest[open + 1..];
+        match tail
+            .find('}')
+            .and_then(|close| Some((close, args.iter().find(|(k, _)| *k == &tail[..close])?)))
+        {
+            Some((close, (_, v))) => {
+                out.push_str(v);
+                rest = &tail[close + 1..];
+            }
+            None => {
+                out.push('{');
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 pub fn mmss(ms: u64) -> String {
@@ -290,39 +167,52 @@ pub fn greeting() -> &'static str {
 
 /// kHz with the decimal separator of the language ("352,8" in French).
 fn khz_local(rate: u32) -> String {
-    let k = khz(rate);
-    if fr() { k.replace('.', ",") } else { k }
+    decimal(&khz(rate))
+}
+
+fn decimal(s: &str) -> String {
+    if matches!(language(), "fr" | "de" | "es" | "it") {
+        s.replace('.', ",")
+    } else {
+        s.to_string()
+    }
 }
 
 /// "12 albums at 352.8 kHz can't be played natively on this DAC".
 pub fn unsupported_albums(n: u32, rate: u32) -> String {
-    let k = khz_local(rate);
-    match (fr(), n == 1) {
-        (false, true) => format!("1 album at {k} kHz can't be played natively on this DAC"),
-        (false, false) => format!("{n} albums at {k} kHz can't be played natively on this DAC"),
-        (true, true) => format!("1 album à {k} kHz ne pourra pas être lu nativement sur ce DAC"),
-        (true, false) => {
-            format!("{n} albums à {k} kHz ne pourront pas être lus nativement sur ce DAC")
-        }
+    let rate = khz_local(rate);
+    let n = n.to_string();
+    if n == "1" {
+        tf(
+            "1 album at {rate} kHz can't be played natively on this DAC",
+            &[("rate", &rate)],
+        )
+    } else {
+        tf(
+            "{n} albums at {rate} kHz can't be played natively on this DAC",
+            &[("n", &n), ("rate", &rate)],
+        )
     }
 }
 
 /// Install confirmation: what comes from where, and what is not checked.
 pub fn install_body(name: &str, version: &str, author: &str, host: &str, repo: &str) -> String {
-    let who = if author.is_empty() {
-        String::new()
-    } else if fr() {
-        format!(" de {author}")
-    } else {
-        format!(" by {author}")
-    };
-    if fr() {
-        format!(
-            "{name} {version}{who} sera téléchargé depuis {host} et lancé avec vos droits. ricercar vérifie que le fichier correspond au catalogue (SHA-256), mais ne relit pas ce que fait le plugin. Code source : {repo}"
+    let args = [
+        ("name", name),
+        ("version", version),
+        ("author", author),
+        ("host", host),
+        ("repo", repo),
+    ];
+    if author.is_empty() {
+        tf(
+            "{name} {version} will be downloaded from {host} and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: {repo}",
+            &args,
         )
     } else {
-        format!(
-            "{name} {version}{who} will be downloaded from {host} and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: {repo}"
+        tf(
+            "{name} {version} by {author} will be downloaded from {host} and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: {repo}",
+            &args,
         )
     }
 }
@@ -330,32 +220,21 @@ pub fn install_body(name: &str, version: &str, author: &str, host: &str, repo: &
 /// Warning shown above the confirmation of a plugin update whose binary now
 /// comes from another host than the installed one.
 pub fn host_changed(old: &str, new: &str) -> String {
-    if fr() {
-        format!(
-            "Attention : l'adresse de téléchargement a changé. La version installée venait de {old}, cette mise à jour vient de {new}. Ne continuez que si vous faites confiance à cette nouvelle source."
-        )
-    } else {
-        format!(
-            "Warning: the download address has changed. The installed version came from {old}; this update comes from {new}. Only continue if you trust the new source."
-        )
-    }
+    tf(
+        "Warning: the download address has changed. The installed version came from {old}; this update comes from {new}. Only continue if you trust the new source.",
+        &[("old", old), ("new", new)],
+    )
 }
 
 /// "The DAC refuses 352.8 kHz (accepts: 44.1–192 kHz)".
 pub fn dac_refuses(rate: u32, accepts: Option<&str>) -> String {
-    let k = khz_local(rate);
-    let accepts = accepts.map(|a| {
-        if fr() {
-            a.replace('.', ",")
-        } else {
-            a.to_string()
-        }
-    });
-    match (fr(), accepts) {
-        (false, Some(a)) => format!("The DAC refuses {k} kHz (accepts: {a})"),
-        (false, None) => format!("The DAC refuses {k} kHz"),
-        (true, Some(a)) => format!("Le DAC refuse {k} kHz (accepte : {a})"),
-        (true, None) => format!("Le DAC refuse {k} kHz"),
+    let rate = khz_local(rate);
+    match accepts {
+        Some(a) => tf(
+            "The DAC refuses {rate} kHz (accepts: {accepts})",
+            &[("rate", &rate), ("accepts", &decimal(a))],
+        ),
+        None => tf("The DAC refuses {rate} kHz", &[("rate", &rate)]),
     }
 }
 
@@ -366,6 +245,126 @@ pub fn count(n: usize, one: &'static str, many: &'static str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// Language of this test thread, leaving the global one alone.
+        pub(super) static LANG: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    fn with_language<R>(code: &str, f: impl FnOnce() -> R) -> R {
+        let i = LANGUAGES.iter().position(|(c, _)| *c == code).unwrap();
+        LANG.set(Some(i));
+        let r = f();
+        LANG.set(None);
+        r
+    }
+
+    fn placeholders(s: &str) -> Vec<&str> {
+        let mut v: Vec<&str> = s
+            .match_indices('{')
+            .filter_map(|(i, _)| s[i..].find('}').map(|j| &s[i..=i + j]))
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// Every language translates the same strings as French, keeps their
+    /// placeholders and has the plural forms gettext expects.
+    #[test]
+    fn catalogs_are_complete() {
+        let fr = catalog(1);
+        for (i, (code, _)) in LANGUAGES.iter().enumerate().skip(1) {
+            let cat = catalog(i);
+            let forms = if *code == "ja" { 1 } else { 2 };
+            for (en, ref_value) in fr {
+                let value = cat
+                    .get(en)
+                    .unwrap_or_else(|| panic!("{code}: missing {en:?}"));
+                let texts: Vec<&str> = match (ref_value, value) {
+                    (serde_json::Value::String(_), serde_json::Value::String(s)) => vec![s],
+                    (serde_json::Value::Array(_), serde_json::Value::Array(a)) => {
+                        assert_eq!(a.len(), forms, "{code}: plural forms of {en:?}");
+                        a.iter().map(|v| v.as_str().unwrap()).collect()
+                    }
+                    _ => panic!("{code}: wrong kind of value for {en:?}"),
+                };
+                for text in texts {
+                    assert!(!text.trim().is_empty(), "{code}: empty {en:?}");
+                    let (want, got) = (placeholders(en), placeholders(text));
+                    let plural = ref_value.is_array();
+                    assert!(
+                        got == want || plural && got.iter().all(|p| want.contains(p)),
+                        "{code}: placeholders of {en:?} in {text:?}"
+                    );
+                }
+            }
+            assert_eq!(cat.len(), fr.len(), "{code}: strings French does not have");
+        }
+    }
+
+    /// The literal strings the sources pass to `t` and `tf`.
+    fn rust_strings() -> Vec<(std::path::PathBuf, String)> {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let src = std::fs::read_to_string(&path).unwrap();
+            for (i, call) in src.match_indices("t(").chain(src.match_indices("tf(")) {
+                if src[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
+                let rest = src[i + call.len()..].trim_start();
+                let Some(rest) = rest.strip_prefix('"') else {
+                    continue;
+                };
+                let Some(end) = rest.find('"') else { continue };
+                let after = rest[end + 1..].trim_start();
+                // t takes the string alone, tf the string then its values;
+                // anything else is another function.
+                let closes = if call == "t(" {
+                    after.trim_start_matches(',').trim_start().starts_with(')')
+                } else {
+                    after.starts_with(',')
+                };
+                if closes && !rest[..end].contains('\\') {
+                    found.push((path.clone(), rest[..end].to_string()));
+                }
+            }
+        }
+        found
+    }
+
+    /// Every literal string the sources pass to `t` or `tf` has a translation.
+    #[test]
+    fn rust_strings_are_translated() {
+        let strings = rust_strings();
+        assert!(
+            strings.len() > 100,
+            "scanner found {} strings",
+            strings.len()
+        );
+        for (path, en) in strings {
+            assert!(
+                catalog(1).contains_key(&en),
+                "{path:?}: {en:?} is not translated"
+            );
+        }
+    }
+
+    #[test]
+    fn templates() {
+        assert_eq!(
+            tf("{name} installed", &[("name", "Demo {name}")]),
+            "Demo {name} installed"
+        );
+        with_language("ja", || {
+            assert_eq!(
+                tf("Install {name}?", &[("name", "Demo")]),
+                "Demo をインストールしますか？"
+            );
+        });
+    }
 
     #[test]
     fn formats() {
@@ -388,5 +387,38 @@ mod tests {
             dac_refuses(352_800, Some("44.1–192 kHz")),
             "The DAC refuses 352.8 kHz (accepts: 44.1–192 kHz)"
         );
+        assert_eq!(
+            install_body("Demo", "1.0", "", "github.com", "https://x"),
+            "Demo 1.0 will be downloaded from github.com and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: https://x"
+        );
+    }
+
+    #[test]
+    fn formats_in_french() {
+        with_language("fr", || {
+            assert_eq!(t("Muted"), "Sourdine");
+            assert_eq!(count(3, "track", "tracks"), "3 titres");
+            assert_eq!(
+                unsupported_albums(1, 352_800),
+                "1 album à 352,8 kHz ne pourra pas être lu nativement sur ce DAC"
+            );
+            assert_eq!(
+                dac_refuses(352_800, Some("44.1–192 kHz")),
+                "Le DAC refuse 352,8 kHz (accepte : 44,1–192 kHz)"
+            );
+            assert!(
+                install_body("Demo", "1.0", "Jo", "github.com", "https://x")
+                    .starts_with("Demo 1.0 de Jo sera téléchargé depuis github.com")
+            );
+            assert!(host_changed("a.org", "b.org").starts_with("Attention : l'adresse"));
+        });
+        assert_eq!(t("Muted"), "Muted");
+    }
+
+    #[test]
+    fn formats_in_german() {
+        with_language("de", || {
+            assert_eq!(dac_refuses(352_800, None), "Der DAC lehnt 352,8 kHz ab");
+        });
     }
 }

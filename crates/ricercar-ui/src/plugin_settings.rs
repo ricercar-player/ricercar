@@ -12,7 +12,7 @@ use slint::{Model, ModelRc, VecModel};
 
 use crate::SettingRow;
 use crate::app::{Ui, with_ui};
-use crate::text::t;
+use crate::text::{t, tf};
 
 /// The dialog's plugin, and the declaration and values it shows.
 pub struct Open {
@@ -130,9 +130,9 @@ fn row(s: &Setting, values: &Map<String, Value>) -> SettingRow {
 pub fn error_text(e: &SettingError) -> String {
     let n = |x: f64| number_text(&serde_json::json!(x));
     match e {
-        SettingError::BelowMin(m) => format!("{} {}", t("At least"), n(*m)),
-        SettingError::AboveMax(m) => format!("{} {}", t("At most"), n(*m)),
-        SettingError::TooLong(max) => format!("{} {max} {}", t("At most"), t("characters")),
+        SettingError::BelowMin(m) => tf("At least {n}", &[("n", &n(*m))]),
+        SettingError::AboveMax(m) => tf("At most {n}", &[("n", &n(*m))]),
+        SettingError::TooLong(max) => tf("At most {n} characters", &[("n", &max.to_string())]),
         _ => t("This value is not accepted").into(),
     }
 }
@@ -159,7 +159,7 @@ pub fn open(ui: &Ui, id: &str) {
         .map(|s| s.name)
         .unwrap_or_else(|| id.to_string());
     let app = ui.app();
-    app.set_psettings_title(format!("{} {name}", t("Settings for")).into());
+    app.set_psettings_title(tf("Settings for {name}", &[("name", &name)]).into());
     app.set_psettings_note(note(running).into());
     app.set_psettings_rows(ModelRc::new(VecModel::from(rows(&schema, &values))));
     ui.plugins.borrow_mut().settings = Some(Open {

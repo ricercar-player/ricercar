@@ -1,0 +1,1465 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: es\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "MainWindow"
+msgid "New playlist"
+msgstr "Nueva playlist"
+
+msgctxt "MainWindow"
+msgid "Rename playlist"
+msgstr "Cambiar nombre de la playlist"
+
+msgctxt "MainWindow"
+msgid "Delete “{}”?"
+msgstr "¿Eliminar «{}»?"
+
+msgctxt "MainWindow"
+msgid "The playlist is removed; your music files are not touched."
+msgstr "Se elimina la playlist; tus archivos de música no se tocan."
+
+msgctxt "MainWindow"
+msgid "The playlist is deleted from {}. This cannot be undone."
+msgstr "La playlist se elimina de {}. Esta acción no se puede deshacer."
+
+msgctxt "MainWindow"
+msgid "Create"
+msgstr "Crear"
+
+msgctxt "MainWindow"
+msgid "Rename"
+msgstr "Cambiar nombre"
+
+msgctxt "MainWindow"
+msgid "Delete"
+msgstr "Eliminar"
+
+msgctxt "MainWindow"
+msgid "Create in"
+msgstr "Crear en"
+
+msgctxt "MainWindow"
+msgid "Installing…"
+msgstr "Instalando…"
+
+msgctxt "MainWindow"
+msgid "Install"
+msgstr "Instalar"
+
+msgctxt "MainWindow"
+msgid "Add a music folder"
+msgstr "Añadir una carpeta de música"
+
+msgctxt "MainWindow"
+msgid "No folder picker is available on this desktop (is xdg-desktop-portal installed?). Type the folder's path instead."
+msgstr "No hay ningún selector de carpetas disponible en este escritorio (¿está instalado xdg-desktop-portal?). Escribe la ruta de la carpeta."
+
+msgctxt "MainWindow"
+msgid "Add"
+msgstr "Añadir"
+
+msgctxt "Sidebar"
+msgid "Search"
+msgstr "Buscar"
+
+msgctxt "Sidebar"
+msgid "Home"
+msgstr "Inicio"
+
+msgctxt "Sidebar"
+msgid "Albums"
+msgstr "Álbumes"
+
+msgctxt "Sidebar"
+msgid "Artists"
+msgstr "Artistas"
+
+msgctxt "Sidebar"
+msgid "Tracks"
+msgstr "Canciones"
+
+msgctxt "Sidebar"
+msgid "Genres"
+msgstr "Géneros"
+
+msgctxt "Sidebar"
+msgid "Favorites"
+msgstr "Favoritos"
+
+msgctxt "Sidebar"
+msgid "Radio"
+msgstr "Radio"
+
+msgctxt "Sidebar"
+msgid "Plugins"
+msgstr "Plugins"
+
+msgctxt "Sidebar"
+msgid "{n} update available"
+msgid_plural "{n} updates available"
+msgstr[0] "{n} actualización disponible"
+msgstr[1] "{n} actualizaciones disponibles"
+
+msgctxt "Sidebar"
+msgid "Playlists"
+msgstr "Playlists"
+
+msgctxt "Sidebar"
+msgid "New playlist"
+msgstr "Nueva playlist"
+
+msgctxt "Sidebar"
+msgid "No playlists yet"
+msgstr "Aún no hay playlists"
+
+msgctxt "Sidebar"
+msgid "ricercar {} is available"
+msgstr "ricercar {} está disponible"
+
+msgctxt "Sidebar"
+msgid "Update now"
+msgstr "Actualizar ahora"
+
+msgctxt "Sidebar"
+msgid "What's new"
+msgstr "Novedades"
+
+msgctxt "Sidebar"
+msgid "Close"
+msgstr "Cerrar"
+
+msgctxt "Sidebar"
+msgid "Indexing {} / {}"
+msgstr "Indexando {} / {}"
+
+msgctxt "Sidebar"
+msgid "Scanning library…"
+msgstr "Analizando la biblioteca…"
+
+msgctxt "Sidebar"
+msgid "Settings"
+msgstr "Ajustes"
+
+msgctxt "ChainPanel"
+msgid "Signal path"
+msgstr "Ruta de la señal"
+
+msgctxt "ChainPanel"
+msgid "Bit-perfect"
+msgstr "Bit-perfect"
+
+msgctxt "ChainPanel"
+msgid "Altered signal path"
+msgstr "Ruta de la señal alterada"
+
+msgctxt "ChainPanel"
+msgid "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing."
+msgstr "Las muestras llegan intactas al dispositivo: frecuencia nativa, sin remuestreo, sin mezclador, sin procesar el volumen."
+
+msgctxt "ChainPanel"
+msgid "Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback."
+msgstr "Algo en la cadena modifica las muestras (volumen, ReplayGain, silencio o un dispositivo compartido). Pon el volumen al 100 % y usa un dispositivo hw: para una reproducción bit-perfect."
+
+msgctxt "VolumeControl"
+msgid "Mute"
+msgstr "Silenciar"
+
+msgctxt "VolumeControl"
+msgid "Volume"
+msgstr "Volumen"
+
+msgctxt "PlayerBar"
+msgid "Nothing playing"
+msgstr "No se está reproduciendo nada"
+
+msgctxt "PlayerBar"
+msgid "Favorite"
+msgstr "Favorito"
+
+msgctxt "PlayerBar"
+msgid "Shuffle"
+msgstr "Aleatorio"
+
+msgctxt "PlayerBar"
+msgid "Previous"
+msgstr "Anterior"
+
+msgctxt "PlayerBar"
+msgid "Pause"
+msgstr "Pausar"
+
+msgctxt "PlayerBar"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "PlayerBar"
+msgid "Next"
+msgstr "Siguiente"
+
+msgctxt "PlayerBar"
+msgid "Repeat"
+msgstr "Repetir"
+
+msgctxt "PlayerBar"
+msgid "Position"
+msgstr "Posición"
+
+msgctxt "PlayerBar"
+msgid "LIVE"
+msgstr "EN DIRECTO"
+
+msgctxt "PlayerBar"
+msgid "Loading…"
+msgstr "Cargando…"
+
+msgctxt "PlayerBar"
+msgid "Lyrics"
+msgstr "Letra"
+
+msgctxt "PlayerBar"
+msgid "Queue"
+msgstr "Cola"
+
+msgctxt "Biography"
+msgid "Show less"
+msgstr "Mostrar menos"
+
+msgctxt "Biography"
+msgid "Read more"
+msgstr "Leer más"
+
+msgctxt "Biography"
+msgid "Source: {}"
+msgstr "Fuente: {}"
+
+msgctxt "TrackHeader"
+msgid "Title"
+msgstr "Título"
+
+msgctxt "TrackHeader"
+msgid "Album"
+msgstr "Álbum"
+
+msgctxt "TrackHeader"
+msgid "Plays"
+msgstr "Escuchas"
+
+msgctxt "TrackHeader"
+msgid "Format"
+msgstr "Formato"
+
+msgctxt "TrackHeader"
+msgid "Length"
+msgstr "Duración"
+
+msgctxt "TrackLine"
+msgid "Favorite"
+msgstr "Favorito"
+
+msgctxt "BrowseContent"
+msgid "Loading…"
+msgstr "Cargando…"
+
+msgctxt "BrowseContent"
+msgid "Sign in to see this"
+msgstr "Inicia sesión para ver esto"
+
+msgctxt "BrowseContent"
+msgid "Could not load this list"
+msgstr "No se pudo cargar esta lista"
+
+msgctxt "BrowseContent"
+msgid "Sign in"
+msgstr "Iniciar sesión"
+
+msgctxt "BrowseContent"
+msgid "Nothing here"
+msgstr "Aquí no hay nada"
+
+msgctxt "BrowseContent"
+msgid "This list is empty."
+msgstr "Esta lista está vacía."
+
+msgctxt "BrowseContent"
+msgid "Show more"
+msgstr "Mostrar más"
+
+msgctxt "DeviceCaps"
+msgid "Sample rates"
+msgstr "Frecuencias de muestreo"
+
+msgctxt "DeviceCaps"
+msgid "Containers"
+msgstr "Contenedores"
+
+msgctxt "DeviceCaps"
+msgid "Channels"
+msgstr "Canales"
+
+msgctxt "StationLine"
+msgid "Favorite"
+msgstr "Favorito"
+
+msgctxt "RadioPage"
+msgid "Radio"
+msgstr "Radio"
+
+msgctxt "RadioPage"
+msgid "Thousands of internet stations from the community-run Radio Browser directory."
+msgstr "Miles de emisoras de internet del directorio comunitario Radio Browser."
+
+msgctxt "RadioPage"
+msgid "Station, genre, country…"
+msgstr "Emisora, género, país…"
+
+msgctxt "RadioPage"
+msgid "Your stations"
+msgstr "Tus emisoras"
+
+msgctxt "SettingsPage"
+msgid "Settings"
+msgstr "Ajustes"
+
+msgctxt "SettingsPage"
+msgid "Audio output"
+msgstr "Salida de audio"
+
+msgctxt "SettingsPage"
+msgid "Hardware devices (hw:) are opened exclusively: no mixer, no resampling, native sample rate for every track."
+msgstr "Los dispositivos de hardware (hw:) se abren en exclusiva: sin mezclador, sin remuestreo y a la frecuencia nativa de cada canción."
+
+msgctxt "SettingsPage"
+msgid "BIT-PERFECT"
+msgstr "BIT-PERFECT"
+
+msgctxt "SettingsPage"
+msgid "SHARED"
+msgstr "COMPARTIDO"
+
+msgctxt "SettingsPage"
+msgid "Hide capabilities"
+msgstr "Ocultar capacidades"
+
+msgctxt "SettingsPage"
+msgid "Show capabilities"
+msgstr "Mostrar capacidades"
+
+msgctxt "SettingsPage"
+msgid "Rescan devices"
+msgstr "Buscar dispositivos"
+
+msgctxt "SettingsPage"
+msgid "After plugging in a USB DAC."
+msgstr "Tras conectar un DAC USB."
+
+msgctxt "SettingsPage"
+msgid "Refresh"
+msgstr "Actualizar"
+
+msgctxt "SettingsPage"
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
+msgctxt "SettingsPage"
+msgid "Evens out loudness between tracks. Any gain makes playback non bit-perfect."
+msgstr "Iguala el volumen percibido entre canciones. Cualquier ganancia hace que la reproducción deje de ser bit-perfect."
+
+msgctxt "SettingsPage"
+msgid "Off"
+msgstr "No"
+
+msgctxt "SettingsPage"
+msgid "Track"
+msgstr "Canción"
+
+msgctxt "SettingsPage"
+msgid "Album"
+msgstr "Álbum"
+
+msgctxt "SettingsPage"
+msgid "Auto"
+msgstr "Auto"
+
+msgctxt "SettingsPage"
+msgid "Preamp: {} dB"
+msgstr "Preamplificación: {} dB"
+
+msgctxt "SettingsPage"
+msgid "Added to the ReplayGain value."
+msgstr "Se suma al valor de ReplayGain."
+
+msgctxt "SettingsPage"
+msgid "Resume where I left off"
+msgstr "Continuar donde lo dejé"
+
+msgctxt "SettingsPage"
+msgid "Restore the queue and position at startup (paused)."
+msgstr "Restaura la cola y la posición al iniciar (en pausa)."
+
+msgctxt "SettingsPage"
+msgid "Continuous playback"
+msgstr "Reproducción continua"
+
+msgctxt "SettingsPage"
+msgid "When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin."
+msgstr "Cuando la cola termina con una canción de un plugin que lo ofrece, seguir reproduciendo canciones similares de ese plugin."
+
+msgctxt "SettingsPage"
+msgid "Library"
+msgstr "Biblioteca"
+
+msgctxt "SettingsPage"
+msgid "Folders ricercar indexes. Files are only read, never modified."
+msgstr "Carpetas que indexa ricercar. Los archivos solo se leen, nunca se modifican."
+
+msgctxt "SettingsPage"
+msgid "Remove folder"
+msgstr "Quitar carpeta"
+
+msgctxt "SettingsPage"
+msgid "No music folder yet"
+msgstr "Aún no hay carpetas de música"
+
+msgctxt "SettingsPage"
+msgid "{n} track indexed"
+msgid_plural "{n} tracks indexed"
+msgstr[0] "{n} canción indexada"
+msgstr[1] "{n} canciones indexadas"
+
+msgctxt "SettingsPage"
+msgid "Indexing {} / {}"
+msgstr "Indexando {} / {}"
+
+msgctxt "SettingsPage"
+msgid "Rescan"
+msgstr "Volver a analizar"
+
+msgctxt "SettingsPage"
+msgid "Add folder"
+msgstr "Añadir carpeta"
+
+msgctxt "SettingsPage"
+msgid "Watch folders for changes"
+msgstr "Vigilar cambios en las carpetas"
+
+msgctxt "SettingsPage"
+msgid "New and edited files appear automatically."
+msgstr "Los archivos nuevos y modificados aparecen automáticamente."
+
+msgctxt "SettingsPage"
+msgid "Import a playlist"
+msgstr "Importar una playlist"
+
+msgctxt "SettingsPage"
+msgid "M3U or M3U8 file; tracks outside your library are skipped."
+msgstr "Archivo M3U o M3U8; las canciones que no están en tu biblioteca se omiten."
+
+msgctxt "SettingsPage"
+msgid "Import"
+msgstr "Importar"
+
+msgctxt "SettingsPage"
+msgid "Network"
+msgstr "Red"
+
+msgctxt "SettingsPage"
+msgid "Let apps on your phone (BubbleUPnP, Symfonium, mConnect…) play to this computer and browse your library."
+msgstr "Deja que las apps de tu móvil (BubbleUPnP, Symfonium, mConnect…) reproduzcan en este ordenador y exploren tu biblioteca."
+
+msgctxt "SettingsPage"
+msgid "Device name"
+msgstr "Nombre del dispositivo"
+
+msgctxt "SettingsPage"
+msgid "Play from other apps (UPnP / OpenHome renderer)"
+msgstr "Reproducir desde otras apps (renderer UPnP / OpenHome)"
+
+msgctxt "SettingsPage"
+msgid "Share my library (UPnP media server)"
+msgstr "Compartir mi biblioteca (servidor multimedia UPnP)"
+
+msgctxt "SettingsPage"
+msgid "Network interface"
+msgstr "Interfaz de red"
+
+msgctxt "SettingsPage"
+msgid "Where phones and other apps can reach ricercar. With a VPN or containers, pick your home network."
+msgstr "Dónde los teléfonos y otras apps pueden encontrar ricercar. Con una VPN o contenedores, elige tu red doméstica."
+
+msgctxt "SettingsPage"
+msgid "Plugins"
+msgstr "Plugins"
+
+msgctxt "SettingsPage"
+msgid "Plugins add catalogues from other sources. Each one is a separate program running with your permissions: install only plugins you trust."
+msgstr "Los plugins añaden catálogos de otras fuentes. Cada uno es un programa independiente que se ejecuta con tus permisos: instala solo plugins de confianza."
+
+msgctxt "SettingsPage"
+msgid "Installed plugins and community catalogue"
+msgstr "Plugins instalados y catálogo comunitario"
+
+msgctxt "SettingsPage"
+msgid "None installed"
+msgstr "Ninguno instalado"
+
+msgctxt "SettingsPage"
+msgid "{n} plugin"
+msgid_plural "{n} plugins"
+msgstr[0] "{n} plugin"
+msgstr[1] "{n} plugins"
+
+msgctxt "SettingsPage"
+msgid "Open"
+msgstr "Abrir"
+
+msgctxt "SettingsPage"
+msgid "Scrobbling"
+msgstr "Scrobbling"
+
+msgctxt "SettingsPage"
+msgid "A track counts as played after half its length or four minutes."
+msgstr "Una canción cuenta como escuchada tras la mitad de su duración o cuatro minutos."
+
+msgctxt "SettingsPage"
+msgid "User token"
+msgstr "Token de usuario"
+
+msgctxt "SettingsPage"
+msgid "Save"
+msgstr "Guardar"
+
+msgctxt "SettingsPage"
+msgid "API key"
+msgstr "Clave de API"
+
+msgctxt "SettingsPage"
+msgid "Shared secret"
+msgstr "Secreto compartido"
+
+msgctxt "SettingsPage"
+msgid "Connect"
+msgstr "Conectar"
+
+msgctxt "SettingsPage"
+msgid "I approved it"
+msgstr "Ya lo autoricé"
+
+msgctxt "SettingsPage"
+msgid "Disconnect"
+msgstr "Desconectar"
+
+msgctxt "SettingsPage"
+msgid "Online extras"
+msgstr "Servicios en línea"
+
+msgctxt "SettingsPage"
+msgid "Synced lyrics"
+msgstr "Letras sincronizadas"
+
+msgctxt "SettingsPage"
+msgid "Look up lyrics on lrclib.net when a track has none (.lrc files and embedded lyrics are always used)."
+msgstr "Buscar letras en lrclib.net cuando una canción no tiene (los archivos .lrc y las letras incrustadas se usan siempre)."
+
+msgctxt "SettingsPage"
+msgid "Missing album art"
+msgstr "Portadas que faltan"
+
+msgctxt "SettingsPage"
+msgid "Fetch covers from MusicBrainz / Cover Art Archive for albums without art."
+msgstr "Obtener portadas de MusicBrainz / Cover Art Archive para los álbumes que no tienen."
+
+msgctxt "SettingsPage"
+msgid "Plugin catalogue"
+msgstr "Catálogo de plugins"
+
+msgctxt "SettingsPage"
+msgid "Read the list of community plugins from GitHub when you open the Plugins page."
+msgstr "Leer la lista de plugins de la comunidad desde GitHub al abrir la página Plugins."
+
+msgctxt "SettingsPage"
+msgid "Updates"
+msgstr "Actualizaciones"
+
+msgctxt "SettingsPage"
+msgid "Once a day at startup, ask GitHub whether a new ricercar is out, and check installed plugins against the catalogue. Nothing is installed without you."
+msgstr "Una vez al día, al iniciar, preguntar a GitHub si hay una nueva versión de ricercar y comparar los plugins instalados con el catálogo. No se instala nada sin tu permiso."
+
+msgctxt "SettingsPage"
+msgid "Appearance"
+msgstr "Apariencia"
+
+msgctxt "SettingsPage"
+msgid "Language"
+msgstr "Idioma"
+
+msgctxt "SettingsPage"
+msgid "System"
+msgstr "Sistema"
+
+msgctxt "SettingsPage"
+msgid "Theme"
+msgstr "Tema"
+
+msgctxt "SettingsPage"
+msgid "Dark"
+msgstr "Oscuro"
+
+msgctxt "SettingsPage"
+msgid "Light"
+msgstr "Claro"
+
+msgctxt "SettingsPage"
+msgid "Accent colour"
+msgstr "Color de acento"
+
+msgctxt "SettingsPage"
+msgid "Colours from the album cover"
+msgstr "Colores de la portada"
+
+msgctxt "SettingsPage"
+msgid "Tint the interface with the playing album's colours."
+msgstr "Tiñe la interfaz con los colores del álbum en reproducción."
+
+msgctxt "SettingsPage"
+msgid "Keep playing in the tray when the window is closed"
+msgstr "Seguir reproduciendo en la bandeja al cerrar la ventana"
+
+msgctxt "SettingsPage"
+msgid "Track change notifications"
+msgstr "Notificaciones de cambio de canción"
+
+msgctxt "SettingsPage"
+msgid "Keyboard"
+msgstr "Teclado"
+
+msgctxt "SettingsPage"
+msgid "Play / pause"
+msgstr "Reproducir / pausar"
+
+msgctxt "SettingsPage"
+msgid "Space"
+msgstr "Espacio"
+
+msgctxt "SettingsPage"
+msgid "Next / previous track"
+msgstr "Canción siguiente / anterior"
+
+msgctxt "SettingsPage"
+msgid "Seek 10 seconds"
+msgstr "Avanzar / retroceder 10 segundos"
+
+msgctxt "SettingsPage"
+msgid "Volume"
+msgstr "Volumen"
+
+msgctxt "SettingsPage"
+msgid "Search"
+msgstr "Buscar"
+
+msgctxt "SettingsPage"
+msgid "Now playing / lyrics"
+msgstr "Reproduciendo / letra"
+
+msgctxt "SettingsPage"
+msgid "Queue"
+msgstr "Cola"
+
+msgctxt "SettingsPage"
+msgid "About"
+msgstr "Acerca de"
+
+msgctxt "SettingsPage"
+msgid "A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service."
+msgstr "Un reproductor de música bit-perfect y receptor de red para Linux. Licencia MIT. Sin relación con ningún sello discográfico ni servicio de streaming."
+
+msgctxt "SettingsPage"
+msgid "User interface"
+msgstr "Interfaz"
+
+msgctxt "SettingsPage"
+msgid "Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar."
+msgstr "Creado con el toolkit Slint, usado bajo su licencia libre de regalías. Las licencias de terceros se instalan con ricercar."
+
+msgctxt "SettingsPage"
+msgid "Software update"
+msgstr "Actualización de software"
+
+msgctxt "SettingsPage"
+msgid "Checking…"
+msgstr "Comprobando…"
+
+msgctxt "SettingsPage"
+msgid "ricercar is up to date."
+msgstr "ricercar está actualizado."
+
+msgctxt "SettingsPage"
+msgid "ricercar {} is available."
+msgstr "ricercar {} está disponible."
+
+msgctxt "SettingsPage"
+msgid "ricercar {} is available. Download it from its release page."
+msgstr "ricercar {} está disponible. Descárgalo desde su página de versión."
+
+msgctxt "SettingsPage"
+msgid "Downloading and installing ricercar {}…"
+msgstr "Descargando e instalando ricercar {}…"
+
+msgctxt "SettingsPage"
+msgid "ricercar {} is installed. Restart ricercar to use it."
+msgstr "ricercar {} está instalado. Reinicia ricercar para usarlo."
+
+msgctxt "SettingsPage"
+msgid "Ask GitHub whether a newer ricercar is out."
+msgstr "Preguntar a GitHub si hay una versión más reciente de ricercar."
+
+msgctxt "SettingsPage"
+msgid "What's new"
+msgstr "Novedades"
+
+msgctxt "SettingsPage"
+msgid "Update now"
+msgstr "Actualizar ahora"
+
+msgctxt "SettingsPage"
+msgid "Download"
+msgstr "Descargar"
+
+msgctxt "SettingsPage"
+msgid "Restart"
+msgstr "Reiniciar"
+
+msgctxt "SettingsPage"
+msgid "Check for updates"
+msgstr "Buscar actualizaciones"
+
+msgctxt "SettingsPage"
+msgid "Diagnostic report"
+msgstr "Informe de diagnóstico"
+
+msgctxt "SettingsPage"
+msgid "For compatibility reports. Secrets are hidden."
+msgstr "Para informes de compatibilidad. Los secretos se ocultan."
+
+msgctxt "SettingsPage"
+msgid "Open logs folder"
+msgstr "Abrir carpeta de registros"
+
+msgctxt "SettingsPage"
+msgid "Copy diagnostic report"
+msgstr "Copiar informe de diagnóstico"
+
+msgctxt "QueueLine"
+msgid "More"
+msgstr "Más"
+
+msgctxt "QueueLine"
+msgid "Remove"
+msgstr "Quitar"
+
+msgctxt "QueueList"
+msgid "Now playing"
+msgstr "Reproduciendo"
+
+msgctxt "QueueList"
+msgid "Next up"
+msgstr "A continuación"
+
+msgctxt "QueueList"
+msgid "Finding more tracks…"
+msgstr "Buscando más canciones…"
+
+msgctxt "QueueList"
+msgid "The queue is empty"
+msgstr "La cola está vacía"
+
+msgctxt "QueueList"
+msgid "Play an album or add tracks with “Add to queue”."
+msgstr "Reproduce un álbum o añade canciones con «Añadir a la cola»."
+
+msgctxt "QueuePanel"
+msgid "Queue"
+msgstr "Cola"
+
+msgctxt "QueuePanel"
+msgid "Clear"
+msgstr "Vaciar"
+
+msgctxt "QueuePanel"
+msgid "Close"
+msgstr "Cerrar"
+
+msgctxt "ChainView"
+msgid "Signal path"
+msgstr "Ruta de la señal"
+
+msgctxt "ChainView"
+msgid "Bit-perfect"
+msgstr "Bit-perfect"
+
+msgctxt "ChainView"
+msgid "Altered signal path"
+msgstr "Ruta de la señal alterada"
+
+msgctxt "ChainView"
+msgid "Every sample reaches the DAC exactly as it is in the file."
+msgstr "Cada muestra llega al DAC exactamente como está en el archivo."
+
+msgctxt "ChainView"
+msgid "Volume below 100 %, ReplayGain, mute or a shared (non hw:) device alters the samples."
+msgstr "Un volumen por debajo del 100 %, ReplayGain, el silencio o un dispositivo compartido (no hw:) alteran las muestras."
+
+msgctxt "NowPlayingView"
+msgid "bit-perfect"
+msgstr "bit-perfect"
+
+msgctxt "NowPlayingView"
+msgid "Lyrics"
+msgstr "Letra"
+
+msgctxt "NowPlayingView"
+msgid "Queue"
+msgstr "Cola"
+
+msgctxt "NowPlayingView"
+msgid "Signal path"
+msgstr "Ruta de la señal"
+
+msgctxt "NowPlayingView"
+msgid "Close"
+msgstr "Cerrar"
+
+msgctxt "ItemActionLine"
+msgid "Add to queue"
+msgstr "Añadir a la cola"
+
+msgctxt "ContextMenu"
+msgid "Go to album"
+msgstr "Ir al álbum"
+
+msgctxt "ContextMenu"
+msgid "Go to artist"
+msgstr "Ir al artista"
+
+msgctxt "ContextMenu"
+msgid "Remove from the queue"
+msgstr "Quitar de la cola"
+
+msgctxt "ContextMenu"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "ContextMenu"
+msgid "Shuffle"
+msgstr "Aleatorio"
+
+msgctxt "ContextMenu"
+msgid "Play next"
+msgstr "Reproducir a continuación"
+
+msgctxt "ContextMenu"
+msgid "Add to queue"
+msgstr "Añadir a la cola"
+
+msgctxt "ContextMenu"
+msgid "Add to playlist"
+msgstr "Añadir a una playlist"
+
+msgctxt "ContextMenu"
+msgid "Start radio"
+msgstr "Iniciar radio"
+
+msgctxt "ContextMenu"
+msgid "Favorite / unfavorite"
+msgstr "Añadir / quitar de favoritos"
+
+msgctxt "ContextMenu"
+msgid "Show in folder"
+msgstr "Mostrar en la carpeta"
+
+msgctxt "ContextMenu"
+msgid "Remove from playlist"
+msgstr "Quitar de la playlist"
+
+msgctxt "ContextMenu"
+msgid "Move up"
+msgstr "Subir"
+
+msgctxt "ContextMenu"
+msgid "Move down"
+msgstr "Bajar"
+
+msgctxt "ContextMenu"
+msgid "Back"
+msgstr "Atrás"
+
+msgctxt "ContextMenu"
+msgid "New playlist…"
+msgstr "Nueva playlist…"
+
+msgctxt "Dialog"
+msgid "OK"
+msgstr "OK"
+
+msgctxt "Dialog"
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgctxt "TopBar"
+msgid "Back"
+msgstr "Atrás"
+
+msgctxt "TopBar"
+msgid "Forward"
+msgstr "Adelante"
+
+msgctxt "ActionBar"
+msgid "Pause"
+msgstr "Pausar"
+
+msgctxt "ActionBar"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "ActionBar"
+msgid "Shuffle"
+msgstr "Aleatorio"
+
+msgctxt "ActionBar"
+msgid "Favorite"
+msgstr "Favorito"
+
+msgctxt "ActionBar"
+msgid "Add to queue"
+msgstr "Añadir a la cola"
+
+msgctxt "ActionBar"
+msgid "More"
+msgstr "Más"
+
+msgctxt "ListeningHero"
+msgid "Pause"
+msgstr "Pausar"
+
+msgctxt "ListeningHero"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "HomePage"
+msgid "Home"
+msgstr "Inicio"
+
+msgctxt "HomePage"
+msgid "Now playing"
+msgstr "Reproduciendo"
+
+msgctxt "HomePage"
+msgid "Paused"
+msgstr "En pausa"
+
+msgctxt "HomePage"
+msgid "bit-perfect"
+msgstr "bit-perfect"
+
+msgctxt "HomePage"
+msgid "Open album"
+msgstr "Abrir álbum"
+
+msgctxt "HomePage"
+msgid "Lyrics"
+msgstr "Letra"
+
+msgctxt "HomePage"
+msgid "Pick up where you left off"
+msgstr "Continúa donde lo dejaste"
+
+msgctxt "HomePage"
+msgid "albums"
+msgstr "álbumes"
+
+msgctxt "HomePage"
+msgid "artists"
+msgstr "artistas"
+
+msgctxt "HomePage"
+msgid "tracks"
+msgstr "canciones"
+
+msgctxt "HomePage"
+msgid "hi-res tracks"
+msgstr "canciones hi-res"
+
+msgctxt "HomePage"
+msgid "of music"
+msgstr "de música"
+
+msgctxt "HomePage"
+msgid "Shuffle library"
+msgstr "Aleatorio de la biblioteca"
+
+msgctxt "HomePage"
+msgid "Recently played"
+msgstr "Escuchado recientemente"
+
+msgctxt "HomePage"
+msgid "Your library is empty"
+msgstr "Tu biblioteca está vacía"
+
+msgctxt "HomePage"
+msgid "Add the folders that hold your music in Settings. ricercar indexes FLAC, WAV, AIFF, ALAC, AAC, MP3 and Ogg Vorbis files and watches them for changes. Streams pushed from a UPnP app on your phone play here too."
+msgstr "Añade en Ajustes las carpetas donde guardas tu música. ricercar indexa archivos FLAC, WAV, AIFF, ALAC, AAC, MP3 y Ogg Vorbis y vigila sus cambios. Las transmisiones enviadas desde una app UPnP de tu móvil también suenan aquí."
+
+msgctxt "HomePage"
+msgid "Add a music folder"
+msgstr "Añadir una carpeta de música"
+
+msgctxt "HomePage"
+msgid "Indexing your music…"
+msgstr "Indexando tu música…"
+
+msgctxt "HomePage"
+msgid "{} of {} files read"
+msgstr "{} de {} archivos leídos"
+
+msgctxt "HomePage"
+msgid "Looking for audio files"
+msgstr "Buscando archivos de audio"
+
+msgctxt "HomePage"
+msgid "Albums played recently"
+msgstr "Álbumes escuchados recientemente"
+
+msgctxt "HomePage"
+msgid "Recently added"
+msgstr "Añadido recientemente"
+
+msgctxt "HomePage"
+msgid "Show all"
+msgstr "Ver todo"
+
+msgctxt "HomePage"
+msgid "Most played"
+msgstr "Lo más escuchado"
+
+msgctxt "HomePage"
+msgid "Most played albums"
+msgstr "Álbumes más escuchados"
+
+msgctxt "AlbumsPage"
+msgid "Albums"
+msgstr "Álbumes"
+
+msgctxt "AlbumsPage"
+msgid "A–Z"
+msgstr "A–Z"
+
+msgctxt "AlbumsPage"
+msgid "Artist"
+msgstr "Artista"
+
+msgctxt "AlbumsPage"
+msgid "Year"
+msgstr "Año"
+
+msgctxt "AlbumsPage"
+msgid "Added"
+msgstr "Añadido"
+
+msgctxt "AlbumsPage"
+msgid "Hi-Res"
+msgstr "Hi-Res"
+
+msgctxt "AlbumsPage"
+msgid "No hi-res albums"
+msgstr "No hay álbumes hi-res"
+
+msgctxt "AlbumsPage"
+msgid "No albums yet"
+msgstr "Aún no hay álbumes"
+
+msgctxt "AlbumsPage"
+msgid "None of your albums is above 16 bit / 48 kHz."
+msgstr "Ninguno de tus álbumes supera 16 bits / 48 kHz."
+
+msgctxt "AlbumsPage"
+msgid "Add a music folder in Settings to fill your library."
+msgstr "Añade una carpeta de música en Ajustes para llenar tu biblioteca."
+
+msgctxt "AlbumPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} canción"
+msgstr[1] "{n} canciones"
+
+msgctxt "AlbumPage"
+msgid "NOT SUPPORTED BY THE DAC"
+msgstr "NO COMPATIBLE CON EL DAC"
+
+msgctxt "AlbumPage"
+msgid "Go to label"
+msgstr "Ir al sello"
+
+msgctxt "AlbumPage"
+msgid "More by {}"
+msgstr "Más de {}"
+
+msgctxt "AlbumPage"
+msgid "Artist page"
+msgstr "Página del artista"
+
+msgctxt "ArtistsPage"
+msgid "Artists"
+msgstr "Artistas"
+
+msgctxt "ArtistsPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} álbum"
+msgstr[1] "{n} álbumes"
+
+msgctxt "ArtistPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} álbum"
+msgstr[1] "{n} álbumes"
+
+msgctxt "ArtistPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} canción"
+msgstr[1] "{n} canciones"
+
+msgctxt "ArtistPage"
+msgid "Favorite"
+msgstr "Favorito"
+
+msgctxt "ArtistPage"
+msgid "Starting radio…"
+msgstr "Iniciando la radio…"
+
+msgctxt "ArtistPage"
+msgid "Start radio"
+msgstr "Iniciar radio"
+
+msgctxt "ArtistPage"
+msgid "Discography"
+msgstr "Discografía"
+
+msgctxt "ArtistPage"
+msgid "Most played"
+msgstr "Lo más escuchado"
+
+msgctxt "ArtistPage"
+msgid "Also appears on"
+msgstr "También aparece en"
+
+msgctxt "TracksPage"
+msgid "Tracks"
+msgstr "Canciones"
+
+msgctxt "TracksPage"
+msgid "Artist"
+msgstr "Artista"
+
+msgctxt "TracksPage"
+msgid "Title"
+msgstr "Título"
+
+msgctxt "TracksPage"
+msgid "Album"
+msgstr "Álbum"
+
+msgctxt "TracksPage"
+msgid "Length"
+msgstr "Duración"
+
+msgctxt "TracksPage"
+msgid "Added"
+msgstr "Añadido"
+
+msgctxt "TracksPage"
+msgid "Plays"
+msgstr "Escuchas"
+
+msgctxt "GenresPage"
+msgid "Genres"
+msgstr "Géneros"
+
+msgctxt "GenresPage"
+msgid "No genres"
+msgstr "No hay géneros"
+
+msgctxt "GenresPage"
+msgid "Genres come from the GENRE tag of your files."
+msgstr "Los géneros vienen de la etiqueta GENRE de tus archivos."
+
+msgctxt "GenresPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} álbum"
+msgstr[1] "{n} álbumes"
+
+msgctxt "GenrePage"
+msgid "Shuffle"
+msgstr "Aleatorio"
+
+msgctxt "FavoritesPage"
+msgid "Favorites"
+msgstr "Favoritos"
+
+msgctxt "FavoritesPage"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "FavoritesPage"
+msgid "Nothing here yet"
+msgstr "Aún no hay nada aquí"
+
+msgctxt "FavoritesPage"
+msgid "Tap the heart on an album or a track to keep it here."
+msgstr "Toca el corazón de un álbum o una canción para guardarlo aquí."
+
+msgctxt "FavoritesPage"
+msgid "Albums"
+msgstr "Álbumes"
+
+msgctxt "FavoritesPage"
+msgid "Tracks"
+msgstr "Canciones"
+
+msgctxt "PlaylistPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} canción"
+msgstr[1] "{n} canciones"
+
+msgctxt "PlaylistPage"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "PlaylistPage"
+msgid "Shuffle"
+msgstr "Aleatorio"
+
+msgctxt "PlaylistPage"
+msgid "Rename"
+msgstr "Cambiar nombre"
+
+msgctxt "PlaylistPage"
+msgid "Export as M3U"
+msgstr "Exportar como M3U"
+
+msgctxt "PlaylistPage"
+msgid "Delete playlist"
+msgstr "Eliminar playlist"
+
+msgctxt "PlaylistPage"
+msgid "This playlist is empty"
+msgstr "Esta playlist está vacía"
+
+msgctxt "PlaylistPage"
+msgid "Right-click any track and choose “Add to playlist”."
+msgstr "Haz clic derecho en una canción y elige «Añadir a una playlist»."
+
+msgctxt "SearchPage"
+msgid "Search"
+msgstr "Buscar"
+
+msgctxt "SearchPage"
+msgid "Results for “{}”"
+msgstr "Resultados de «{}»"
+
+msgctxt "SearchPage"
+msgid "All"
+msgstr "Todo"
+
+msgctxt "SearchPage"
+msgid "Artists"
+msgstr "Artistas"
+
+msgctxt "SearchPage"
+msgid "Tracks"
+msgstr "Canciones"
+
+msgctxt "SearchPage"
+msgid "Albums"
+msgstr "Álbumes"
+
+msgctxt "SearchPage"
+msgid "Playlists"
+msgstr "Playlists"
+
+msgctxt "SearchPage"
+msgid "Searching {}…"
+msgstr "Buscando en {}…"
+
+msgctxt "SearchPage"
+msgid "No results"
+msgstr "Sin resultados"
+
+msgctxt "SearchPage"
+msgid "Nothing in your library matches. Check the spelling, or try fewer words."
+msgstr "Nada de tu biblioteca coincide. Revisa la ortografía o prueba con menos palabras."
+
+msgctxt "SearchPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} álbum"
+msgstr[1] "{n} álbumes"
+
+msgctxt "SearchPage"
+msgid "Nothing of this kind matches."
+msgstr "Nada de este tipo coincide."
+
+msgctxt "BrowsePage"
+msgid "Play"
+msgstr "Reproducir"
+
+msgctxt "BrowsePage"
+msgid "Shuffle"
+msgstr "Aleatorio"
+
+msgctxt "BrowsePage"
+msgid "Rename"
+msgstr "Cambiar nombre"
+
+msgctxt "BrowsePage"
+msgid "Delete playlist"
+msgstr "Eliminar playlist"
+
+msgctxt "BrowsePage"
+msgid "More"
+msgstr "Más"
+
+msgctxt "SignInDialog"
+msgid "Asking the plugin for a sign-in address…"
+msgstr "Pidiendo al plugin una dirección de inicio de sesión…"
+
+msgctxt "SignInDialog"
+msgid "QR code of the sign-in address"
+msgstr "Código QR de la dirección de inicio de sesión"
+
+msgctxt "SignInDialog"
+msgid "Sign in in your browser. On another device, scan the code."
+msgstr "Inicia sesión en tu navegador. En otro dispositivo, escanea el código."
+
+msgctxt "SignInDialog"
+msgid "Open in browser"
+msgstr "Abrir en el navegador"
+
+msgctxt "SignInDialog"
+msgid "This closes by itself once you are signed in. If the browser runs elsewhere, paste the address it ends on."
+msgstr "Esto se cierra solo en cuanto inicies sesión. Si el navegador está en otro equipo, pega la dirección en la que termina."
+
+msgctxt "SignInDialog"
+msgid "Paste the address or code"
+msgstr "Pega la dirección o el código"
+
+msgctxt "SignInDialog"
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgctxt "SignInDialog"
+msgid "Checking…"
+msgstr "Comprobando…"
+
+msgctxt "SignInDialog"
+msgid "Sign in"
+msgstr "Iniciar sesión"
+
+msgctxt "PluginSettingsDialog"
+msgid "Restarts the plugin when changed."
+msgstr "Cambiarlo reinicia el plugin."
+
+msgctxt "PluginSettingsDialog"
+msgid "Reset to defaults"
+msgstr "Restablecer valores predeterminados"
+
+msgctxt "PluginSettingsDialog"
+msgid "Close"
+msgstr "Cerrar"
+
+msgctxt "PluginsPage"
+msgid "Plugins"
+msgstr "Plugins"
+
+msgctxt "PluginsPage"
+msgid "Plugins are programs made by other people. They run with your permissions and ricercar does not review them: install only plugins you trust, and check that they follow the terms of the service they use."
+msgstr "Los plugins son programas hechos por otras personas. Se ejecutan con tus permisos y ricercar no los revisa: instala solo plugins de confianza y comprueba que respetan las condiciones del servicio que usan."
+
+msgctxt "PluginsPage"
+msgid "Installed"
+msgstr "Instalado"
+
+msgctxt "PluginsPage"
+msgid "No plugins yet. Install one from the catalogue below, or declare it in config.toml."
+msgstr "Aún no hay plugins. Instala uno desde el catálogo de abajo o decláralo en config.toml."
+
+msgctxt "PluginsPage"
+msgid "Sign in"
+msgstr "Iniciar sesión"
+
+msgctxt "PluginsPage"
+msgid "Sign out"
+msgstr "Cerrar sesión"
+
+msgctxt "PluginsPage"
+msgid "Plugin settings"
+msgstr "Ajustes del plugin"
+
+msgctxt "PluginsPage"
+msgid "Plugin settings (available while the plugin runs)"
+msgstr "Ajustes del plugin (disponibles mientras el plugin está en marcha)"
+
+msgctxt "PluginsPage"
+msgid "Update"
+msgstr "Actualizar"
+
+msgctxt "PluginsPage"
+msgid "Remove"
+msgstr "Quitar"
+
+msgctxt "PluginsPage"
+msgid "Community catalogue"
+msgstr "Catálogo comunitario"
+
+msgctxt "PluginsPage"
+msgid "Open the hub"
+msgstr "Abrir el hub"
+
+msgctxt "PluginsPage"
+msgid "Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256."
+msgstr "Las entradas enlazan a los repositorios de sus autores; ricercar no aloja ni revisa nada, salvo el SHA-256 del archivo."
+
+msgctxt "PluginsPage"
+msgid "Filter plugins"
+msgstr "Filtrar plugins"
+
+msgctxt "PluginsPage"
+msgid "Repository"
+msgstr "Repositorio"
+
+msgctxt "PluginsPage"
+msgid "Install"
+msgstr "Instalar"
+
+msgctxt "PluginsPage"
+msgid "No build for this computer"
+msgstr "No hay versión para este ordenador"
+
+msgctxt ""
+msgid "Everything"
+msgstr "Todo"
+
+msgctxt ""
+msgid "My library"
+msgstr "Mi biblioteca"
+
+msgctxt "PlayButton"
+msgid "Pause"
+msgstr "Pausar"
+
+msgctxt "PlayButton"
+msgid "Play"
+msgstr "Reproducir"

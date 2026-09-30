@@ -533,9 +533,12 @@ dbus-run-session -- cargo test --workspace --locked   # 320+ tests
 - **Screenshots without a display:**
   `RICERCAR_SNAPSHOT=out/ ricercar --device null --no-upnp --no-mpris --library <dir>`
   renders the main views with Slint's software renderer and writes PNGs.
-- **Translations:** French strings live in
-  `crates/ricercar-ui/tools/fr.json`; run `tools/gen_po.py` after changing
-  UI text (CI checks that the catalogue is up to date).
+- **Translations:** one table per language in
+  `crates/ricercar-ui/tools/` (`fr`, `de`, `es`, `it`, `ja` `.json`, keyed
+  by the English text) serves both the Slint catalogues and the Rust
+  strings; run `python3 crates/ricercar-ui/tools/gen_po.py` after changing
+  UI text. Tests check that every language has every string, and CI that
+  the catalogues are up to date.
 
 ## ❓ FAQ
 
