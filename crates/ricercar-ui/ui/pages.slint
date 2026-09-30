@@ -595,12 +595,13 @@ export component ArtistPage inherits PageScroll {
             spacing: 8px;
             alignment: start;
             padding-bottom: 8px;
-            for a[i] in App.ar-own.length > 0 ? App.ar-own : App.ar-appears: Cover {
-                visible: i < 8;
-                width: i < 8 ? 76px : 0px;
+            // Eight at most: hidden covers would still add their spacing,
+            // and an artist with hundreds of albums would widen the page.
+            for i in min(8, App.ar-own.length > 0 ? App.ar-own.length : App.ar-appears.length): Cover {
+                width: 76px;
                 height: 76px;
                 radius: 6px;
-                source: a.cover;
+                source: App.ar-own.length > 0 ? App.ar-own[i].cover : App.ar-appears[i].cover;
             }
         }
         Text {
