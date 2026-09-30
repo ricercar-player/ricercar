@@ -55,23 +55,29 @@
   <screenshots>
     <screenshot type="default">
       <caption>Home</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/home.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.7.0/docs/screenshots/home.jpg</image>
     </screenshot>
     <screenshot>
       <caption>An album</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/album.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.7.0/docs/screenshots/album.jpg</image>
     </screenshot>
     <screenshot>
       <caption>Synced lyrics</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/lyrics.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.7.0/docs/screenshots/lyrics.jpg</image>
     </screenshot>
     <screenshot>
       <caption>The signal path, from file to DAC</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.5.2/docs/screenshots/signal-path.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.7.0/docs/screenshots/signal-path.jpg</image>
     </screenshot>
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.0" date="2026-09-30">
+      <description>
+        <p>Source plugins bring their own settings, lyrics, favourites, editable playlists, artist details and radios; six interface languages; a choice of network interface; faster seeking in network streams.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.7.0</url>
+    </release>
     <release version="0.6.0" date="2026-09-30">
       <description>
         <p>A hardened network receiver, signed updates, steadier playback, keyboard access and search in a single plugin.</p>

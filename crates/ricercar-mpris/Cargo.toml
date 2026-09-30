@@ -1,12 +1,12 @@
 [package]
 name = "ricercar-mpris"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-ricercar-audio = { version = "0.6.0", path = "../ricercar-audio" }
+ricercar-audio = { version = "0.7.0", path = "../ricercar-audio" }
 ricercar-core.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
