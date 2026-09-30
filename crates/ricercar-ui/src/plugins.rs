@@ -49,6 +49,9 @@ pub struct PluginsView {
     /// Browse page: plugin id, ref, next offset.
     browse: Option<(String, String, usize)>,
     browse_serial: u64,
+    /// Plugin ids behind the search scopes after "Everything" and "My
+    /// library" (index 2…).
+    scope_ids: Vec<String>,
     /// Global search: local results and each signed-in plugin's part.
     search_local: Option<LocalResults>,
     search: Vec<SearchPart>,
@@ -215,6 +218,7 @@ pub fn poll(ui: &Rc<Ui>) {
     refresh_libraries(ui, &statuses);
     refresh_rows(ui, &statuses);
     refresh_sections(ui, &statuses);
+    refresh_search_scopes(ui, &statuses);
     let open = ui.plugins.borrow().signin.clone();
     if let Some(id) = open
         && statuses.iter().any(|s| s.id == id && s.signed_in())
@@ -897,6 +901,33 @@ fn play_page(ui: &Rc<Ui>, shuffle: bool) {
 
 // ------------------------------------------------------------ search
 
+/// Search scopes: "Everything", "My library", then each signed-in plugin
+/// that searches or shares its library. A selected plugin stays selected
+/// while it is there.
+fn refresh_search_scopes(ui: &Ui, statuses: &[PluginStatus]) {
+    let usable: Vec<&PluginStatus> = statuses
+        .iter()
+        .filter(|s| s.signed_in() && (s.caps.search || s.caps.library))
+        .collect();
+    let ids: Vec<String> = usable.iter().map(|s| s.id.clone()).collect();
+    let mut names: Vec<slint::SharedString> =
+        vec![t("Everything").into(), t("My library").into()];
+    names.extend(usable.iter().map(|s| slint::SharedString::from(s.name.as_str())));
+    let app = ui.app();
+    let scope = app.get_search_scope();
+    let selected = if scope >= 2 {
+        let current = ui.plugins.borrow().scope_ids.get(scope as usize - 2).cloned();
+        current
+            .and_then(|c| ids.iter().position(|i| *i == c))
+            .map_or(0, |p| p as i32 + 2)
+    } else {
+        scope
+    };
+    ui.plugins.borrow_mut().scope_ids = ids;
+    app.set_search_scopes(ModelRc::new(VecModel::from(names)));
+    app.set_search_scope(selected);
+}
+
 /// Most results kept per plugin and list.
 const SEARCH_MAX: usize = 50;
 
@@ -910,12 +941,21 @@ pub fn run_search(ui: &Rc<Ui>, q: &str, local: LocalResults) {
         let mut pv = ui.plugins.borrow_mut();
         pv.search_serial += 1;
         let mut parts = Vec::new();
-        // Search page scope: 0 everything, 1 the user's library only.
-        let catalogue = ui.app().get_search_scope() == 0;
-        for s in statuses
-            .iter()
-            .filter(|s| s.signed_in() && !words.is_empty())
-        {
+        // Search page scope: 0 everything, 1 the user's library only,
+        // 2… one plugin (its library there and its catalogue).
+        let scope = ui.app().get_search_scope();
+        let only = (scope >= 2)
+            .then(|| pv.scope_ids.get(scope as usize - 2).cloned())
+            .flatten();
+        let catalogue = scope == 0 || only.is_some();
+        let local = if only.is_some() {
+            LocalResults::default()
+        } else {
+            local
+        };
+        for s in statuses.iter().filter(|s| {
+            s.signed_in() && !words.is_empty() && only.as_ref().is_none_or(|o| *o == s.id)
+        }) {
             if let Some(lib) = pv.libs.iter().find(|l| l.id == s.id) {
                 parts.push(library_matches(lib, &words));
             }

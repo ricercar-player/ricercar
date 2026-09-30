@@ -927,7 +927,7 @@ export component SearchPage inherits PageScroll {
             alignment: start;
             spacing: 12px;
             Segmented {
-                options: [@tr("Everything"), @tr("My library")];
+                options: App.search-scopes;
                 selected <=> App.search-scope;
                 changed => { App.search-scope-changed(); }
             }

@@ -140,6 +140,8 @@ pub fn t(en: &'static str) -> &'static str {
         "Signed out" => "Déconnecté",
         "Library" => "Bibliothèque",
         "All" => "Tout",
+        "Everything" => "Partout",
+        "My library" => "Ma bibliothèque",
         "Playlist" => "Playlist",
         "The plugin gave an unusable address." => "Le plugin a fourni une adresse inutilisable.",
         "Not signed in yet. Check the code and try again." => {

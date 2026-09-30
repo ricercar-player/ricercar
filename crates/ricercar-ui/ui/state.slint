@@ -364,6 +364,8 @@ export global App {
     in-out property <int> search-kind;
     // 0 everything, 1 my library (no catalogue search)
     in-out property <int> search-scope;
+    // "Everything", "My library", then each signed-in plugin
+    in property <[string]> search-scopes: [@tr("Everything"), @tr("My library")];
     callback search-scope-changed();
     in property <[TrackRow]> s-tracks;
 
