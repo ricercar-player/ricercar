@@ -342,7 +342,11 @@ fn restored_session_resolves_plugin_items() {
     let ctl = rig.controller();
     ctl.enable_session(session, true);
     assert_eq!(ctl.lock().queue.len(), 2);
-    ctl.play();
+    // Play the first restored item. The saved position is not asserted:
+    // the first controller (no plugin host) starts on enqueue and may have
+    // skipped the unresolvable first track before it paused.
+    let first = ctl.lock().queue[0].id;
+    ctl.play_id(first);
     assert!(rig.wait_log("playback.started track/4"), "{}", rig.log());
 }
 
