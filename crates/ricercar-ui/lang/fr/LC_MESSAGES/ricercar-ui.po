@@ -40,6 +40,18 @@ msgctxt "MainWindow"
 msgid "Install"
 msgstr "Installer"
 
+msgctxt "MainWindow"
+msgid "Add a music folder"
+msgstr "Ajouter un dossier de musique"
+
+msgctxt "MainWindow"
+msgid "No folder picker is available on this desktop (is xdg-desktop-portal installed?). Type the folder's path instead."
+msgstr "Aucun sélecteur de dossier n'est disponible sur ce bureau (xdg-desktop-portal est-il installé ?). Saisissez plutôt le chemin du dossier."
+
+msgctxt "MainWindow"
+msgid "Add"
+msgstr "Ajouter"
+
 msgctxt "Sidebar"
 msgid "Search"
 msgstr "Rechercher"
@@ -146,6 +158,10 @@ msgctxt "VolumeControl"
 msgid "Mute"
 msgstr "Sourdine"
 
+msgctxt "VolumeControl"
+msgid "Volume"
+msgstr "Volume"
+
 msgctxt "PlayerBar"
 msgid "Nothing playing"
 msgstr "Aucune lecture"
@@ -163,12 +179,24 @@ msgid "Previous"
 msgstr "Précédent"
 
 msgctxt "PlayerBar"
+msgid "Pause"
+msgstr "Pause"
+
+msgctxt "PlayerBar"
+msgid "Play"
+msgstr "Lecture"
+
+msgctxt "PlayerBar"
 msgid "Next"
 msgstr "Suivant"
 
 msgctxt "PlayerBar"
 msgid "Repeat"
 msgstr "Répéter"
+
+msgctxt "PlayerBar"
+msgid "Position"
+msgstr "Position"
 
 msgctxt "PlayerBar"
 msgid "LIVE"
@@ -575,6 +603,10 @@ msgid "Play / pause"
 msgstr "Lecture / pause"
 
 msgctxt "SettingsPage"
+msgid "Space"
+msgstr "Espace"
+
+msgctxt "SettingsPage"
 msgid "Next / previous track"
 msgstr "Titre suivant / précédent"
 
@@ -605,6 +637,14 @@ msgstr "À propos"
 msgctxt "SettingsPage"
 msgid "A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service."
 msgstr "Un lecteur de musique bit-perfect et récepteur réseau pour Linux. Licence MIT. Sans lien avec aucun label ni service de streaming."
+
+msgctxt "SettingsPage"
+msgid "User interface"
+msgstr "Interface"
+
+msgctxt "SettingsPage"
+msgid "Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar."
+msgstr "Réalisée avec la boîte à outils Slint, utilisée sous sa licence libre de redevances. Les licences des composants tiers sont installées avec ricercar."
 
 msgctxt "SettingsPage"
 msgid "Software update"
@@ -1151,14 +1191,6 @@ msgid "Results for “{}”"
 msgstr "Résultats pour « {} »"
 
 msgctxt "SearchPage"
-msgid "Everything"
-msgstr "Partout"
-
-msgctxt "SearchPage"
-msgid "My library"
-msgstr "Ma bibliothèque"
-
-msgctxt "SearchPage"
 msgid "All"
 msgstr "Tout"
 
@@ -1303,3 +1335,19 @@ msgstr "Installer"
 msgctxt "PluginsPage"
 msgid "No build for this computer"
 msgstr "Pas de version pour cet ordinateur"
+
+msgctxt ""
+msgid "Everything"
+msgstr "Partout"
+
+msgctxt ""
+msgid "My library"
+msgstr "Ma bibliothèque"
+
+msgctxt "PlayButton"
+msgid "Pause"
+msgstr "Pause"
+
+msgctxt "PlayButton"
+msgid "Play"
+msgstr "Lecture"

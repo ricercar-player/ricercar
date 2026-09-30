@@ -12,6 +12,7 @@ mod player;
 mod plugins;
 mod profile;
 mod snapshot;
+mod sys;
 mod text;
 mod tray;
 mod ui_state;

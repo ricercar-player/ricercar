@@ -10,6 +10,13 @@ export component Icon inherits Image {
     image-fit: contain;
 }
 
+/// Outline around a control reached with the keyboard (Tab). Give it the
+/// control's geometry grown by 3px on each side.
+export component FocusRing inherits Rectangle {
+    border-width: Theme.focus-width;
+    border-color: Theme.focus-ring;
+}
+
 export component IconButton inherits Rectangle {
     in property <image> icon;
     in property <length> size: 32px;
@@ -26,14 +33,28 @@ export component IconButton inherits Rectangle {
     border-radius: round ? self.height / 2 : Theme.r-md;
     background: !enabled ? transparent : ta.pressed ? Theme.press : ta.has-hover ? Theme.hover : transparent;
     animate background { duration: Theme.quick; easing: ease-out; }
+    forward-focus: fs;
     accessible-role: button;
     accessible-label: tooltip;
-    accessible-action-default => { clicked(); }
+    accessible-enabled: enabled;
+    accessible-action-default => { if enabled { clicked(); } }
     Icon {
         source: icon;
         size: icon-size;
         tint: !enabled ? Theme.text3.with-alpha(0.5) : ta.has-hover && !active ? Theme.text : tint;
         animate colorize { duration: Theme.quick; }
+    }
+    // Reached with Tab only: a mouse click leaves the focus where it was.
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
     }
     ta := TouchArea {
         mouse-cursor: enabled ? pointer : default;
@@ -45,6 +66,13 @@ export component IconButton inherits Rectangle {
         height: 4px;
         border-radius: 2px;
         background: Theme.accent;
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
     }
 }
 
@@ -62,9 +90,11 @@ export component Button inherits Rectangle {
     border-width: primary ? 0 : 1px;
     border-color: Theme.line;
     animate background { duration: Theme.quick; easing: ease-out; }
+    forward-focus: fs;
     accessible-role: button;
     accessible-label: text;
-    accessible-action-default => { clicked(); }
+    accessible-enabled: enabled;
+    accessible-action-default => { if enabled { clicked(); } }
     lay := HorizontalLayout {
         padding-left: icon.width > 0 ? 14px : 18px;
         padding-right: 18px;
@@ -84,9 +114,27 @@ export component Button inherits Rectangle {
             color: !enabled ? Theme.text3 : primary ? Theme.on-accent : danger ? Theme.bad : Theme.text;
         }
     }
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
     ta := TouchArea {
         mouse-cursor: enabled ? pointer : default;
         clicked => { if enabled { root.clicked(); } }
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
     }
 }
 
@@ -103,7 +151,7 @@ export component PlayButton inherits Rectangle {
     drop-shadow-offset-y: 4px;
     drop-shadow-color: #00000066;
     accessible-role: button;
-    accessible-label: playing ? "Pause" : "Play";
+    accessible-label: playing ? @tr("Pause") : @tr("Play");
     accessible-action-default => { clicked(); }
     Icon {
         x: (parent.width - self.width) / 2 + (playing ? 0 : size * 0.03);
@@ -194,9 +242,12 @@ export component SectionTitle inherits HorizontalLayout {
 }
 
 /// Thin progress/seek bar with a knob on hover; emits `seek(fraction)`.
+/// With the keyboard focus, the arrow keys move it by `step`.
 export component SeekBar inherits Rectangle {
     in property <float> value; // 0..1
     in property <bool> enabled: true;
+    in property <string> label;
+    in property <float> step: 0.05;
     in property <color> fill: Theme.text;
     in property <color> hover-fill: Theme.accent;
     in property <length> thickness: 4px;
@@ -206,6 +257,47 @@ export component SeekBar inherits Rectangle {
     callback moved(float);
     height: 16px;
     private property <float> shown: ta.pressed ? max(0, min(1, ta.mouse-x / self.width)) : value;
+    function nudge(by: float) {
+        if root.enabled { root.seek(max(0, min(1, root.value + by))); }
+    }
+    forward-focus: fs;
+    accessible-role: slider;
+    accessible-label: label;
+    accessible-enabled: enabled;
+    accessible-value: round(value * 100);
+    accessible-value-minimum: 0;
+    accessible-value-maximum: 100;
+    accessible-value-step: step * 100;
+    accessible-action-increment => { nudge(step); }
+    accessible-action-decrement => { nudge(-step); }
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(e) => {
+            // Ctrl + arrows stay the global next / previous / volume keys.
+            if e.modifiers.control || e.modifiers.alt { return reject; }
+            if e.text == Key.RightArrow || e.text == Key.UpArrow {
+                nudge(step);
+                return accept;
+            }
+            if e.text == Key.LeftArrow || e.text == Key.DownArrow {
+                nudge(-step);
+                return accept;
+            }
+            if e.text == Key.Home {
+                root.seek(0);
+                return accept;
+            }
+            reject
+        }
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: 0;
+        width: parent.width + 6px;
+        height: parent.height;
+        border-radius: self.height / 2;
+    }
     track := Rectangle {
         y: (parent.height - self.height) / 2;
         height: ta.has-hover || ta.pressed ? thickness + 2px : thickness;

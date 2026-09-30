@@ -568,7 +568,7 @@ pub fn open_url(url: &str) {
         return;
     }
     if url.starts_with("http://") || url.starts_with("https://") {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        crate::sys::xdg_open(url);
     }
 }
 
@@ -910,13 +910,21 @@ fn refresh_search_scopes(ui: &Ui, statuses: &[PluginStatus]) {
         .filter(|s| s.signed_in() && (s.caps.search || s.caps.library))
         .collect();
     let ids: Vec<String> = usable.iter().map(|s| s.id.clone()).collect();
-    let mut names: Vec<slint::SharedString> =
-        vec![t("Everything").into(), t("My library").into()];
-    names.extend(usable.iter().map(|s| slint::SharedString::from(s.name.as_str())));
+    let mut names: Vec<slint::SharedString> = vec![t("Everything").into(), t("My library").into()];
+    names.extend(
+        usable
+            .iter()
+            .map(|s| slint::SharedString::from(s.name.as_str())),
+    );
     let app = ui.app();
     let scope = app.get_search_scope();
     let selected = if scope >= 2 {
-        let current = ui.plugins.borrow().scope_ids.get(scope as usize - 2).cloned();
+        let current = ui
+            .plugins
+            .borrow()
+            .scope_ids
+            .get(scope as usize - 2)
+            .cloned();
         current
             .and_then(|c| ids.iter().position(|i| *i == c))
             .map_or(0, |p| p as i32 + 2)
@@ -1688,6 +1696,16 @@ fn artist_albums(ui: &Ui, id: String, pname: String, name: String, reference: Op
             }
             let app = ui.app();
             app.set_ar_albums(app.get_ar_albums() + cards.len() as i32);
+            let counts: Option<Vec<u32>> = items
+                .iter()
+                .filter(|i| i.kind == ItemKind::Album)
+                .map(|i| i.track_count)
+                .collect();
+            let known = app.get_ar_tracks();
+            app.set_ar_tracks(match counts {
+                Some(c) if known >= 0 => known + c.iter().sum::<u32>() as i32,
+                _ => -1,
+            });
             if app.get_ar_cover().size().width == 0
                 && let Some(url) = items.iter().find_map(art_url)
             {
@@ -1887,9 +1905,27 @@ pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
         }
         .into(),
     );
-    app.set_install_body(
-        crate::text::install_body(&e.name, &e.version, &e.author, &host_name, &e.repository).into(),
-    );
+    let mut body =
+        crate::text::install_body(&e.name, &e.version, &e.author, &host_name, &e.repository);
+    // An update from somewhere else than the installed binary: say so first.
+    if update {
+        let installed = ui
+            .ctx
+            .config
+            .read()
+            .unwrap()
+            .plugins
+            .iter()
+            .find(|p| p.id == e.id)
+            .cloned();
+        if let Some(installed) = installed
+            && catalog::update_info(&installed, &e).is_some_and(|u| u.host_changed)
+        {
+            let old = installed.host.unwrap_or_default();
+            body = format!("{}\n\n{body}", crate::text::host_changed(&old, &host_name));
+        }
+    }
+    app.set_install_body(body.into());
     app.set_install_busy(false);
     ui.plugins.borrow_mut().pending_install = Some(e);
     app.set_install_open(true);

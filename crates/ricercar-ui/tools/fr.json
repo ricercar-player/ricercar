@@ -265,5 +265,11 @@
 "Update now": "Mettre à jour",
 "Download": "Télécharger",
 "Restart": "Redémarrer",
-"Check for updates": "Rechercher des mises à jour"
+"Check for updates": "Rechercher des mises à jour",
+"No folder picker is available on this desktop (is xdg-desktop-portal installed?). Type the folder's path instead.": "Aucun sélecteur de dossier n'est disponible sur ce bureau (xdg-desktop-portal est-il installé ?). Saisissez plutôt le chemin du dossier.",
+"Add": "Ajouter",
+"Position": "Position",
+"Space": "Espace",
+"User interface": "Interface",
+"Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar.": "Réalisée avec la boîte à outils Slint, utilisée sous sa licence libre de redevances. Les licences des composants tiers sont installées avec ricercar."
 }

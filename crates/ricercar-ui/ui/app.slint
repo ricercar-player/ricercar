@@ -68,7 +68,7 @@ export component MainWindow inherits Window {
 
     keys := FocusScope {
         key-pressed(e) => {
-            if dialog != 0 || App.signin-open || App.install-open { return reject; }
+            if dialog != 0 || App.signin-open || App.install-open || App.root-path-open { return reject; }
             if e.text == " " {
                 App.play-pause();
                 return accept;
@@ -240,6 +240,21 @@ export component MainWindow inherits Window {
         confirm-text: App.install-busy ? @tr("Installing…") : @tr("Install");
         confirm(v) => { if !App.install-busy { App.install-confirm(); } }
         cancel => { App.install-cancel(); }
+    }
+
+    // Without an xdg-desktop-portal there is no folder picker: type the path.
+    if App.root-path-open: Dialog {
+        title: @tr("Add a music folder");
+        body: @tr("No folder picker is available on this desktop (is xdg-desktop-portal installed?). Type the folder's path instead.");
+        with-input: true;
+        confirm-text: @tr("Add");
+        value <=> App.root-path;
+        init => { self.focus-input(); }
+        confirm(v) => { App.add-root-path(v); }
+        cancel => {
+            App.root-path-open = false;
+            keys.focus();
+        }
     }
 
     if App.signin-open: SignInDialog {

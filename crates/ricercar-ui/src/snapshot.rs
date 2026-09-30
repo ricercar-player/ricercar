@@ -85,7 +85,7 @@ pub const W: u32 = 1440;
 pub const H: u32 = 900;
 
 /// Install the headless platform; must run before the window is created.
-pub fn install() {
+pub fn install() -> Result<(), String> {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     window.set_size(PhysicalSize::new(W, H));
     WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
@@ -94,7 +94,7 @@ pub fn install() {
         start: Instant::now(),
         queue: Queue::default(),
     }))
-    .expect("platform already set");
+    .map_err(|e| format!("snapshot mode: {e}"))
 }
 
 fn capture(dir: &std::path::Path, name: &str) {

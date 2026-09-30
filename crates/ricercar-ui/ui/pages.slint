@@ -614,7 +614,7 @@ export component ArtistPage inherits PageScroll {
             overflow: elide;
         }
         Text {
-            text: @tr("{n} album" | "{n} albums" % App.ar-albums) + " · " + @tr("{n} track" | "{n} tracks" % App.ar-tracks);
+            text: @tr("{n} album" | "{n} albums" % App.ar-albums) + (App.ar-tracks < 0 ? "" : " · " + @tr("{n} track" | "{n} tracks" % App.ar-tracks));
             font-size: Theme.fs-md;
             color: Theme.text2;
         }

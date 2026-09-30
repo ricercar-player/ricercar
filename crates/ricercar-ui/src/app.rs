@@ -487,7 +487,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     };
     let snapshot = std::env::var_os("RICERCAR_SNAPSHOT").map(std::path::PathBuf::from);
     if snapshot.is_some() {
-        crate::snapshot::install();
+        crate::snapshot::install()?;
     }
     let ctx = Rc::new(ricercar_daemon::startup(args, hooks)?);
     let window = MainWindow::new()?;
@@ -600,6 +600,17 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
                 crate::profile::frame_rendered();
             }
         });
+    }
+    // SIGTERM / SIGINT (logout, systemctl, Ctrl+C in a terminal) quit the
+    // same way as the tray's Quit, so the session and state are saved.
+    if !snapshot_mode
+        && let Err(e) = ctrlc::set_handler(|| {
+            let _ = slint::invoke_from_event_loop(|| {
+                let _ = slint::quit_event_loop();
+            });
+        })
+    {
+        tracing::warn!("no signal handler: {e}");
     }
     window.show()?;
     slint::run_event_loop_until_quit()?;

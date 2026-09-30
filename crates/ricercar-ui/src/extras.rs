@@ -406,6 +406,44 @@ pub fn poll_network_status(ui: &Ui) {
     }
 }
 
+fn add_root(ui: &Ui, dir: std::path::PathBuf) {
+    ui.ctx.update_config(|c| {
+        if !c.library.roots.contains(&dir) {
+            c.library.roots.push(dir.clone());
+        }
+    });
+    refresh_library_rows(ui);
+    ui.toast(t("Folder added; indexing…"), false);
+}
+
+/// Whether a file chooser portal answers on the session bus (starting it if
+/// needed). Without one, rfd reports "nothing picked" as for a cancel.
+fn file_chooser_available() -> bool {
+    let Ok(bus) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    bus.call_method(
+        Some("org.freedesktop.portal.Desktop"),
+        "/org/freedesktop/portal/desktop",
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &("org.freedesktop.portal.FileChooser", "version"),
+    )
+    .is_ok()
+}
+
+/// A typed folder path: `~` expanded, must be an existing directory.
+fn typed_folder(typed: &str) -> Option<std::path::PathBuf> {
+    let typed = typed.trim();
+    let path = match typed.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            std::path::PathBuf::from(std::env::var_os("HOME")?).join(rest.trim_start_matches('/'))
+        }
+        _ => std::path::PathBuf::from(typed),
+    };
+    (path.is_absolute() && path.is_dir()).then_some(path)
+}
+
 pub fn refresh_library_rows(ui: &Ui) {
     let roots: Vec<SharedString> = ui
         .ctx
@@ -717,7 +755,7 @@ fn lastfm_connect(ui: &Rc<Ui>) {
         post(move |ui| match r {
             Ok(token) => {
                 let url = lf.auth_url(&token);
-                let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                crate::sys::xdg_open(&url);
                 ui.extras.borrow_mut().lastfm_token = Some(token);
                 ui.app().set_lastfm_pending(true);
                 ui.toast(
@@ -801,18 +839,36 @@ pub fn wire(ui: &Rc<Ui>) {
     });
     app.on_add_root(|| {
         std::thread::spawn(|| {
-            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                post(move |ui| {
-                    ui.ctx.update_config(|c| {
-                        if !c.library.roots.contains(&dir) {
-                            c.library.roots.push(dir.clone());
-                        }
-                    });
-                    refresh_library_rows(ui);
-                    ui.toast(t("Folder added; indexing…"), false);
-                });
+            let picker = file_chooser_available();
+            let asked = std::time::Instant::now();
+            let dir = if picker {
+                rfd::FileDialog::new().pick_folder()
+            } else {
+                None
+            };
+            match dir {
+                Some(dir) => post(move |ui| add_root(ui, dir)),
+                // rfd answers "nothing picked" at once when the portal
+                // fails; nobody cancels a real dialog that fast.
+                None if !picker || asked.elapsed() < std::time::Duration::from_millis(400) => {
+                    post(|ui| {
+                        let app = ui.app();
+                        app.set_root_path(SharedString::new());
+                        app.set_root_path_open(true);
+                    })
+                }
+                None => {}
             }
         });
+    });
+    app.on_add_root_path(|typed| {
+        with_ui(|ui| match typed_folder(typed.as_str()) {
+            Some(dir) => {
+                ui.app().set_root_path_open(false);
+                add_root(ui, dir);
+            }
+            None => ui.toast(t("This folder does not exist."), true),
+        })
     });
     app.on_remove_root(|i| {
         with_ui(|ui| {
@@ -932,4 +988,22 @@ pub fn wire(ui: &Rc<Ui>) {
             show_stations(ui);
         })
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::typed_folder;
+
+    #[test]
+    fn typed_folder_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_str().unwrap();
+        assert_eq!(
+            typed_folder(&format!("  {p} ")).as_deref(),
+            Some(dir.path())
+        );
+        assert_eq!(typed_folder(&format!("{p}/missing")), None);
+        assert_eq!(typed_folder("relative/path"), None);
+        assert_eq!(typed_folder(""), None);
+    }
 }

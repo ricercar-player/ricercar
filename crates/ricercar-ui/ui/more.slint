@@ -1,4 +1,4 @@
-import { ScrollView, Slider } from "std-widgets.slint";
+import { ScrollView, Slider, AboutSlint } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, StationRow, DeviceRow, CapChip } from "state.slint";
@@ -554,7 +554,7 @@ export component SettingsPage inherits PageScroll {
 
         Group {
             title: @tr("Keyboard");
-            Row { label: @tr("Play / pause"); Text { text: "Space"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            Row { label: @tr("Play / pause"); Text { text: @tr("Space"); color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
             Divider { }
             Row { label: @tr("Next / previous track"); Text { text: "Ctrl + → / ←"; color: Theme.text2; font-size: Theme.fs-sm; vertical-alignment: center; } }
             Divider { }
@@ -575,6 +575,18 @@ export component SettingsPage inherits PageScroll {
                 label: "ricercar " + App.version;
                 hint: @tr("A bit-perfect music player and network receiver for Linux. MIT licence. Not affiliated with any record label or streaming service.");
                 Button { text: "GitHub"; clicked => { App.open-url("https://github.com/ricercar-player/ricercar"); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("User interface");
+                min-height: 128px;
+                hint: @tr("Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar.");
+                // Slint's own attribution, as its royalty-free licence asks.
+                Rectangle {
+                    width: 176px;
+                    height: 108px;
+                    AboutSlint { width: 100%; height: 100%; }
+                }
             }
             Divider { }
             Row {

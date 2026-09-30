@@ -171,7 +171,7 @@ pub fn copy_report(ui: &Ui) {
         let path = home().join("ricercar-report.txt");
         match std::fs::write(&path, &text) {
             Ok(()) => {
-                let _ = std::process::Command::new("xdg-open").arg(home()).spawn();
+                crate::sys::xdg_open(home());
                 post(move |ui| {
                     ui.toast(
                         format!("{} {}", t("Report saved to"), path.display()),
@@ -187,7 +187,7 @@ pub fn copy_report(ui: &Ui) {
 pub fn open_logs() {
     let dir = logging::log_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+    crate::sys::xdg_open(dir);
 }
 
 #[cfg(test)]

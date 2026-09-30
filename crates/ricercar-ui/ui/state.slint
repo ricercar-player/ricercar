@@ -330,6 +330,7 @@ export global App {
     // ---------------------------------------------------------------- artist page
     in property <string> ar-name;
     in property <int> ar-albums;
+    // Tracks on the artist page, -1 when a plugin album does not say.
     in property <int> ar-tracks;
     in property <image> ar-cover;
     in property <[TrackRow]> ar-top;
@@ -394,6 +395,10 @@ export global App {
     callback text-setting-edited();
     in property <[string]> roots;
     callback add-root();
+    // typed folder path, when no folder picker (portal) is available
+    in-out property <bool> root-path-open;
+    in-out property <string> root-path;
+    callback add-root-path(string);
     callback remove-root(int);
     callback rescan();
     in-out property <bool> watch-library;

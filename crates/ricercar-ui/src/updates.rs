@@ -160,6 +160,9 @@ fn install(ui: &Rc<Ui>) {
                 tracing::warn!("update to {}: {e}", release.version);
                 let msg = match e {
                     InstallError::Cancelled => t("Update cancelled.").to_string(),
+                    InstallError::NotAuthorized => {
+                        t("Not authorised. Is a polkit authentication agent running?").to_string()
+                    }
                     InstallError::Checksum => t(
                         "The download does not match the release checksums; nothing was installed.",
                     )

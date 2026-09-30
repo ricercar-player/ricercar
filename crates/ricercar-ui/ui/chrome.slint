@@ -2,7 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, ChainHop } from "state.slint";
-import { Icon, IconButton, Cover, SeekBar, TextField, Badge } from "widgets.slint";
+import { Icon, IconButton, Cover, SeekBar, TextField, Badge, FocusRing } from "widgets.slint";
 
 component NavItem inherits Rectangle {
     in property <image> icon;
@@ -370,6 +370,7 @@ component VolumeControl inherits HorizontalLayout {
     SeekBar {
         y: (parent.height - self.height) / 2;
         width: 96px;
+        label: @tr("Volume");
         value: App.muted ? 0 : App.volume;
         fill: App.volume < 1 ? Theme.warn : Theme.text2;
         seek(v) => { App.set-volume(v); }
@@ -495,8 +496,9 @@ export component PlayerBar inherits Rectangle {
                     background: pta.pressed ? Theme.text2 : Theme.text;
                     transform-scale: pta.has-hover ? 1.06 : 1;
                     animate transform-scale { duration: Theme.quick; easing: ease-out; }
+                    forward-focus: pfs;
                     accessible-role: button;
-                    accessible-label: App.playing ? "Pause" : "Play";
+                    accessible-label: App.playing ? @tr("Pause") : @tr("Play");
                     accessible-action-default => { App.play-pause(); }
                     Icon {
                         x: (parent.width - self.width) / 2 + (App.playing ? 0 : 1px);
@@ -504,9 +506,26 @@ export component PlayerBar inherits Rectangle {
                         size: 18px;
                         tint: Theme.bg;
                     }
+                    pfs := FocusScope {
+                        focus-on-click: false;
+                        key-pressed(e) => {
+                            if e.text == " " || e.text == Key.Return {
+                                App.play-pause();
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
                     pta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { App.play-pause(); }
+                    }
+                    if pfs.has-focus: FocusRing {
+                        x: -3px;
+                        y: -3px;
+                        width: parent.width + 6px;
+                        height: parent.height + 6px;
+                        border-radius: parent.border-radius + 3px;
                     }
                 }
                 IconButton {
@@ -539,6 +558,7 @@ export component PlayerBar inherits Rectangle {
                 }
                 seek := SeekBar {
                     horizontal-stretch: 1;
+                    label: @tr("Position");
                     enabled: App.has-track && App.dur-ms > 0;
                     value: App.dur-ms > 0 ? App.pos-ms / App.dur-ms : 0;
                     seek(v) => { App.seek(v * App.dur-ms); }

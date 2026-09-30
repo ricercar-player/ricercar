@@ -732,26 +732,28 @@ fn mark_fav(ui: &Ui, path: &str, fav: bool) {
 }
 
 pub fn show_in_folder(path: &str) {
-    let dir = std::path::Path::new(path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_default();
-    // Prefer the FileManager1 portal (selects the file), fall back to xdg-open.
-    let uri = ricercar_core::meta::file_uri(std::path::Path::new(path));
-    let ok = zbus::blocking::Connection::session()
-        .and_then(|c| {
-            c.call_method(
-                Some("org.freedesktop.FileManager1"),
-                "/org/freedesktop/FileManager1",
-                Some("org.freedesktop.FileManager1"),
-                "ShowItems",
-                &(vec![uri.as_str()], ""),
-            )
-        })
-        .is_ok();
-    if !ok {
-        let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
-    }
+    let path = std::path::PathBuf::from(path);
+    // A D-Bus round trip (and a file manager starting up) must not freeze
+    // the window: talk to it from a thread.
+    std::thread::spawn(move || {
+        let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        // Prefer the FileManager1 service (selects the file), fall back to xdg-open.
+        let uri = ricercar_core::meta::file_uri(&path);
+        let ok = zbus::blocking::Connection::session()
+            .and_then(|c| {
+                c.call_method(
+                    Some("org.freedesktop.FileManager1"),
+                    "/org/freedesktop/FileManager1",
+                    Some("org.freedesktop.FileManager1"),
+                    "ShowItems",
+                    &(vec![uri.as_str()], ""),
+                )
+            })
+            .is_ok();
+        if !ok {
+            crate::sys::xdg_open(dir);
+        }
+    });
 }
 
 fn play_or_queue(ui: &Ui, tracks: &[Track], ctx: PlayContext, action: &str) {
@@ -949,30 +951,26 @@ pub fn wire(ui: &Rc<Ui>) {
     });
     app.on_playlist_export(|id| {
         with_ui(|ui| {
-            let name = ui
-                .ctx
-                .lib
-                .playlist(id as i64)
-                .map(|p| p.name)
-                .unwrap_or_default();
-            let dir = std::env::var_os("HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_default()
-                .join("Music")
-                .join("Playlists");
-            let _ = std::fs::create_dir_all(&dir);
-            let safe: String = name
-                .chars()
-                .map(|c| if c == '/' { '-' } else { c })
-                .collect();
-            let dest = dir.join(format!("{safe}.m3u8"));
-            match ui.ctx.lib.export_m3u(id as i64, &dest) {
-                Ok(()) => ui.toast(
-                    format!("{} {}", t("Playlist exported to"), dest.display()),
-                    false,
-                ),
-                Err(e) => ui.toast(e.to_string(), true),
-            }
+            let lib = ui.ctx.lib.clone();
+            // Database reads and file writes stay off the UI thread.
+            std::thread::spawn(move || {
+                let id = id as i64;
+                let name = lib.playlist(id).map(|p| p.name).unwrap_or_default();
+                let dir = crate::sys::music_dir().join("Playlists");
+                let safe: String = name
+                    .chars()
+                    .map(|c| if c == '/' { '-' } else { c })
+                    .collect();
+                let dest = dir.join(format!("{safe}.m3u8"));
+                let r = std::fs::create_dir_all(&dir).and_then(|()| lib.export_m3u(id, &dest));
+                crate::app::post(move |ui| match r {
+                    Ok(()) => ui.toast(
+                        format!("{} {}", t("Playlist exported to"), dest.display()),
+                        false,
+                    ),
+                    Err(e) => ui.toast(e.to_string(), true),
+                });
+            });
         })
     });
     app.on_playlist_import(|| {
@@ -993,11 +991,7 @@ pub fn wire(ui: &Rc<Ui>) {
         });
     });
     app.on_show_in_folder(|p| show_in_folder(&p));
-    app.on_open_url(|u| {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(u.as_str())
-            .spawn();
-    });
+    app.on_open_url(|u| crate::sys::xdg_open(u.as_str()));
     app.on_quit(|| {
         let _ = slint::quit_event_loop();
     });

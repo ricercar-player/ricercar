@@ -182,6 +182,10 @@ pub fn t(en: &'static str) -> &'static str {
         "this computer" => "cet ordinateur",
         "Report saved to" => "Rapport enregistré dans",
         "Folder added; indexing…" => "Dossier ajouté ; indexation…",
+        "This folder does not exist." => "Ce dossier n'existe pas.",
+        "Not authorised. Is a polkit authentication agent running?" => {
+            "Non autorisé. Un agent d'authentification polkit est-il lancé ?"
+        }
         "Folder removed" => "Dossier retiré",
         "Output device" => "Sortie audio",
         "Network error" => "Erreur réseau",
@@ -287,6 +291,20 @@ pub fn install_body(name: &str, version: &str, author: &str, host: &str, repo: &
     } else {
         format!(
             "{name} {version}{who} will be downloaded from {host} and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: {repo}"
+        )
+    }
+}
+
+/// Warning shown above the confirmation of a plugin update whose binary now
+/// comes from another host than the installed one.
+pub fn host_changed(old: &str, new: &str) -> String {
+    if fr() {
+        format!(
+            "Attention : l'adresse de téléchargement a changé. La version installée venait de {old}, cette mise à jour vient de {new}. Ne continuez que si vous faites confiance à cette nouvelle source."
+        )
+    } else {
+        format!(
+            "Warning: the download address has changed. The installed version came from {old}; this update comes from {new}. Only continue if you trust the new source."
         )
     }
 }

@@ -3,6 +3,7 @@ name = "ricercar-ui"
 version = "0.5.2"
 edition = "2024"
 license.workspace = true
+rust-version.workspace = true
 description = "Bit-perfect music player and UPnP/OpenHome network receiver for Linux"
 homepage = "https://github.com/ricercar-player/ricercar"
 repository = "https://github.com/ricercar-player/ricercar"
@@ -10,6 +11,7 @@ readme = "../../README.md"
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
 ksni = { version = "0.3.6", default-features = false, features = ["blocking", "async-io"] }
 qrcode = { version = "0.14", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
@@ -38,7 +40,10 @@ path = "src/main.rs"
 
 # ---------------------------------------------------------------- packaging
 # `cargo deb -p ricercar-ui` / `cargo generate-rpm -p crates/ricercar-ui`
-# after `cargo build --release -p ricercar-ui -p ricercar-cli -p ricercar-daemon`.
+# after `cargo build --release -p ricercar-ui -p ricercar-cli -p ricercar-daemon`
+# and `dist/third-party-licenses.sh` (writes target/THIRD-PARTY-LICENSES).
+# dist/self-update marks these as the project's own packages, which the app
+# may upgrade in place; distribution packages must leave it out.
 
 [package.metadata.deb]
 name = "ricercar"
@@ -52,16 +57,26 @@ internet radio, exclusive ALSA output at each track's native rate, and \
 streaming pushed from phone apps such as BubbleUPnP or Kazoo."""
 section = "sound"
 priority = "optional"
-depends = "$auto"
-recommends = "xdg-desktop-portal"
+# libxkbcommon is loaded at run time, so $auto does not see it.
+depends = "$auto, libxkbcommon0"
+recommends = "xdg-desktop-portal, polkitd | policykit-1"
 assets = [
     ["target/release/ricercar", "usr/bin/", "755"],
     ["target/release/ricercar-cli", "usr/bin/", "755"],
     ["target/release/ricercar-daemon", "usr/bin/", "755"],
     ["../../dist/ricercar.desktop", "usr/share/applications/", "644"],
     ["../../dist/ricercar.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../dist/icons/48x48/ricercar.png", "usr/share/icons/hicolor/48x48/apps/", "644"],
+    ["../../dist/icons/128x128/ricercar.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
+    ["../../dist/icons/256x256/ricercar.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["../../dist/io.github.ricercar_player.ricercar.metainfo.xml", "usr/share/metainfo/", "644"],
     ["../../dist/ricercar.service", "usr/lib/systemd/user/", "644"],
+    ["../../dist/self-update", "usr/share/ricercar/self-update", "644"],
     ["../../README.md", "usr/share/doc/ricercar/README.md", "644"],
+    ["../../LICENSE", "usr/share/licenses/ricercar/LICENSE", "644"],
+    ["../../target/THIRD-PARTY-LICENSES", "usr/share/licenses/ricercar/THIRD-PARTY-LICENSES", "644"],
+    ["assets/fonts/OFL.txt", "usr/share/licenses/ricercar/OFL.txt", "644"],
+    ["assets/icons/LICENSE", "usr/share/licenses/ricercar/icons-LICENSE", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -74,12 +89,27 @@ assets = [
     { source = "target/release/ricercar-daemon", dest = "/usr/bin/ricercar-daemon", mode = "755" },
     { source = "../../dist/ricercar.desktop", dest = "/usr/share/applications/ricercar.desktop", mode = "644" },
     { source = "../../dist/ricercar.svg", dest = "/usr/share/icons/hicolor/scalable/apps/ricercar.svg", mode = "644" },
+    { source = "../../dist/icons/48x48/ricercar.png", dest = "/usr/share/icons/hicolor/48x48/apps/ricercar.png", mode = "644" },
+    { source = "../../dist/icons/128x128/ricercar.png", dest = "/usr/share/icons/hicolor/128x128/apps/ricercar.png", mode = "644" },
+    { source = "../../dist/icons/256x256/ricercar.png", dest = "/usr/share/icons/hicolor/256x256/apps/ricercar.png", mode = "644" },
+    { source = "../../dist/io.github.ricercar_player.ricercar.metainfo.xml", dest = "/usr/share/metainfo/io.github.ricercar_player.ricercar.metainfo.xml", mode = "644" },
     { source = "../../dist/ricercar.service", dest = "/usr/lib/systemd/user/ricercar.service", mode = "644" },
+    { source = "../../dist/self-update", dest = "/usr/share/ricercar/self-update", mode = "644" },
     { source = "../../LICENSE", dest = "/usr/share/licenses/ricercar/LICENSE", mode = "644", doc = true },
+    { source = "../../target/THIRD-PARTY-LICENSES", dest = "/usr/share/licenses/ricercar/THIRD-PARTY-LICENSES", mode = "644", doc = true },
+    { source = "assets/fonts/OFL.txt", dest = "/usr/share/licenses/ricercar/OFL.txt", mode = "644", doc = true },
+    { source = "assets/icons/LICENSE", dest = "/usr/share/licenses/ricercar/icons-LICENSE", mode = "644", doc = true },
     { source = "../../README.md", dest = "/usr/share/doc/ricercar/README.md", mode = "644", doc = true },
 ]
 
+# Shared-library names rather than package names, so that one package works
+# on Fedora, openSUSE and RHEL alike. Libraries the binaries link are also
+# found automatically; libxkbcommon is loaded at run time and must be listed.
 [package.metadata.generate-rpm.requires]
-alsa-lib = "*"
-fontconfig = "*"
-libxkbcommon = "*"
+"libasound.so.2()(64bit)" = "*"
+"libfontconfig.so.1()(64bit)" = "*"
+"libxkbcommon.so.0()(64bit)" = "*"
+
+[package.metadata.generate-rpm.recommends]
+xdg-desktop-portal = "*"
+polkit = "*"

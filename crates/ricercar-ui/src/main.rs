@@ -26,7 +26,34 @@ fn main() {
         return;
     }
     if let Err(e) = ricercar_ui::run(args) {
-        eprintln!("ricercar: {e}");
+        startup_failed(&e.to_string());
         std::process::exit(1);
+    }
+}
+
+/// The app was started from a launcher more often than from a terminal: say
+/// why it did not open in the log file and as a desktop notification too.
+fn startup_failed(msg: &str) {
+    eprintln!("ricercar: {msg}");
+    // No-op when logging is already set up; opens the log file otherwise.
+    ricercar_daemon::init_logging();
+    tracing::error!("could not start: {msg}");
+    let log = ricercar_daemon::logging::log_path();
+    let body = format!("{msg}\n\nDetails: {}", log.display());
+    if let Ok(mut child) = std::process::Command::new("notify-send")
+        .args([
+            "--app-name=ricercar",
+            "--icon=ricercar",
+            "--urgency=critical",
+        ])
+        .arg("ricercar could not start")
+        .arg(body)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        // notify-send returns at once; reap it before exiting.
+        let _ = child.wait();
     }
 }
