@@ -44,8 +44,11 @@ struct TestRig {
     out: std::path::PathBuf,
 }
 
+/// Renderer on a `file:` sink, the fixtures indexed (control points may
+/// only push `file://` URIs of library tracks).
 fn rig(name: &str) -> TestRig {
     let lib = Arc::new(Library::in_memory().unwrap());
+    lib.scan_roots(&[std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")]);
     let out = std::env::temp_dir().join(format!("ricercar-upnp-{name}.raw"));
     let _ = std::fs::remove_file(&out);
     let ctl = Arc::new(ricercar_core::Controller::new(
@@ -400,4 +403,113 @@ fn play_mode_capabilities_and_media_info() {
     assert_eq!(out_arg(&media, "NrTracks"), "2");
     assert_eq!(out_arg(&media, "NextURI"), "http://127.0.0.1:9/two.flac");
     assert!(out_arg(&media, "NextURIMetaData").contains("two.flac"));
+}
+
+#[test]
+fn refuses_uris_outside_the_library() {
+    let r = rig("foreign-uris");
+    let p = r.handle.port;
+    let ns = "urn:schemas-upnp-org:service:AVTransport:1";
+    // A real audio file, just not an indexed one.
+    let dir = std::env::temp_dir().join(format!("ricercar-upnp-foreign-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stray = dir.join("stray.flac");
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone_16_441.flac"),
+        &stray,
+    )
+    .unwrap();
+    let stray_uri = format!("file://{}", stray.display());
+    for uri in [
+        "file:///etc/passwd",
+        "/etc/passwd",
+        "etc/passwd",
+        "plugin://demo/track%2F1",
+        "ftp://127.0.0.1/a.flac",
+        stray_uri.as_str(),
+    ] {
+        for (action, key) in [
+            ("SetAVTransportURI", "CurrentURI"),
+            ("SetNextAVTransportURI", "NextURI"),
+        ] {
+            let resp = soap(
+                p,
+                "/ctl/avt",
+                ns,
+                action,
+                &[("InstanceID", "0"), (key, uri), ("CurrentURIMetaData", "")],
+            );
+            assert!(
+                resp.contains("<errorCode>716</errorCode>"),
+                "{action} {uri}: {resp}"
+            );
+        }
+    }
+    assert!(r._ctl.lock().queue.is_empty());
+    let resp = soap(
+        p,
+        "/ctl/avt",
+        ns,
+        "SetAVTransportURI",
+        &[
+            ("InstanceID", "0"),
+            ("CurrentURI", &fixture("tone_16_441.flac")),
+            ("CurrentURIMetaData", ""),
+        ],
+    );
+    assert!(resp.contains("200 OK"), "{resp}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn connections_capped_per_address() {
+    let r = rig("per-ip");
+    let p = r.handle.port;
+    let idle: Vec<TcpStream> = (0..16)
+        .map(|_| TcpStream::connect(("127.0.0.1", p)).unwrap())
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    let busy = http(p, "GET /device.xml HTTP/1.1\r\nHOST: x\r\n", "");
+    assert!(busy.starts_with("HTTP/1.1 503"), "{busy}");
+    drop(idle);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let resp = http(p, "GET /device.xml HTTP/1.1\r\nHOST: x\r\n", "");
+        if resp.starts_with("HTTP/1.1 200") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "slots never released: {resp}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn gena_callbacks_must_point_at_the_subscriber() {
+    let r = rig("gena-cb");
+    let p = r.handle.port;
+    for cb in [
+        "http://10.9.8.7:5000/cb",
+        "http://127.0.0.1:0/cb",
+        "http://localhost:5000/cb",
+        "https://127.0.0.1:5000/cb",
+    ] {
+        let resp = http(
+            p,
+            &format!(
+                "SUBSCRIBE /evt/avt HTTP/1.1\r\nHOST: x\r\nCALLBACK: <{cb}>\r\nNT: upnp:event\r\nTIMEOUT: Second-300"
+            ),
+            "",
+        );
+        assert!(resp.starts_with("HTTP/1.1 412"), "{cb}: {resp}");
+    }
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let cb = format!("http://{}/cb", l.local_addr().unwrap());
+    let resp = http(
+        p,
+        &format!(
+            "SUBSCRIBE /evt/avt HTTP/1.1\r\nHOST: x\r\nCALLBACK: <{cb}>\r\nNT: upnp:event\r\nTIMEOUT: Second-300"
+        ),
+        "",
+    );
+    assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
 }

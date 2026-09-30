@@ -11,6 +11,9 @@ use crate::xml;
 pub const DIDL_OPEN: &str = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">";
 pub const DIDL_CLOSE: &str = "</DIDL-Lite>";
 
+/// Longest duration accepted (hours).
+const MAX_HOURS: u64 = 1_000_000;
+
 /// `H+:MM:SS[.fff]` or `H+:MM:SS.F0/F1` → milliseconds.
 pub fn parse_duration(t: &str) -> Option<u64> {
     let t = t.trim();
@@ -21,9 +24,15 @@ pub fn parse_duration(t: &str) -> Option<u64> {
     let (sec, frac) = rest.split_once('.').unwrap_or((rest, ""));
     let s: u64 = sec.parse().ok()?;
     let frac_ms = if let Some((a, b)) = frac.split_once('/') {
-        let a: f64 = a.parse().ok()?;
-        let b: f64 = b.parse().ok()?;
-        if b > 0.0 { (a / b * 1000.0) as u64 } else { 0 }
+        let a: u64 = a.parse().ok()?;
+        let b: u64 = b.parse().ok()?;
+        if b == 0 {
+            0
+        } else if a < b {
+            (a as u128 * 1000 / b as u128) as u64
+        } else {
+            return None;
+        }
     } else if frac.is_empty() {
         0
     } else {
@@ -31,7 +40,7 @@ pub fn parse_duration(t: &str) -> Option<u64> {
         let v: u64 = digits.parse().ok()?;
         v * 10u64.pow(3 - digits.len() as u32)
     };
-    if m >= 60 || s >= 60 {
+    if h > MAX_HOURS || m >= 60 || s >= 60 {
         return None;
     }
     Some((h * 3600 + m * 60 + s) * 1000 + frac_ms)
@@ -351,6 +360,12 @@ mod tests {
         assert_eq!(parse_duration("0:00:01.1/2"), Some(1_500));
         assert_eq!(parse_duration("0:61:00"), None);
         assert_eq!(parse_duration("junk"), None);
+        assert_eq!(parse_duration("18446744073709551615:00:00"), None);
+        assert_eq!(parse_duration("1000001:00:00"), None);
+        assert_eq!(parse_duration("1000000:59:59.999"), Some(3_600_003_599_999));
+        assert_eq!(parse_duration("0:00:01.18446744073709551615/2"), None);
+        assert_eq!(parse_duration("0:00:01.3/2"), None);
+        assert_eq!(parse_duration("0:00:01.-1/2"), None);
         assert_eq!(fmt_duration(205_500), "0:03:25.500");
     }
 

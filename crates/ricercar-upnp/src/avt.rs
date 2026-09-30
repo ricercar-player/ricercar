@@ -72,6 +72,7 @@ pub fn cms_vars(server: bool) -> Vars {
 }
 
 /// Item parsed from control-point metadata, or derived from the URI.
+/// Only remote cover URLs are taken from the metadata.
 pub fn remote_info(uri: &str, meta: &str) -> TrackInfo {
     let from_uri = TrackInfo::from_uri(uri);
     match didl::parse_didl(uri, meta) {
@@ -81,6 +82,13 @@ pub fn remote_info(uri: &str, meta: &str) -> TrackInfo {
             }
             if info.path.is_none() {
                 info.path = from_uri.path;
+            }
+            if !info
+                .cover
+                .as_deref()
+                .is_some_and(|c| c.starts_with("http://") || c.starts_with("https://"))
+            {
+                info.cover = from_uri.cover;
             }
             info
         }
@@ -147,6 +155,9 @@ impl Renderer {
                     self.ctl.clear_queue();
                     return ok(&[]);
                 }
+                if !self.uri_allowed(&uri) {
+                    return Reply::Err(716, "Resource not found");
+                }
                 let meta = args.get("CurrentURIMetaData");
                 self.ctl.set_remote(&uri, Some(remote_info(&uri, meta)));
                 let id = self.ctl.lock().queue.first().map(|q| q.id);
@@ -158,6 +169,9 @@ impl Renderer {
             }
             "SetNextAVTransportURI" => {
                 let uri = args.get("NextURI").trim().to_string();
+                if !uri.is_empty() && !self.uri_allowed(&uri) {
+                    return Reply::Err(716, "Resource not found");
+                }
                 let meta = args.get("NextURIMetaData");
                 let info = (!uri.is_empty()).then(|| remote_info(&uri, meta));
                 self.ctl.remote_next(&uri, info);

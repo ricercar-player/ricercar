@@ -205,34 +205,24 @@ pub fn serve_media(r: &Renderer, req: &Request, stream: &mut TcpStream) {
 }
 
 /// `GET /art?u=<file uri>` or `/art?a=<album id>`: cover art of library
-/// items (or local queue items) only — never fetches remote URLs.
+/// tracks and albums only — never other local files, never remote URLs.
 pub fn serve_art(r: &Renderer, req: &Request, stream: &mut TcpStream) {
     let head_only = req.method == "HEAD";
     let lib = &r.ctl.lib;
     // (cache key, track file carrying/next to the art)
-    let target: Option<(String, String)> =
-        if let Some(a) = req.query("a") {
-            pct_decode(a)
-                .and_then(|id| lib.album(&id))
-                .filter(|al| !al.cover_path.is_empty())
-                .map(|al| (al.id, al.cover_path))
-        } else if let Some(u) = req.query("u") {
-            pct_decode(u).and_then(|uri| {
-                let path = meta::uri_to_path(&uri)?.to_string_lossy().into_owned();
-                if let Some(t) = lib.track(&path) {
-                    return Some((t.album_id, t.path));
-                }
-                // A local file queued by the UI (not indexed): allowed since it
-                // is already in the play queue.
-                let queued =
-                    r.ctl.lock().queue.iter().any(|q| {
-                        q.info.uri == uri && q.info.path.as_deref() == Some(path.as_str())
-                    });
-                queued.then(|| (path.clone(), path))
-            })
-        } else {
-            None
-        };
+    let target: Option<(String, String)> = if let Some(a) = req.query("a") {
+        pct_decode(a)
+            .and_then(|id| lib.album(&id))
+            .filter(|al| !al.cover_path.is_empty())
+            .map(|al| (al.id, al.cover_path))
+    } else if let Some(u) = req.query("u") {
+        pct_decode(u)
+            .and_then(|uri| meta::uri_to_path(&uri))
+            .and_then(|p| lib.track(&p.to_string_lossy()))
+            .map(|t| (t.album_id, t.path))
+    } else {
+        None
+    };
     let Some((key, track)) = target else {
         return http::not_found(stream);
     };

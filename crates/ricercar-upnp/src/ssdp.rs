@@ -1,6 +1,7 @@
 //! SSDP discovery: multicast announcements on every IPv4 interface,
 //! M-SEARCH replies after the MX-random delay, `ssdp:byebye` on shutdown.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -13,6 +14,11 @@ const CACHE_SECS: u32 = 1800;
 /// (bounded thread count under a search flood).
 const MAX_PENDING_REPLIES: usize = 16;
 const SERVER: &str = "Linux/6 UPnP/1.1 ricercar/0.5";
+/// M-SEARCHes answered per second, from one source and overall.
+const SEARCHES_PER_SOURCE: u32 = 10;
+const SEARCHES_TOTAL: u32 = 50;
+/// How long the responder reuses its view of the interfaces.
+const IFACE_CACHE: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -144,6 +150,11 @@ fn ifaces() -> Vec<Iface> {
     v
 }
 
+fn on_subnet(i: &Iface, p: Ipv4Addr) -> bool {
+    let m = u32::from(i.mask);
+    u32::from(i.ip) & m == u32::from(p) & m
+}
+
 /// The local address a peer should use to reach us: same subnet first.
 fn ip_for_peer(peer: IpAddr, ifs: &[Iface]) -> Ipv4Addr {
     let IpAddr::V4(p) = peer else {
@@ -152,15 +163,53 @@ fn ip_for_peer(peer: IpAddr, ifs: &[Iface]) -> Ipv4Addr {
     if p.is_loopback() {
         return Ipv4Addr::LOCALHOST;
     }
-    let same = |i: &&Iface| {
-        let m = u32::from(i.mask);
-        u32::from(i.ip) & m == u32::from(p) & m
-    };
     ifs.iter()
-        .find(same)
+        .find(|i| on_subnet(i, p))
         .or(ifs.first())
         .map(|i| i.ip)
         .unwrap_or(Ipv4Addr::LOCALHOST)
+}
+
+/// Searches are answered only for this host and the attached subnets.
+fn peer_is_local(peer: IpAddr, ifs: &[Iface]) -> bool {
+    match peer {
+        IpAddr::V4(p) => p.is_loopback() || ifs.iter().any(|i| on_subnet(i, p)),
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// Fixed one-second windows: at most `SEARCHES_PER_SOURCE` answers to one
+/// address and `SEARCHES_TOTAL` overall.
+struct RateLimit {
+    window: Instant,
+    total: u32,
+    by_src: HashMap<IpAddr, u32>,
+}
+
+impl RateLimit {
+    fn new(now: Instant) -> RateLimit {
+        RateLimit {
+            window: now,
+            total: 0,
+            by_src: HashMap::new(),
+        }
+    }
+
+    fn allow(&mut self, src: IpAddr, now: Instant) -> bool {
+        if now.saturating_duration_since(self.window) >= Duration::from_secs(1) {
+            *self = RateLimit::new(now);
+        }
+        if self.total >= SEARCHES_TOTAL {
+            return false;
+        }
+        let n = self.by_src.entry(src).or_insert(0);
+        if *n >= SEARCHES_PER_SOURCE {
+            return false;
+        }
+        *n += 1;
+        self.total += 1;
+        true
+    }
 }
 
 fn http_date() -> String {
@@ -304,6 +353,9 @@ impl Ssdp {
                 .spawn(move || {
                     let mut buf = [0u8; 2048];
                     sock.set_read_timeout(Some(Duration::from_millis(300))).ok();
+                    let mut ifs = ifaces();
+                    let mut ifs_at = Instant::now();
+                    let mut limit = RateLimit::new(Instant::now());
                     while !stop.load(Ordering::Relaxed) {
                         let Ok((n, from)) = sock.recv_from(&mut buf) else {
                             continue;
@@ -312,7 +364,15 @@ impl Ssdp {
                         let Some((st, mx, _)) = parse_msearch(&msg) else {
                             continue;
                         };
-                        let ip = ip_for_peer(from.ip(), &ifaces());
+                        let now = Instant::now();
+                        if now.saturating_duration_since(ifs_at) >= IFACE_CACHE {
+                            ifs = ifaces();
+                            ifs_at = now;
+                        }
+                        if !peer_is_local(from.ip(), &ifs) || !limit.allow(from.ip(), now) {
+                            continue;
+                        }
+                        let ip = ip_for_peer(from.ip(), &ifs);
                         let replies: Vec<String> = common
                             .entries
                             .iter()
@@ -432,6 +492,36 @@ mod tests {
             ip_for_peer("127.0.0.1".parse().unwrap(), &ifs),
             Ipv4Addr::LOCALHOST
         );
+    }
+
+    #[test]
+    fn only_local_peers() {
+        let ifs = [Iface {
+            ip: Ipv4Addr::new(192, 168, 1, 7),
+            mask: Ipv4Addr::new(255, 255, 255, 0),
+        }];
+        assert!(peer_is_local("192.168.1.42".parse().unwrap(), &ifs));
+        assert!(peer_is_local("127.0.0.1".parse().unwrap(), &ifs));
+        assert!(!peer_is_local("192.168.2.42".parse().unwrap(), &ifs));
+        assert!(!peer_is_local("8.8.8.8".parse().unwrap(), &ifs));
+        assert!(!peer_is_local("::1".parse().unwrap(), &ifs));
+        assert!(!peer_is_local("8.8.8.8".parse().unwrap(), &[]));
+    }
+
+    #[test]
+    fn search_rate_limit() {
+        let t0 = Instant::now();
+        let mut l = RateLimit::new(t0);
+        let a: IpAddr = "192.168.1.2".parse().unwrap();
+        let answered = (0..100).filter(|_| l.allow(a, t0)).count();
+        assert_eq!(answered, SEARCHES_PER_SOURCE as usize);
+        // Many sources: the overall cap holds.
+        let total = (0..=255u8)
+            .filter(|i| l.allow(IpAddr::V4(Ipv4Addr::new(10, 0, 0, *i)), t0))
+            .count();
+        assert_eq!(total, (SEARCHES_TOTAL - SEARCHES_PER_SOURCE) as usize);
+        // A new window starts afresh.
+        assert!(l.allow(a, t0 + Duration::from_secs(1)));
     }
 
     #[test]

@@ -636,9 +636,15 @@ fn tokenize(s: &str) -> Option<Vec<Tok>> {
     Some(out)
 }
 
+/// Longest criteria string accepted.
+const MAX_CRITERIA_LEN: usize = 4096;
+/// Deepest parenthesis nesting accepted.
+const MAX_DEPTH: usize = 32;
+
 struct Parser {
     toks: Vec<Tok>,
     pos: usize,
+    depth: usize,
 }
 
 impl Parser {
@@ -667,8 +673,13 @@ impl Parser {
     fn factor(&mut self) -> Option<Expr> {
         match self.toks.get(self.pos)?.clone() {
             Tok::Open => {
+                if self.depth >= MAX_DEPTH {
+                    return None;
+                }
                 self.pos += 1;
+                self.depth += 1;
                 let e = self.or()?;
+                self.depth -= 1;
                 (self.toks.get(self.pos) == Some(&Tok::Close)).then_some(())?;
                 self.pos += 1;
                 Some(e)
@@ -698,9 +709,13 @@ fn parse_criteria(s: &str) -> Option<Expr> {
     if s.is_empty() || s == "*" {
         return Some(Expr::All);
     }
+    if s.len() > MAX_CRITERIA_LEN {
+        return None;
+    }
     let mut p = Parser {
         toks: tokenize(s)?,
         pos: 0,
+        depth: 0,
     };
     let e = p.or()?;
     (p.pos == p.toks.len()).then_some(e)
@@ -765,5 +780,16 @@ mod tests {
         assert!(e.eval(&Obj::Track(&t)));
         let c = parse_criteria(r#"upnp:class = "object.container.album.musicAlbum""#).unwrap();
         assert!(!c.eval(&Obj::Track(&t)));
+    }
+
+    #[test]
+    fn criteria_bounded() {
+        assert!(parse_criteria(&"(".repeat(100_000)).is_none());
+        let nest = |n: usize| format!("{}dc:title = \"a\"{}", "(".repeat(n), ")".repeat(n));
+        assert!(parse_criteria(&nest(MAX_DEPTH)).is_some());
+        assert!(parse_criteria(&nest(MAX_DEPTH + 1)).is_none());
+        let long = vec!["dc:title = \"a\""; 400].join(" and ");
+        assert!(long.len() > MAX_CRITERIA_LEN);
+        assert!(parse_criteria(&long).is_none());
     }
 }

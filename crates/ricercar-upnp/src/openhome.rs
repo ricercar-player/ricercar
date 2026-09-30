@@ -349,14 +349,14 @@ impl Renderer {
             }
             "SeekSecondAbsolute" => match args.num::<u64>("Value") {
                 Some(v) => {
-                    self.ctl.seek_ms(v * 1000);
+                    self.ctl.seek_ms(v.saturating_mul(1000));
                     ok(&[])
                 }
                 None => Reply::Err(402, "Invalid Args"),
             },
             "SeekSecondRelative" => match args.num::<i64>("Value") {
                 Some(v) => {
-                    self.ctl.seek_relative(v * 1000);
+                    self.ctl.seek_relative(v.saturating_mul(1000));
                     ok(&[])
                 }
                 None => Reply::Err(402, "Invalid Args"),
@@ -418,6 +418,9 @@ impl Renderer {
                 let uri = args.get("Uri").trim().to_string();
                 if uri.is_empty() {
                     return Reply::Err(402, "Invalid Args");
+                }
+                if !self.uri_allowed(&uri) {
+                    return Reply::Err(716, "Resource not found");
                 }
                 if self.ctl.lock().queue.len() >= TRACKS_MAX {
                     return Reply::Err(801, "Playlist full");

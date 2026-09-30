@@ -25,7 +25,8 @@ mod ssdp;
 mod xml;
 
 use std::collections::HashMap;
-use std::net::{TcpListener, TcpStream};
+use std::io::Read;
+use std::net::{IpAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -64,6 +65,8 @@ pub fn xml_escape_pub(s: &str) -> String {
 
 /// Concurrent HTTP connections; more are answered 503 and closed.
 const MAX_CONNS: usize = 64;
+/// Concurrent HTTP connections from one address.
+const MAX_CONNS_PER_IP: usize = 16;
 
 /// Every service we host (renderer and server devices).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -204,6 +207,7 @@ pub(crate) struct Renderer {
     pub standby: AtomicBool,
     covers: OnceLock<Option<CoverCache>>,
     active_conns: AtomicUsize,
+    conns_by_ip: Mutex<HashMap<IpAddr, usize>>,
 }
 
 impl Renderer {
@@ -250,6 +254,17 @@ impl Renderer {
             stream_title: st.stream_title.clone(),
             queue_rev: st.queue_rev,
         }
+    }
+
+    /// Whether a URI pushed by a control point may be played: http(s)
+    /// streams, or `file://` URIs of library tracks. Anything else (other
+    /// local files, bare paths, `plugin://`) is refused.
+    pub fn uri_allowed(&self, uri: &str) -> bool {
+        if uri.starts_with("http://") || uri.starts_with("https://") {
+            return true;
+        }
+        ricercar_core::meta::uri_to_path(uri)
+            .is_some_and(|p| self.ctl.lib.has_path(&p.to_string_lossy()))
     }
 
     pub fn store_meta(&self, id: u64, didl: &str) {
@@ -395,6 +410,10 @@ impl RendererHandle {
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
+        // Ends the GENA delivery threads (after their current attempt).
+        for svc in Svc::ALL {
+            self.renderer.subs(svc).clear();
+        }
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while self.renderer.active_conns.load(Ordering::SeqCst) > 0
             && std::time::Instant::now() < deadline
@@ -469,6 +488,7 @@ pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result
         standby: AtomicBool::new(false),
         covers: OnceLock::new(),
         active_conns: AtomicUsize::new(0),
+        conns_by_ip: Mutex::new(HashMap::new()),
     });
     renderer.update_counters(&renderer.snap());
 
@@ -554,11 +574,38 @@ pub fn start(controller: Arc<Controller>, opts: &UpnpOptions) -> std::io::Result
     })
 }
 
-struct ConnGuard<'a>(&'a AtomicUsize);
+/// One admitted connection; releases its slots when dropped.
+struct ConnGuard {
+    r: Arc<Renderer>,
+    ip: IpAddr,
+}
 
-impl Drop for ConnGuard<'_> {
+impl ConnGuard {
+    fn admit(r: &Arc<Renderer>, ip: IpAddr) -> Option<ConnGuard> {
+        let mut by_ip = r.conns_by_ip.lock().unwrap();
+        let n = by_ip.get(&ip).copied().unwrap_or(0);
+        if n >= MAX_CONNS_PER_IP {
+            return None;
+        }
+        if r.active_conns.fetch_add(1, Ordering::SeqCst) >= MAX_CONNS {
+            r.active_conns.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        by_ip.insert(ip, n + 1);
+        Some(ConnGuard { r: r.clone(), ip })
+    }
+}
+
+impl Drop for ConnGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        let mut by_ip = self.r.conns_by_ip.lock().unwrap();
+        if let Some(n) = by_ip.get_mut(&self.ip) {
+            *n -= 1;
+            if *n == 0 {
+                by_ip.remove(&self.ip);
+            }
+        }
+        self.r.active_conns.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -573,22 +620,22 @@ fn accept_loop(r: Arc<Renderer>, listener: TcpListener, stop: Arc<AtomicBool>) {
         };
         let _ = stream.set_read_timeout(Some(http::READ_TIMEOUT));
         let _ = stream.set_write_timeout(Some(http::WRITE_TIMEOUT));
-        if r.active_conns.fetch_add(1, Ordering::SeqCst) >= MAX_CONNS {
-            r.active_conns.fetch_sub(1, Ordering::SeqCst);
+        let admitted = stream
+            .peer_addr()
+            .ok()
+            .and_then(|a| ConnGuard::admit(&r, a.ip()));
+        let Some(guard) = admitted else {
             let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
             http::write_response(&mut stream, 503, "text/plain", b"busy");
             continue;
-        }
-        let r2 = r.clone();
-        let spawned = std::thread::Builder::new()
+        };
+        // On a spawn failure the closure, and so the guard, is dropped.
+        let _ = std::thread::Builder::new()
             .name("ricercar-upnp-conn".into())
             .spawn(move || {
-                let _guard = ConnGuard(&r2.active_conns);
-                serve_conn(&r2, stream);
+                serve_conn(&guard.r, stream);
+                drop(guard);
             });
-        if spawned.is_err() {
-            r.active_conns.fetch_sub(1, Ordering::SeqCst);
-        }
     }
     // Drop the event channel so the event thread ends too.
     r.wake.lock().unwrap().take();
@@ -722,7 +769,12 @@ fn handle_subscribe(r: &Renderer, svc: Svc, req: &http::Request, stream: &mut Tc
         }
         return;
     }
-    let callbacks = callback.map(events::parse_callbacks).unwrap_or_default();
+    let Ok(peer) = stream.peer_addr() else {
+        return;
+    };
+    let callbacks = callback
+        .map(|c| events::parse_callbacks(c, peer.ip()))
+        .unwrap_or_default();
     if nt != Some("upnp:event") || callbacks.is_empty() {
         return http::write_response(stream, 412, "text/plain", b"");
     }
@@ -773,8 +825,9 @@ fn load_or_create_udn_named(name: &str) -> String {
     let host = std::fs::read_to_string("/etc/machine-id").unwrap_or_default();
     let mut seed = format!("{}{name}", host.trim());
     if host.trim().is_empty() {
-        let rnd = std::fs::read("/dev/urandom").unwrap_or_default();
-        seed = format!("{:?}{name}", &rnd[..16.min(rnd.len())]);
+        let mut rnd = [0u8; 16];
+        let _ = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut rnd));
+        seed = format!("{rnd:?}{name}");
     }
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in seed.bytes() {

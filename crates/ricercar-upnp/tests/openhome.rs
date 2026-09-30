@@ -57,7 +57,7 @@ fn device_lists_openhome_services() {
 
 #[test]
 fn playlist_flow_and_avtransport_view() {
-    let r = rig("oh-flow", false);
+    let r = rig("oh-flow", true);
     let p = r.port();
     let didl1 = r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="x" parentID="y" restricted="1"><dc:title>First &amp; foremost</dc:title><upnp:artist>Tester</upnp:artist><upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo="http-get:*:audio/flac:*" duration="0:00:02.000">x</res></item></DIDL-Lite>"#;
 
@@ -323,7 +323,7 @@ fn next_event(rx: &mpsc::Receiver<String>, needle: &str) -> String {
 
 #[test]
 fn gena_events_openhome_and_lastchange() {
-    let r = rig("oh-gena", false);
+    let r = rig("oh-gena", true);
     let p = r.port();
 
     let (cb, rx) = callback_server();
@@ -388,4 +388,22 @@ fn gena_events_openhome_and_lastchange() {
         format!("UNSUBSCRIBE /evt/ohplaylist HTTP/1.1\r\nHOST: x\r\nSID: {sid}\r\n\r\n").as_bytes(),
     );
     assert!(head.contains("412"), "{head}");
+}
+
+#[test]
+fn insert_refuses_uris_outside_the_library() {
+    let r = rig("oh-foreign", true);
+    let p = r.port();
+    for uri in ["file:///etc/passwd", "/etc/passwd", "plugin://demo/x"] {
+        let resp = pl(
+            p,
+            "Insert",
+            &[("AfterId", "0"), ("Uri", uri), ("Metadata", "")],
+        );
+        assert_eq!(fault_code(&resp), Some(716), "{uri}: {resp}");
+    }
+    assert!(r.ctl.lock().queue.is_empty());
+    insert(p, 0, &fixture("tone_16_441.flac"), "");
+    insert(p, 0, "http://127.0.0.1:9/stream.flac", "");
+    assert_eq!(r.ctl.lock().queue.len(), 2);
 }

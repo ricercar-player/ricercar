@@ -3,13 +3,15 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const SERVER: &str = "Linux/6 UPnP/1.1 ricercar/0.5";
 const MAX_HEAD: usize = 64 * 1024;
 const MAX_BODY: usize = 1024 * 1024;
-/// Time allowed for a client to send its request.
+/// Longest silence allowed while a client sends its request.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Time allowed for a client to send its whole request (head and body).
+pub const REQUEST_DEADLINE: Duration = Duration::from_secs(15);
 /// A client that accepts no data for this long is dropped.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -44,13 +46,26 @@ impl Request {
 }
 
 pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
+    read_request_within(stream, REQUEST_DEADLINE)
+}
+
+fn read_request_within(stream: &mut TcpStream, budget: Duration) -> Option<Request> {
+    let deadline = Instant::now() + budget;
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
+    let read = |stream: &mut TcpStream, tmp: &mut [u8]| -> Option<usize> {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        stream.set_read_timeout(Some(left.min(READ_TIMEOUT))).ok()?;
+        stream.read(tmp).ok()
+    };
     let header_end = loop {
         if let Some(pos) = find_header_end(&buf) {
             break pos;
         }
-        let n = stream.read(&mut tmp).ok()?;
+        let n = read(stream, &mut tmp)?;
         if n == 0 {
             return None;
         }
@@ -81,7 +96,7 @@ pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
     }
     let mut body: Vec<u8> = buf[header_end..].to_vec();
     while body.len() < content_len {
-        let n = stream.read(&mut tmp).ok()?;
+        let n = read(stream, &mut tmp)?;
         if n == 0 {
             break;
         }
@@ -158,4 +173,49 @@ pub fn respond(
 
 pub fn not_found(stream: &mut TcpStream) {
     write_response(stream, 404, "text/plain", b"");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    fn pair() -> (TcpStream, TcpStream) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let c = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        (l.accept().unwrap().0, c)
+    }
+
+    #[test]
+    fn slow_client_hits_the_deadline() {
+        let (mut server, mut client) = pair();
+        let feeder = std::thread::spawn(move || {
+            // One byte every 100 ms: never silent long enough for a read
+            // timeout, never done either.
+            for _ in 0..30 {
+                if client.write_all(b"G").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let t = Instant::now();
+        assert!(read_request_within(&mut server, Duration::from_millis(500)).is_none());
+        assert!(t.elapsed() < Duration::from_secs(2));
+        drop(server);
+        feeder.join().unwrap();
+    }
+
+    #[test]
+    fn complete_request_within_deadline() {
+        let (mut server, mut client) = pair();
+        client
+            .write_all(b"POST /x?a=1 HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc")
+            .unwrap();
+        let req = read_request_within(&mut server, Duration::from_secs(2)).unwrap();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.route(), "/x");
+        assert_eq!(req.query("a"), Some("1"));
+        assert_eq!(req.body, b"abc");
+    }
 }

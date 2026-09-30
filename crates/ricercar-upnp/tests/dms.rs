@@ -344,3 +344,45 @@ fn art_never_fetches_remote_urls() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(!hit.load(Ordering::SeqCst), "renderer fetched a remote URL");
 }
+
+#[test]
+fn art_only_for_library_tracks() {
+    let r = rig("dms-art-lib", true);
+    // A queued file outside the library, next to a folder image.
+    let dir = std::env::temp_dir().join(format!("ricercar-upnp-art-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stray = dir.join("stray.flac");
+    std::fs::copy(fixtures().join("tone_16_441.flac"), &stray).unwrap();
+    std::fs::write(dir.join("cover.jpg"), b"\xff\xd8\xff\xe0 not really a jpeg").unwrap();
+    let uri = format!("file://{}", stray.display());
+    r.ctl.set_remote(&uri, None);
+    r.ctl.stop();
+    let (head, _) = get(r.port(), &format!("/art?u={}", pct(&uri)), "");
+    assert!(head.contains("404"), "{head}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn deeply_nested_search_is_refused() {
+    let r = rig("dms-nest", true);
+    let p = r.port();
+    let criteria = "(".repeat(100_000);
+    let resp = soap(
+        p,
+        "cd",
+        CD,
+        "Search",
+        &[
+            ("ContainerID", "0"),
+            ("SearchCriteria", &criteria),
+            ("Filter", "*"),
+            ("StartingIndex", "0"),
+            ("RequestCount", "0"),
+            ("SortCriteria", ""),
+        ],
+    );
+    assert_eq!(fault_code(&resp), Some(708), "{resp}");
+    // Still serving.
+    let (head, _) = get(p, "/server.xml", "");
+    assert!(head.contains("200 OK"), "{head}");
+}
