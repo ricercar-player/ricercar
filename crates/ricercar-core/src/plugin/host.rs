@@ -19,8 +19,9 @@ use serde_json::{Value, json};
 use super::rpc::{CallError, Incoming, Rpc, RpcError};
 use super::settings::{self, Setting, Stored};
 use super::{
-    AuthBegin, AuthState, AuthStatus, Capabilities, Item, OutputInfo, PROTOCOL, PluginError,
-    PluginInfo, Purpose, Resolved, Resolver, parse_plugin_uri,
+    AuthBegin, AuthState, AuthStatus, Capabilities, Item, ItemDetails, ItemKind, LibraryList,
+    OutputInfo, PROTOCOL, PluginError, PluginInfo, PluginLyrics, Purpose, Resolved, Resolver,
+    items_of, parse_plugin_uri, valid_ref,
 };
 use crate::config::PluginConfig;
 use crate::controller::{Controller, EnqueueAt, Origin, TrackInfo};
@@ -28,6 +29,8 @@ use crate::controller::{Controller, EnqueueAt, Origin, TrackInfo};
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTH_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Lyrics show while the track plays: a slow plugin is passed over.
+const LYRICS_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// Restart delays after a crash; the last one repeats.
 const BACKOFF: [u64; 4] = [1, 2, 5, 30];
@@ -36,6 +39,17 @@ const STABLE: Duration = Duration::from_secs(60);
 const PROGRESS_EVERY: Duration = Duration::from_secs(30);
 /// Longest rate-limit block honoured, whatever the plugin asks for.
 const MAX_RETRY_AFTER: u64 = 3600;
+/// Tracks asked for per `radio.next` by continuous playback.
+pub const RADIO_LIMIT: usize = 20;
+const RADIO_MAX: usize = 50;
+/// Refs sent in `radio.next`'s `exclude`, at most.
+const RADIO_EXCLUDE: usize = 50;
+/// Most tracks read for a "play" action.
+pub const TRACKS_MAX: usize = 500;
+const MAX_PLAYLIST_NAME: usize = 200;
+const MAX_PLAYLIST_DESCRIPTION: usize = 2000;
+/// Refs or entries sent in one `playlists.add` / `playlists.remove`.
+const MAX_PLAYLIST_BATCH: usize = 500;
 
 /// What a plugin is doing, for the settings page and the diagnostic report.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +117,10 @@ struct Slot {
     status: RwLock<PluginStatus>,
     thread: Mutex<Option<JoinHandle<()>>>,
     blocked_until: Mutex<Option<Instant>>,
+    /// Playlist refs the plugin marked `editable`, as last seen.
+    editable: Mutex<std::collections::HashSet<String>>,
+    /// `playlists.move` answered "method not found" since the start.
+    no_move: AtomicBool,
 }
 
 struct Inner {
@@ -332,6 +350,8 @@ impl PluginHost {
                         status: RwLock::new(PluginStatus::new(&c.id, RunState::Starting)),
                         thread: Mutex::new(None),
                         blocked_until: Mutex::new(None),
+                        editable: Mutex::new(Default::default()),
+                        no_move: AtomicBool::new(false),
                     });
                     let host = self.clone();
                     let s2 = slot.clone();
@@ -495,6 +515,8 @@ impl PluginHost {
                 });
         }
         slot.declared.store(false, Ordering::SeqCst);
+        slot.no_move.store(false, Ordering::SeqCst);
+        slot.editable.lock().unwrap().clear();
         let (tx, rx) = mpsc::channel::<Incoming>();
         let rpc = Rpc::start(&id, stdout, stdin, move |m| {
             let _ = tx.send(m);
@@ -630,6 +652,7 @@ impl PluginHost {
         let timeout = match method {
             "auth.complete" => AUTH_COMPLETE_TIMEOUT,
             "track.resolve" => RESOLVE_TIMEOUT,
+            "lyrics.get" => LYRICS_TIMEOUT,
             _ => DEFAULT_TIMEOUT,
         };
         let slot = self.slot(id).ok_or(PluginError::NotRunning)?;
@@ -735,7 +758,9 @@ impl PluginHost {
     ) -> Result<(Vec<Item>, Option<Vec<Item>>), PluginError> {
         let v = self.call(id, "browse.root", json!({}))?;
         let home = v.get("home").map(|h| items_of(Some(h)));
-        Ok((items_of(v.get("sections")), home))
+        let sections = items_of(v.get("sections"));
+        self.learn(id, &sections);
+        Ok((sections, home))
     }
 
     /// Children of a browsable item: (items, total, has_more).
@@ -751,8 +776,10 @@ impl PluginHost {
             "browse.list",
             json!({"ref": reference, "offset": offset, "limit": limit.min(200)}),
         )?;
+        let items = items_of(v.get("items"));
+        self.learn(id, &items);
         Ok((
-            items_of(v.get("items")),
+            items,
             v.get("total").and_then(Value::as_u64),
             v.get("has_more").and_then(Value::as_bool).unwrap_or(false),
         ))
@@ -776,7 +803,7 @@ impl PluginHost {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        Ok(groups
+        let groups: Vec<_> = groups
             .into_iter()
             .filter_map(|g| {
                 let kind = serde_json::from_value(g.get("kind")?.clone()).ok()?;
@@ -786,7 +813,11 @@ impl PluginHost {
                     g.get("has_more").and_then(Value::as_bool).unwrap_or(false),
                 ))
             })
-            .collect())
+            .collect();
+        for g in &groups {
+            self.learn(id, &g.1);
+        }
+        Ok(groups)
     }
 
     /// A whole `library.*` list, page by page, up to `max` items.
@@ -804,6 +835,9 @@ impl PluginHost {
                 json!({"offset": out.len(), "limit": 200}),
             )?;
             let items = items_of(v.get("items"));
+            if list == LibraryList::Playlists {
+                self.learn(id, &items);
+            }
             let more = v.get("has_more").and_then(Value::as_bool).unwrap_or(false);
             let got = items.len();
             out.extend(items);
@@ -816,20 +850,313 @@ impl PluginHost {
 
     pub fn item_get(&self, id: &str, reference: &str) -> Result<Item, PluginError> {
         let v = self.call(id, "item.get", json!({ "ref": reference }))?;
-        items_of(Some(&json!([v])))
-            .pop()
-            .ok_or(PluginError::NotFound)
+        let items = items_of(Some(&json!([v])));
+        self.learn(id, &items);
+        items.into_iter().next().ok_or(PluginError::NotFound)
     }
 
     pub fn favorites_set(&self, id: &str, reference: &str, on: bool) -> Result<(), PluginError> {
-        if !self.status(id).is_some_and(|s| s.caps.favorites) {
-            return Err(PluginError::Other {
-                code: -32601,
-                message: "favorites not supported".into(),
-            });
-        }
+        self.require(id, |c| c.favorites, "favorites")?;
         self.call(id, "favorites.set", json!({"ref": reference, "on": on}))
             .map(|_| ())
+    }
+
+    /// Refuse a call the plugin did not declare, without asking it.
+    fn require(
+        &self,
+        id: &str,
+        cap: impl Fn(&Capabilities) -> bool,
+        what: &str,
+    ) -> Result<(), PluginError> {
+        match self.status(id) {
+            Some(s) if cap(&s.caps) => Ok(()),
+            Some(s) if s.state != RunState::Running => Err(PluginError::NotRunning),
+            None => Err(PluginError::NotRunning),
+            Some(_) => Err(PluginError::Other {
+                code: -32601,
+                message: format!("{what} not supported"),
+            }),
+        }
+    }
+
+    /// Remember which playlists the plugin says the user may edit.
+    fn learn(&self, id: &str, items: &[Item]) {
+        let Some(slot) = self.slot(id) else { return };
+        let mut set = slot.editable.lock().unwrap();
+        for i in items.iter().filter(|i| i.kind == ItemKind::Playlist) {
+            if i.editable {
+                set.insert(i.reference.clone());
+            } else {
+                set.remove(&i.reference);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ lyrics, details
+
+    /// `lyrics.get` (capability `lyrics`). An answer with nothing usable
+    /// is `NotFound`, like the plugin's own `not_found`.
+    pub fn lyrics_get(&self, id: &str, reference: &str) -> Result<PluginLyrics, PluginError> {
+        self.require(id, |c| c.lyrics, "lyrics")?;
+        let v = self.call(id, "lyrics.get", json!({ "ref": reference }))?;
+        PluginLyrics::parse(&v).ok_or(PluginError::NotFound)
+    }
+
+    /// `item.details` (capability `details`): biography, related shelves
+    /// and facts, cut to the host's limits.
+    pub fn item_details(&self, id: &str, reference: &str) -> Result<ItemDetails, PluginError> {
+        self.require(id, |c| c.details, "details")?;
+        let v = self.call(id, "item.details", json!({ "ref": reference }))?;
+        let d = ItemDetails::parse(&v);
+        for s in &d.related {
+            self.learn(id, &s.items);
+        }
+        Ok(d)
+    }
+
+    // ------------------------------------------------------------ actions, radio
+
+    /// The playable tracks under `reference` (`browse.list`, page by page,
+    /// up to `max` and at most [`TRACKS_MAX`]) as queue entries: what a
+    /// "play" action puts in the queue.
+    pub fn playable_tracks(
+        &self,
+        id: &str,
+        reference: &str,
+        max: usize,
+    ) -> Result<Vec<TrackInfo>, PluginError> {
+        let max = max.min(TRACKS_MAX);
+        let mut out = Vec::new();
+        let mut offset = 0;
+        // Bounded even for a plugin that always says `has_more`.
+        for _ in 0..(TRACKS_MAX / 50 + 5) {
+            let (items, _, more) = self.browse_list(id, reference, offset, 200)?;
+            offset += items.len();
+            let got = items.len();
+            out.extend(
+                items
+                    .iter()
+                    .filter(|i| i.is_playable())
+                    .map(|i| i.to_track_info(id)),
+            );
+            if !more || got == 0 || out.len() >= max {
+                break;
+            }
+        }
+        out.truncate(max);
+        Ok(out)
+    }
+
+    /// `radio.next` (capability `radio`): playable tracks following
+    /// `seed` (a track, album or artist ref), none of `exclude` (refs).
+    pub fn radio_next_items(
+        &self,
+        id: &str,
+        seed: &str,
+        exclude: &[String],
+        limit: usize,
+    ) -> Result<Vec<Item>, PluginError> {
+        self.require(id, |c| c.radio, "radio")?;
+        let limit = limit.clamp(1, RADIO_MAX);
+        let exclude: Vec<&String> = exclude
+            .iter()
+            .filter(|r| valid_ref(r))
+            .take(RADIO_EXCLUDE)
+            .collect();
+        let v = self.call(
+            id,
+            "radio.next",
+            json!({"seed": seed, "exclude": exclude, "limit": limit}),
+        )?;
+        let mut items: Vec<Item> = items_of(v.get("items"))
+            .into_iter()
+            .filter(Item::is_playable)
+            .filter(|i| !exclude.contains(&&i.reference))
+            .collect();
+        items.truncate(limit);
+        Ok(items)
+    }
+
+    // ------------------------------------------------------------ playlists
+
+    /// Whether `playlists.move` can be offered: the plugin declares
+    /// `playlist_edit` and has not answered "method not found" to it.
+    pub fn playlist_move_supported(&self, id: &str) -> bool {
+        self.require(id, |c| c.playlist_edit, "playlist editing")
+            .is_ok()
+            && self
+                .slot(id)
+                .is_some_and(|s| !s.no_move.load(Ordering::SeqCst))
+    }
+
+    /// Whether the plugin marked this playlist `editable` (as last seen in
+    /// a list, or asked with `item.get`).
+    pub fn playlist_editable(&self, id: &str, playlist: &str) -> bool {
+        if self
+            .slot(id)
+            .is_some_and(|s| s.editable.lock().unwrap().contains(playlist))
+        {
+            return true;
+        }
+        self.item_get(id, playlist)
+            .is_ok_and(|i| i.kind == ItemKind::Playlist && i.editable)
+    }
+
+    fn check_editable(&self, id: &str, playlist: &str) -> Result<(), PluginError> {
+        self.require(id, |c| c.playlist_edit, "playlist editing")?;
+        if !valid_ref(playlist) || !self.playlist_editable(id, playlist) {
+            return Err(bad_params("this playlist cannot be edited"));
+        }
+        Ok(())
+    }
+
+    /// After a successful edit: the playlists read again.
+    fn edited<T>(&self, id: &str, value: T) -> PlaylistEdited<T> {
+        let playlists = self
+            .library_all(id, LibraryList::Playlists, super::LIBRARY_MAX)
+            .map_err(|e| tracing::info!("plugin[{id}] library.playlists after an edit: {e}"))
+            .ok();
+        PlaylistEdited { value, playlists }
+    }
+
+    /// `playlists.create`: the new playlist.
+    pub fn playlist_create(
+        &self,
+        id: &str,
+        name: &str,
+        description: Option<&str>,
+        public: Option<bool>,
+    ) -> Result<PlaylistEdited<Item>, PluginError> {
+        self.require(id, |c| c.playlist_edit, "playlist editing")?;
+        let name = playlist_name(name)?;
+        let mut p = json!({ "name": name });
+        if let Some(d) = description.map(str::trim).filter(|d| !d.is_empty()) {
+            p["description"] = json!(d.chars().take(MAX_PLAYLIST_DESCRIPTION).collect::<String>());
+        }
+        if let Some(public) = public {
+            p["public"] = json!(public);
+        }
+        let v = self.call(id, "playlists.create", p)?;
+        let item = items_of(Some(&json!([v])))
+            .into_iter()
+            .next()
+            .ok_or_else(|| PluginError::Other {
+                code: -32603,
+                message: "bad answer to playlists.create".into(),
+            })?;
+        self.learn(id, std::slice::from_ref(&item));
+        Ok(self.edited(id, item))
+    }
+
+    /// `playlists.rename`.
+    pub fn playlist_rename(
+        &self,
+        id: &str,
+        playlist: &str,
+        name: &str,
+    ) -> Result<PlaylistEdited<()>, PluginError> {
+        let name = playlist_name(name)?;
+        self.check_editable(id, playlist)?;
+        self.call(
+            id,
+            "playlists.rename",
+            json!({"ref": playlist, "name": name}),
+        )?;
+        Ok(self.edited(id, ()))
+    }
+
+    /// `playlists.delete`. Irreversible on the service: confirm first.
+    pub fn playlist_delete(
+        &self,
+        id: &str,
+        playlist: &str,
+    ) -> Result<PlaylistEdited<()>, PluginError> {
+        self.check_editable(id, playlist)?;
+        self.call(id, "playlists.delete", json!({ "ref": playlist }))?;
+        if let Some(s) = self.slot(id) {
+            s.editable.lock().unwrap().remove(playlist);
+        }
+        Ok(self.edited(id, ()))
+    }
+
+    /// `playlists.add`: `tracks` are `plugin://` URIs, all of plugin `id`
+    /// (a track of another plugin, or a local one, is refused).
+    pub fn playlist_add(
+        &self,
+        id: &str,
+        playlist: &str,
+        tracks: &[String],
+    ) -> Result<PlaylistEdited<()>, PluginError> {
+        let mut refs = Vec::with_capacity(tracks.len());
+        for uri in tracks {
+            match parse_plugin_uri(uri) {
+                Some((pid, r)) if pid == id && valid_ref(&r) => refs.push(r),
+                _ => return Err(bad_params("tracks must come from the same plugin")),
+            }
+        }
+        if refs.is_empty() || refs.len() > MAX_PLAYLIST_BATCH {
+            return Err(bad_params("no tracks, or too many at once"));
+        }
+        self.check_editable(id, playlist)?;
+        self.call(id, "playlists.add", json!({"ref": playlist, "items": refs}))?;
+        Ok(self.edited(id, ()))
+    }
+
+    /// `playlists.remove`: `entries` are the `entry_id`s of the tracks
+    /// listed by the playlist's `browse.list`.
+    pub fn playlist_remove(
+        &self,
+        id: &str,
+        playlist: &str,
+        entries: &[String],
+    ) -> Result<PlaylistEdited<()>, PluginError> {
+        if entries.is_empty()
+            || entries.len() > MAX_PLAYLIST_BATCH
+            || !entries.iter().all(|e| valid_ref(e))
+        {
+            return Err(bad_params("no entries, or too many at once"));
+        }
+        self.check_editable(id, playlist)?;
+        self.call(
+            id,
+            "playlists.remove",
+            json!({"ref": playlist, "entries": entries}),
+        )?;
+        Ok(self.edited(id, ()))
+    }
+
+    /// `playlists.move` (optional): the entry goes to position `to`
+    /// (0-based, in the playlist as it is before the move). A plugin
+    /// without it answers "method not found", remembered until it
+    /// restarts: see [`PluginHost::playlist_move_supported`].
+    pub fn playlist_move(
+        &self,
+        id: &str,
+        playlist: &str,
+        entry: &str,
+        to: usize,
+    ) -> Result<PlaylistEdited<()>, PluginError> {
+        if !valid_ref(entry) {
+            return Err(bad_params("bad entry"));
+        }
+        self.check_editable(id, playlist)?;
+        if !self.playlist_move_supported(id) {
+            return Err(unsupported("playlists.move"));
+        }
+        let r = self.call(
+            id,
+            "playlists.move",
+            json!({"ref": playlist, "entry": entry, "to": to}),
+        );
+        if let Err(PluginError::Other { code: -32601, .. }) = r {
+            if let Some(s) = self.slot(id) {
+                s.no_move.store(true, Ordering::SeqCst);
+            }
+            self.touch();
+            return Err(unsupported("playlists.move"));
+        }
+        r?;
+        Ok(self.edited(id, ()))
     }
 
     /// Update queue entries of a plugin from `item.get` once it is back
@@ -1107,17 +1434,41 @@ impl PluginHost {
 
 struct Fatal(String);
 
-/// Items of a JSON array; entries that do not parse, or with a missing or
-/// oversized ref, are dropped.
-fn items_of(v: Option<&Value>) -> Vec<Item> {
-    v.and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value::<Item>(i.clone()).ok())
-                .filter(|i| !i.reference.is_empty() && i.reference.len() <= super::MAX_REF)
-                .collect()
-        })
-        .unwrap_or_default()
+/// A playlist edit that succeeded, with the plugin's playlists read again
+/// right after it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaylistEdited<T> {
+    pub value: T,
+    /// `library.playlists` after the edit; `None` when that read failed
+    /// (the edit itself went through).
+    pub playlists: Option<Vec<Item>>,
+}
+
+fn bad_params(message: &str) -> PluginError {
+    PluginError::Other {
+        code: -32602,
+        message: message.into(),
+    }
+}
+
+fn unsupported(what: &str) -> PluginError {
+    PluginError::Other {
+        code: -32601,
+        message: format!("{what} not supported"),
+    }
+}
+
+fn playlist_name(name: &str) -> Result<String, PluginError> {
+    let name: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_PLAYLIST_NAME)
+        .collect();
+    if name.is_empty() {
+        return Err(bad_params("empty playlist name"));
+    }
+    Ok(name)
 }
 
 impl Resolver for PluginHost {
@@ -1140,5 +1491,34 @@ impl Resolver for PluginHost {
     fn plugin_name(&self, uri: &str) -> Option<String> {
         let (id, _) = parse_plugin_uri(uri)?;
         Some(self.status(&id).map(|s| s.name).unwrap_or(id))
+    }
+
+    fn has_radio(&self, uri: &str) -> bool {
+        parse_plugin_uri(uri).is_some_and(|(id, _)| {
+            self.status(&id)
+                .is_some_and(|s| s.state == RunState::Running && s.caps.radio)
+        })
+    }
+
+    fn radio_next(
+        &self,
+        seed: &str,
+        exclude: &[String],
+        limit: usize,
+    ) -> Result<Vec<TrackInfo>, PluginError> {
+        let (id, seed) = parse_plugin_uri(seed).ok_or(PluginError::NotFound)?;
+        let exclude: Vec<String> = exclude
+            .iter()
+            .filter_map(|u| {
+                parse_plugin_uri(u)
+                    .filter(|(p, _)| *p == id)
+                    .map(|(_, r)| r)
+            })
+            .collect();
+        Ok(self
+            .radio_next_items(&id, &seed, &exclude, limit)?
+            .iter()
+            .map(|i| i.to_track_info(&id))
+            .collect())
     }
 }

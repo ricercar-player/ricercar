@@ -8,6 +8,8 @@
 //!   --no-auth          no sign-in (catalogue open)
 //!   --expire-preload   the first preload of each track returns an expired URL
 //!   --gone-first       the first URL of each track answers 410 Gone
+//!   --no-move          no `playlists.move` (answers "method not found")
+//!   --radio-fail       `radio.next` answers `unavailable`
 //!
 //! Everything interesting is appended to `<data_dir>/calls.log`, one line
 //! per event, so tests can check what the host did.
@@ -16,6 +18,12 @@
 //! `playback.*` lines, `page_size` caps `browse.list` pages, `greeting` is
 //! logged at start (it asks for a restart), and signing in adds a choice
 //! to `quality`, sent with `settings.declared`.
+//!
+//! Optional parts: lyrics (synced for track 1, plain for track 2, track 3
+//! instrumental), album/artist/label refs, actions (a "play" radio and a
+//! "browse" similar albums), favourite flags, two playlists (one editable,
+//! with entry ids and every `playlists.*` method), details, `radio.next`,
+//! and `delivery: "proxied"` for the tracks of album 2.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
@@ -87,13 +95,22 @@ const TRACKS: [Track; 6] = [
         playable: false,
     },
 ];
-const PLAYLIST: [u32; 3] = [1, 4, 2];
+
+struct Playlist {
+    n: u32,
+    title: String,
+    /// (entry id, track number)
+    entries: Vec<(String, u32)>,
+    editable: bool,
+}
 
 struct Opts {
     protocol: u64,
     auth: bool,
     expire_preload: bool,
     gone_first: bool,
+    no_move: bool,
+    radio_fail: bool,
 }
 
 struct State {
@@ -106,6 +123,9 @@ struct State {
     last_player_status: String,
     next_id: u64,
     settings: serde_json::Map<String, Value>,
+    playlists: Vec<Playlist>,
+    next_entry: u64,
+    next_playlist: u32,
 }
 
 impl State {
@@ -133,6 +153,26 @@ impl State {
 
     fn base(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    fn playlist(&self, r: &str) -> Option<&Playlist> {
+        let n: u32 = r.strip_prefix("playlist/")?.parse().ok()?;
+        self.playlists.iter().find(|p| p.n == n)
+    }
+
+    /// The playlist `r`, if the user may edit it.
+    fn editable(&mut self, r: &str) -> Result<&mut Playlist, Value> {
+        let n: Option<u32> = r.strip_prefix("playlist/").and_then(|n| n.parse().ok());
+        match self.playlists.iter_mut().find(|p| Some(p.n) == n) {
+            Some(p) if p.editable => Ok(p),
+            Some(_) => Err(err(-32602, "this playlist is not yours")),
+            None => Err(err(-32002, "no such playlist")),
+        }
+    }
+
+    fn entry(&mut self) -> String {
+        self.next_entry += 1;
+        format!("e{}", self.next_entry)
     }
 
     fn setting(&self, key: &str) -> Value {
@@ -196,6 +236,13 @@ fn track_item(st: &State, t: &Track) -> Value {
         "art": format!("{}/art/{}.jpg", st.base(), t.album),
         "format": {"sample_rate": t.rate, "bits": t.bits, "codec": "flac"},
         "playable": t.playable,
+        "album_ref": format!("album/{}", t.album),
+        "artist_ref": "artist/1",
+        "label_ref": "label/1",
+        "favorite": st.favorites.contains(&format!("track/{}", t.n)),
+        "actions": [
+            {"id": "radio", "label": "Track radio", "ref": format!("radio/track/{}", t.n), "kind": "play"}
+        ],
     })
 }
 
@@ -209,6 +256,13 @@ fn album_item(st: &State, a: &(u32, &str, i32)) -> Value {
         "year": a.2,
         "art": format!("{}/art/{}.jpg", st.base(), a.0),
         "browsable": true,
+        "artist_ref": "artist/1",
+        "label_ref": "label/1",
+        "favorite": st.favorites.contains(&format!("album/{}", a.0)),
+        "actions": [
+            {"id": "radio", "label": "Album radio", "ref": format!("radio/album/{}", a.0), "kind": "play"},
+            {"id": "similar", "label": "Similar albums", "ref": format!("similar/album/{}", a.0), "kind": "browse"}
+        ],
     })
 }
 
@@ -220,7 +274,37 @@ fn artist_item(st: &State) -> Value {
         "subtitle": "2 albums",
         "art": format!("{}/art/1.jpg", st.base()),
         "browsable": true,
+        "favorite": st.favorites.contains("artist/1"),
+        "actions": [
+            {"id": "radio", "label": "Artist radio", "ref": "radio/artist/1", "kind": "play"}
+        ],
     })
+}
+
+fn playlist_item(st: &State, p: &Playlist) -> Value {
+    json!({
+        "ref": format!("playlist/{}", p.n), "kind": "playlist", "title": p.title,
+        "subtitle": format!("{} tracks", p.entries.len()),
+        "track_count": p.entries.len(),
+        "art": format!("{}/art/1.jpg", st.base()), "browsable": true,
+        "editable": p.editable,
+    })
+}
+
+/// Playable tracks for a radio seeded by `seed`, none of `exclude`.
+fn radio_tracks(st: &State, seed: &str, exclude: &[String], limit: usize) -> Vec<Value> {
+    let seed_album: Option<u32> = seed.strip_prefix("album/").and_then(|n| n.parse().ok());
+    TRACKS
+        .iter()
+        .filter(|t| t.playable)
+        .filter(|t| seed_album.is_none_or(|a| t.album != a))
+        .filter(|t| {
+            let r = format!("track/{}", t.n);
+            r != seed && !exclude.contains(&r)
+        })
+        .take(limit)
+        .map(|t| track_item(st, t))
+        .collect()
 }
 
 fn children(st: &State, r: &str) -> Option<Vec<Value>> {
@@ -233,17 +317,29 @@ fn children(st: &State, r: &str) -> Option<Vec<Value>> {
     };
     Some(match r {
         "albums" => ALBUMS.iter().map(|a| album_item(st, a)).collect(),
-        "playlists" => vec![json!({
-            "ref": "playlist/1", "kind": "playlist", "title": "Demo mix",
-            "subtitle": "3 tracks", "art": format!("{}/art/1.jpg", st.base()), "browsable": true,
-        })],
+        "playlists" => st.playlists.iter().map(|p| playlist_item(st, p)).collect(),
         "favorites" => tracks(&|t| st.favorites.contains(&format!("track/{}", t.n))),
-        "artist/1" => ALBUMS.iter().map(|a| album_item(st, a)).collect(),
-        "playlist/1" => PLAYLIST
+        "artist/1" | "label/1" => ALBUMS.iter().map(|a| album_item(st, a)).collect(),
+        _ if r.starts_with("playlist/") => st
+            .playlist(r)?
+            .entries
             .iter()
-            .filter_map(|n| TRACKS.iter().find(|t| t.n == *n))
-            .map(|t| track_item(st, t))
+            .filter_map(|(e, n)| {
+                let t = TRACKS.iter().find(|t| t.n == *n)?;
+                let mut v = track_item(st, t);
+                v["entry_id"] = json!(e);
+                Some(v)
+            })
             .collect(),
+        _ if r.starts_with("radio/") => radio_tracks(st, &r["radio/".len()..], &[], 50),
+        _ if r.starts_with("similar/album/") => {
+            let n: u32 = r["similar/album/".len()..].parse().ok()?;
+            ALBUMS
+                .iter()
+                .filter(|a| a.0 != n)
+                .map(|a| album_item(st, a))
+                .collect()
+        }
         _ => {
             let n: u32 = r.strip_prefix("album/")?.parse().ok()?;
             ALBUMS.iter().find(|a| a.0 == n)?;
@@ -259,7 +355,48 @@ fn find_item(st: &State, r: &str) -> Option<Value> {
     if let Some(n) = r.strip_prefix("album/").and_then(|n| n.parse::<u32>().ok()) {
         return ALBUMS.iter().find(|a| a.0 == n).map(|a| album_item(st, a));
     }
-    None
+    if r == "artist/1" {
+        return Some(artist_item(st));
+    }
+    st.playlist(r).map(|p| playlist_item(st, p))
+}
+
+fn lyrics(r: &str) -> Option<Value> {
+    Some(match r {
+        "track/1" => json!({
+            "synced": [
+                {"time_ms": 0, "text": "First light on the demo line"},
+                {"time_ms": 400, "text": "Every sample where it should be"},
+                {"time_ms": 800, "text": ""}
+            ],
+            "plain": "First light on the demo line\nEvery sample where it should be"
+        }),
+        "track/2" => json!({"plain": "A second take\nA little slower"}),
+        "track/3" => json!({"instrumental": true}),
+        _ => return None,
+    })
+}
+
+fn details(st: &State, r: &str) -> Option<Value> {
+    if r == "artist/1" {
+        return Some(json!({
+            "biography": {
+                "text": "Demo Ensemble records short test pieces for ricercar.\n\nEvery track lasts one second.",
+                "source": "Demo Music"
+            },
+            "related": [
+                {"title": "Albums", "items": ALBUMS.iter().map(|a| album_item(st, a)).collect::<Vec<_>>()},
+                {"title": "Top tracks", "items": radio_tracks(st, "", &[], 3)}
+            ],
+            "facts": [{"label": "Formed", "value": "2021"}, {"label": "Label", "value": "Demo Records"}]
+        }));
+    }
+    let n: u32 = r.strip_prefix("album/")?.parse().ok()?;
+    let (_, _, year) = ALBUMS.iter().find(|a| a.0 == n)?;
+    Some(json!({
+        "related": [{"title": "Similar albums", "items": children(st, &format!("similar/album/{n}"))?}],
+        "facts": [{"label": "Label", "value": "Demo Records"}, {"label": "Released", "value": year.to_string()}]
+    }))
 }
 
 fn now() -> i64 {
@@ -368,6 +505,8 @@ fn main() {
         auth: true,
         expire_preload: false,
         gone_first: false,
+        no_move: false,
+        radio_fail: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -376,6 +515,8 @@ fn main() {
             "--no-auth" => opts.auth = false,
             "--expire-preload" => opts.expire_preload = true,
             "--gone-first" => opts.gone_first = true,
+            "--no-move" => opts.no_move = true,
+            "--radio-fail" => opts.radio_fail = true,
             _ => {}
         }
     }
@@ -390,6 +531,22 @@ fn main() {
         last_player_status: String::new(),
         next_id: 1,
         settings: serde_json::Map::new(),
+        playlists: vec![
+            Playlist {
+                n: 1,
+                title: "Demo mix".into(),
+                entries: vec![("e1".into(), 1), ("e2".into(), 4), ("e3".into(), 2)],
+                editable: true,
+            },
+            Playlist {
+                n: 2,
+                title: "Followed picks".into(),
+                entries: vec![("e4".into(), 5), ("e5".into(), 3)],
+                editable: false,
+            },
+        ],
+        next_entry: 5,
+        next_playlist: 3,
     };
     let stdout = std::io::stdout();
     let send = |v: Value| {
@@ -467,7 +624,10 @@ fn main() {
                 | "item.get"
                 | "favorites.set"
                 | "track.resolve"
-        );
+                | "lyrics.get"
+                | "item.details"
+                | "radio.next"
+        ) || method.starts_with("playlists.");
         let result: Result<Value, Value> = if needs_auth && !st.signed_in() {
             Err(err(-32001, "sign in first"))
         } else {
@@ -505,7 +665,8 @@ fn main() {
                         "capabilities": {
                             "auth": st.opts.auth, "browse": true, "search": true, "resolve": true,
                             "favorites": true, "reporting": true, "remote_control": true,
-                            "library": true
+                            "library": true, "lyrics": true, "playlist_edit": true,
+                            "details": true, "radio": true
                         },
                         "settings": schema(false)
                     }))
@@ -622,7 +783,130 @@ fn main() {
                     Ok(json!({"items": page, "total": total, "has_more": offset + limit < total}))
                 }
                 "item.get" => find_item(&st, &r).ok_or_else(|| err(-32002, "no such item")),
+                "lyrics.get" => {
+                    st.log(&format!("lyrics.get {r}"));
+                    lyrics(&r).ok_or_else(|| err(-32002, "no lyrics"))
+                }
+                "item.details" => {
+                    st.log(&format!("item.details {r}"));
+                    details(&st, &r).ok_or_else(|| err(-32002, "no details"))
+                }
+                "radio.next" => {
+                    let seed = params["seed"].as_str().unwrap_or("").to_string();
+                    let exclude: Vec<String> = params["exclude"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let limit = params["limit"].as_u64().unwrap_or(10) as usize;
+                    st.log(&format!(
+                        "radio.next {seed} exclude={} limit={limit}",
+                        exclude.join(",")
+                    ));
+                    if st.opts.radio_fail {
+                        Err(err(-32003, "no radio in your plan"))
+                    } else {
+                        Ok(json!({ "items": radio_tracks(&st, &seed, &exclude, limit) }))
+                    }
+                }
+                "playlists.create" => {
+                    let name = params["name"].as_str().unwrap_or("").trim().to_string();
+                    if name.is_empty() {
+                        Err(err(-32602, "name"))
+                    } else {
+                        st.log(&format!("playlists.create {name}"));
+                        let n = st.next_playlist;
+                        st.next_playlist += 1;
+                        st.playlists.push(Playlist {
+                            n,
+                            title: name,
+                            entries: Vec::new(),
+                            editable: true,
+                        });
+                        Ok(playlist_item(&st, st.playlists.last().unwrap()))
+                    }
+                }
+                "playlists.rename" => {
+                    let name = params["name"].as_str().unwrap_or("").to_string();
+                    st.log(&format!("playlists.rename {r} {name}"));
+                    st.editable(&r).map(|p| {
+                        p.title = name;
+                        Value::Null
+                    })
+                }
+                "playlists.delete" => {
+                    st.log(&format!("playlists.delete {r}"));
+                    st.editable(&r).map(|_| ()).map(|()| {
+                        st.playlists.retain(|p| format!("playlist/{}", p.n) != r);
+                        Value::Null
+                    })
+                }
+                "playlists.add" => {
+                    let refs: Vec<String> = params["items"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    st.log(&format!("playlists.add {r} {}", refs.join(",")));
+                    let ns: Option<Vec<u32>> = refs
+                        .iter()
+                        .map(|x| {
+                            let n: u32 = x.strip_prefix("track/")?.parse().ok()?;
+                            TRACKS.iter().any(|t| t.n == n).then_some(n)
+                        })
+                        .collect();
+                    match ns {
+                        None => Err(err(-32602, "unknown track")),
+                        Some(ns) => {
+                            let entries: Vec<(String, u32)> =
+                                ns.into_iter().map(|n| (st.entry(), n)).collect();
+                            st.editable(&r).map(|p| {
+                                p.entries.extend(entries);
+                                Value::Null
+                            })
+                        }
+                    }
+                }
+                "playlists.remove" => {
+                    let entries: Vec<String> = params["entries"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    st.log(&format!("playlists.remove {r} {}", entries.join(",")));
+                    st.editable(&r).map(|p| {
+                        p.entries.retain(|(e, _)| !entries.contains(e));
+                        Value::Null
+                    })
+                }
+                "playlists.move" if st.opts.no_move => Err(err(-32601, "method not found")),
+                "playlists.move" => {
+                    let entry = params["entry"].as_str().unwrap_or("").to_string();
+                    let to = params["to"].as_u64().unwrap_or(0) as usize;
+                    st.log(&format!("playlists.move {r} {entry} {to}"));
+                    st.editable(&r).and_then(|p| {
+                        let from = p
+                            .entries
+                            .iter()
+                            .position(|(e, _)| *e == entry)
+                            .ok_or_else(|| err(-32002, "no such entry"))?;
+                        let e = p.entries.remove(from);
+                        let to = to.min(p.entries.len());
+                        p.entries.insert(to, e);
+                        Ok(Value::Null)
+                    })
+                }
                 "favorites.set" => {
+                    st.log(&format!("favorites.set {r} {}", params["on"]));
                     if params["on"].as_bool().unwrap_or(false) {
                         st.favorites.insert(r.clone());
                     } else {
@@ -659,7 +943,9 @@ fn main() {
                                 "duration_ms": 1000,
                                 "format": {"sample_rate": t.rate, "bits": t.bits, "channels": 2, "codec": "flac"},
                                 "replaygain": {"track_gain": -3.5, "track_peak": 0.9},
-                                "live": false
+                                "live": false,
+                                // Album 2 goes through a relay of the plugin.
+                                "delivery": if t.album == 2 { "proxied" } else { "direct" }
                             }))
                         }
                     }

@@ -17,7 +17,12 @@
 - **Keep the signal path honest.** A plugin never delivers PCM. It hands the
   host a URL (or a local path); `ricercar-audio` fetches, decodes and plays it
   exactly like any HTTP stream. Output stays bit-perfect when the item allows
-  it, and the signal path keeps showing each hop.
+  it, and the signal path keeps showing each hop. A plugin may relay the
+  stream itself (rebuild a file from segments, decrypt a protected stream
+  locally, then serve it on `127.0.0.1`), as long as it delivers the
+  original codec unchanged: no re-encoding, no signal processing. It then
+  says so with [`delivery: "proxied"`](#resolving), and the signal path
+  shows the relay.
 - **Isolation.** A plugin is a separate process, written in any language. It
   can crash, hang or be slow without taking the player down.
 - **Explicit user choice.** ricercar bundles no plugin and never installs or
@@ -186,7 +191,8 @@ page_size = 50
   "capabilities": {
     "auth": true, "browse": true, "search": true, "resolve": true,
     "favorites": true, "reporting": false, "remote_control": false,
-    "library": true
+    "library": true, "lyrics": true, "playlist_edit": false,
+    "details": true, "radio": true
   },
   "settings": [ … ]                 // optional, see Settings
 }}
@@ -194,6 +200,22 @@ page_size = 50
 
 - A plugin whose `protocol` differs from the host's is disabled with a clear
   message.
+- A missing capability is `false`. Each optional part of the protocol has
+  its own:
+
+| Capability | Methods | Section |
+|---|---|---|
+| `auth` | `auth.*` | [Authentication](#authentication) |
+| `browse`, `search` | `browse.*`, `search`, `item.get` | [Browsing and search](#browsing-and-search) |
+| `resolve` | `track.resolve` | [Resolving](#resolving) |
+| `favorites` | `favorites.set` | [Browsing and search](#browsing-and-search) |
+| `reporting` | `playback.*` (notifications) | [Playback reporting](#playback-reporting-optional) |
+| `remote_control` | `player.*` (plugin → host) | [Remote control](#remote-control-optional) |
+| `library` | `library.*` | [Library](#library-optional) |
+| `lyrics` | `lyrics.get` | [Lyrics](#lyrics-optional) |
+| `playlist_edit` | `playlists.*` | [Playlist editing](#playlist-editing-optional) |
+| `details` | `item.details` | [Details](#details-optional) |
+| `radio` | `radio.next` | [Radio](#radio-optional) |
 - `output` is sent again with `output.changed` when the user switches device.
   Plugins use it to pick a stream format the DAC plays natively, since the
   engine refuses formats it would have to convert.
@@ -233,7 +255,18 @@ Every entry a plugin returns is an **item**:
   "art": "https://…/cover.jpg",   // http(s) image, fetched by the host's cover cache
   "format": {"sample_rate": 96000, "bits": 24, "codec": "flac"},  // best available, informative
   "playable": true,               // tracks: false when region/subscription forbids it
-  "browsable": false              // albums, artists, playlists, folders: true
+  "browsable": false,             // albums, artists, playlists, folders: true
+  // all optional from here
+  "album_ref": "album/77",        // tracks: their album
+  "artist_ref": "artist/12",      // tracks, albums: their artist
+  "label_ref": "label/3",         // albums, tracks: their label or publisher
+  "favorite": true,               // in the user's favourites; absent: unknown
+  "actions": [
+    {"id": "radio",   "label": "Artist radio",   "ref": "radio/artist/12", "kind": "play"},
+    {"id": "similar", "label": "Similar albums", "ref": "similar/album/77", "kind": "browse"}
+  ],
+  "entry_id": "e-5531",           // tracks listed by a playlist, see Playlist editing
+  "editable": false               // playlists, see Playlist editing
 }
 ```
 
@@ -241,6 +274,24 @@ Every entry a plugin returns is an **item**:
   `plugin://<id>/<percent-encoded ref>`, together with the metadata above
   mapped onto `TrackInfo`.
 - The resolved URL is **never** persisted. It is short-lived.
+- `album_ref`, `artist_ref` and `label_ref` are refs like `ref` (opaque,
+  ≤ 1 KiB, otherwise ignored), opened with `browse.list` in the host's
+  generic page: "Go to album", "Go to artist" and a link to the label.
+  Without them the host searches by name, which can pick a namesake. A
+  queued track keeps its `album_ref` and `artist_ref`, saved sessions
+  included.
+- `favorite` lets the host show a filled or empty heart for plugins that
+  declare `favorites`, and update it after `favorites.set`. Absent, the
+  host shows no state.
+- `actions` opens related content without a method per case: an artist's
+  radio, similar albums, a label's catalogue. `kind: "play"`: the host reads
+  `browse.list` on `ref` (up to 500 playable tracks) and queues them,
+  replacing the queue or adding to it as the user chose. `kind: "browse"`:
+  the host opens `ref` in the generic page. `label` is short plain text in
+  the `locale` of `initialize`; `id` names the action (≤ 64 characters).
+  The host shows at most 8 actions per item, below its own, and drops
+  entries with an unknown `kind`, an empty or overlong label (80
+  characters) or a bad `ref`.
 
 ## Browsing and search
 
@@ -253,7 +304,7 @@ Every entry a plugin returns is an **item**:
 | `favorites.set {ref, on}` | Only with the `favorites` capability. |
 
 The host caches nothing beyond the current page and the cover images,
-except the library lists below.
+except the library lists below and lyrics.
 
 ## Library (optional)
 
@@ -295,15 +346,32 @@ page, and it has no sidebar section of its own. A plugin that only declares
   "duration_ms": 245000,
   "format": {"sample_rate": 96000, "bits": 24, "channels": 2, "codec": "flac"},
   "replaygain": {"track_gain": -7.2, "track_peak": 0.98},   // optional
-  "live": false
+  "live": false,
+  "delivery": "direct"            // optional: "direct" (default) or "proxied"
 }}
 ```
 
 **Rules for plugins:**
 - `url` is `http(s)://` or `file://`. HTTP responses must carry
   `Content-Length`, so the engine's spooled source can seek.
+- If the server answers with `Accept-Ranges: bytes` and a
+  `Content-Length`, the player uses `Range` requests: a seek far beyond what
+  has been downloaded starts a new request at that point instead of waiting
+  for the whole file. The remaining parts are fetched afterwards, so seeking
+  back never needs the network. A range request must be answered with
+  `206 Partial Content` and a matching `Content-Range`; a server that
+  ignores `Range` still works, but falls back to one sequential download.
+  Relays that produce the stream on demand should only advertise
+  `Accept-Ranges` if they can really serve arbitrary offsets.
 - `format` describes what the URL delivers. Pick the best format within
   `output`, and return `unavailable` if none fits.
+- `delivery: "proxied"` when the plugin serves the stream itself (usually
+  on `http://127.0.0.1:<port>/…`) instead of pointing at where the service
+  serves it. Allowed only if the bytes are the original codec, unchanged:
+  no re-encoding, no resampling, no processing. The signal path then reads
+  "Source: <plugin> (relayed locally, original codec unchanged)". A relay
+  URL that has expired is handled like any other: the host resolves again
+  after an HTTP error. Unknown values count as `direct`.
 
 **When the host resolves:**
 - on load (`purpose: "play"`);
@@ -349,6 +417,108 @@ for plugins that expose ricercar to an external control protocol.
 
 The queue set this way uses a new `Origin` value, `Plugin(id)`, and the UI
 shows "Playing from <plugin name>".
+
+## Lyrics (optional)
+
+With the `lyrics` capability, the host asks the plugin for the lyrics of its
+tracks before LRCLIB (tags and `.lrc` files are for local files only):
+
+```jsonc
+// host → plugin
+{"method":"lyrics.get","params":{"ref":"track/8812"}}
+// plugin → host
+{"result":{
+  "synced": [{"time_ms": 12340, "text": "…"}, {"time_ms": 15020, "text": "…"}],  // optional
+  "plain": "…",                   // optional, lines separated by \n
+  "instrumental": false           // optional
+}}
+```
+
+- No lyrics: the error `not_found` (-32002). The host then asks LRCLIB when
+  the user allows it, and remembers the `not_found` for a day.
+- Answer within 5 s. On a timeout or any other error the host goes on with
+  LRCLIB and asks again next time.
+- The host sorts `synced` by time and keeps at most 5000 lines of 500
+  characters. Text is plain text. Lyrics found are cached on disk under the
+  track's `plugin://` URI.
+- The lyrics panel names the plugin as the source.
+
+## Playlist editing (optional)
+
+With the `playlist_edit` capability, the user can create, rename and delete
+playlists on the service, and add or remove tracks, from ricercar.
+
+| Method | Params | Result |
+|---|---|---|
+| `playlists.create` | `{name, description?, public?}` | the new playlist, an item |
+| `playlists.rename` | `{ref, name}` | `null` |
+| `playlists.delete` | `{ref}` | `null` |
+| `playlists.add` | `{ref, items: [ref]}` | `null`: tracks appended |
+| `playlists.remove` | `{ref, entries: [entry_id]}` | `null` |
+| `playlists.move` (optional) | `{ref, entry, to}` | `null`: the entry moves to position `to` (0-based, in the list before the move) |
+
+- `editable: true` marks the playlists the user owns, as opposed to those
+  they follow. The host offers editing on those only, never calls an edit
+  method on another one, and the plugin refuses them anyway (`-32602`).
+- `entry_id`, on each track of a playlist's `browse.list`, names the entry
+  rather than the track: a track can appear twice, and many services remove
+  by entry. `playlists.remove` and `playlists.move` take entry ids.
+- `playlists.add` only receives refs of the plugin's own tracks. Local
+  tracks go to local playlists, and a track of one plugin never goes to a
+  playlist of another.
+- A plugin without `playlists.move` answers `-32601`; the host then stops
+  offering reordering until the plugin restarts.
+- After each successful edit the host reads `library.playlists` again, and
+  the open playlist.
+- Deleting asks the user for confirmation first, naming the service: it
+  cannot be undone there.
+
+## Details (optional)
+
+With the `details` capability, the host's artist and album pages show more
+than the item: a biography, shelves of related items, facts.
+
+```jsonc
+// host → plugin
+{"method":"item.details","params":{"ref":"artist/12"}}
+// plugin → host
+{"result":{
+  "biography": {"text": "…", "source": "…"},                        // optional
+  "related": [{"title": "Similar artists", "items": [item, …]}],    // optional
+  "facts": [{"label": "Label", "value": "…"}]                       // optional
+}}
+```
+
+- Asked after the page shows, without holding it up. `not_found` or an
+  error: the page stays as it is.
+- Everything is plain text: the plugin strips any markup itself. Titles
+  and labels come in the `locale` of `initialize`.
+- The host keeps a biography of 20 000 characters, 10 shelves of 50 items
+  (empty shelves are dropped) and 30 facts.
+
+## Radio (optional)
+
+With the `radio` capability, the plugin suggests tracks that follow others:
+
+```jsonc
+// host → plugin
+{"method":"radio.next","params":{"seed":"track/8812","exclude":["track/8812","track/901"],"limit":20}}
+// plugin → host
+{"result":{"items":[item, …]}}
+```
+
+- `seed` is a ref of the plugin: a track, and also an album or an artist
+  for a radio started from those. Plugins should accept all three.
+- `exclude`: refs played recently (at most 50); the plugin leaves them out.
+- `limit`: at most 50. The host keeps the playable tracks, up to `limit`.
+- **Continuous playback** (Settings → Playback, off by default): when the
+  queue reaches its last track and it is a track of a plugin with `radio`,
+  the host calls `radio.next` with it as the seed and appends the tracks
+  it gets, so playback goes on without a gap. Never after a local track or
+  a track of another plugin. An error or an empty answer: playback stops at
+  the end of the queue, as without it.
+- "Start radio" on a plugin track, album or artist replaces the queue with
+  the answer (the track itself first).
 
 ## Settings (optional)
 
@@ -456,12 +626,13 @@ to a UI message and never shows raw text from the plugin as HTML.
 
 | Crate | Change |
 |---|---|
-| `ricercar-core` | New `plugin` module: config `[[plugins]]`, process supervision, JSON-RPC over stdio, `PluginHost` API. `TrackInfo::from_uri` understands `plugin://`. `Origin::Plugin(id)`. `plugin::settings`: declared settings checked, values stored in `[plugins.settings]`, `settings.changed` on change; `reconcile` ignores settings when deciding restarts. |
-| `ricercar-core` / `Controller` | Resolution step in `load_current` and `rearm`, done asynchronously: load the item once its URL is known, and drop the result if the current item changed meanwhile. **`on_track_started` matches items by URI**, so keep a map `item id → resolved URL` for the loading and armed items and match against it. Session save/restore keeps `plugin://` URIs. ReplayGain from `resolve` feeds `opts_for`. |
+| `ricercar-core` | New `plugin` module: config `[[plugins]]`, process supervision, JSON-RPC over stdio, `PluginHost` API. `TrackInfo::from_uri` understands `plugin://`. `Origin::Plugin(id)`. `plugin::settings`: declared settings checked, values stored in `[plugins.settings]`, `settings.changed` on change; `reconcile` ignores settings when deciding restarts. Optional parts: `lyrics_get`, `item_details`, `playlist_*` (playlists read again after each edit), `radio_next_items`, `playable_tracks` for "play" actions; `TrackInfo` keeps `album_ref`/`artist_ref`. |
+| `ricercar-core` / `Controller` | Continuous playback (`[audio] continuous_playback`) and `start_radio`, through `radio.next` off the controller lock. `CtlState.delivery` carries `delivery` for the signal path. Resolution step in `load_current` and `rearm`, done asynchronously: load the item once its URL is known, and drop the result if the current item changed meanwhile. **`on_track_started` matches items by URI**, so keep a map `item id → resolved URL` for the loading and armed items and match against it. Session save/restore keeps `plugin://` URIs. ReplayGain from `resolve` feeds `opts_for`. |
 | `ricercar-audio` | Surface the HTTP status of failed fetches in `EngineEvent::Error` (or a typed variant), so the controller can re-resolve on 401/403/404/410. |
 | `ricercar-daemon` | Start and stop the `PluginHost` in `AppContext`. Send `output.changed` on device switch. Plugin status in the diagnostic report. `set_plugin_setting` / `reset_plugin_settings`: check, save and apply off the calling thread. |
 | `ricercar-ui` | Sidebar section per signed-in plugin, from `browse.root`. Generic browse page (grid for albums and playlists, track table for tracks). Plugins with `library` feed the Albums, Artists and Tracks pages (merged in the page's order, with a source badge and a source filter); plugin albums open on the album page. The global search shows local results at once, then each signed-in plugin's (its `search`, or matches in its library list) as they come, marked with their source. Sign-in dialog (open browser, QR code, paste field). A settings row per plugin (status, sign in/out, enable, and a settings button for plugins that declare settings, opening a dialog of switches, text and number fields and choices, grouped by section). "Source: <plugin>" hop in the signal path. Every new string goes through `@tr()`. |
 | `ricercar-online` / scrobble | Plugin tracks scrobble from their metadata (`path` is `None`). |
+| `ricercar-online` / lyrics | `LyricsSource::Plugin(id)`; for a `plugin://` track, the plugin (with `lyrics`) then LRCLIB, cached under the URI, `not_found` kept a day. The plugin is asked through a callback (`ricercar-daemon::lyrics`). |
 | `ricercar-upnp` | No change. ContentDirectory still serves the local library only. Plugin tracks in the queue are shown with their metadata. |
 | Docs | README: "Features", "Is this a … client?" FAQ and the promise wording (the core ships no service API; third-party plugins may add catalogues). HACKING.md: plugin host map. |
 
@@ -479,6 +650,10 @@ to a UI message and never shows raw text from the plugin as HTML.
   - URL expiry and re-resolve;
   - `auth_required` handling;
   - session restore with `plugin://` items.
+- Lyrics, contextual refs, actions and favourite flags, details, playlist
+  editing (with and without `playlists.move`, refusal of non-editable
+  playlists and of tracks from elsewhere), `delivery`, and continuous
+  playback on the `null` sink (off, on, after a local track, on error).
 - Settings: the declaration is checked, values are checked and stored,
   `initialize` carries them, a change sends `settings.changed` without a
   restart, `restart: true` restarts, `settings.declared` replaces the

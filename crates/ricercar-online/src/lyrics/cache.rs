@@ -13,6 +13,10 @@ use crate::{OnlineError, Result, fsutil};
 /// crowd-sourced and gains lyrics over time.
 pub const NEGATIVE_TTL_SECS: i64 = 7 * 24 * 3600;
 
+/// "Not found" from a source plugin is trusted for a day: its catalogue
+/// changes, and asking it is cheap.
+pub const PLUGIN_NEGATIVE_TTL_SECS: i64 = 24 * 3600;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheLookup {
     Hit(Lyrics),
@@ -26,6 +30,9 @@ pub enum CacheLookup {
 struct Entry {
     fetched_at_unix: i64,
     lyrics: Option<Lyrics>,
+    /// How long a miss is trusted, when not [`NEGATIVE_TTL_SECS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    missing_ttl_secs: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,13 +68,24 @@ impl LyricsCache {
         fsutil::md5_hex(raw.as_bytes())
     }
 
+    /// Key of a track known by its URI (`plugin://…`) rather than by its
+    /// tags. Never equal to a [`LyricsCache::key`].
+    pub fn uri_key(uri: &str) -> String {
+        fsutil::md5_hex(format!("uri|{uri}").as_bytes())
+    }
+
     pub fn lookup(&self, key: &str) -> CacheLookup {
         self.lookup_at(key, now_unix())
     }
 
     /// Records a result; `None` caches a miss.
     pub fn store(&self, key: &str, lyrics: Option<&Lyrics>) -> Result<()> {
-        self.store_at(key, lyrics, now_unix())
+        self.store_at(key, lyrics, now_unix(), None)
+    }
+
+    /// Records a miss trusted for `ttl_secs` instead of the default.
+    pub fn store_missing_for(&self, key: &str, ttl_secs: i64) -> Result<()> {
+        self.store_at(key, None, now_unix(), Some(ttl_secs))
     }
 
     fn path(&self, key: &str) -> PathBuf {
@@ -85,15 +103,25 @@ impl LyricsCache {
             Ok(Entry {
                 fetched_at_unix,
                 lyrics: None,
-            }) if now - fetched_at_unix < NEGATIVE_TTL_SECS => CacheLookup::KnownMissing,
+                missing_ttl_secs,
+            }) if now - fetched_at_unix < missing_ttl_secs.unwrap_or(NEGATIVE_TTL_SECS) => {
+                CacheLookup::KnownMissing
+            }
             _ => CacheLookup::Miss,
         }
     }
 
-    fn store_at(&self, key: &str, lyrics: Option<&Lyrics>, now: i64) -> Result<()> {
+    fn store_at(
+        &self,
+        key: &str,
+        lyrics: Option<&Lyrics>,
+        now: i64,
+        missing_ttl_secs: Option<i64>,
+    ) -> Result<()> {
         let entry = Entry {
             fetched_at_unix: now,
             lyrics: lyrics.cloned(),
+            missing_ttl_secs,
         };
         let json = serde_json::to_vec(&entry).map_err(|e| OnlineError::Parse(e.to_string()))?;
         fsutil::write_atomic(&self.path(key), &json)?;
@@ -159,7 +187,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = LyricsCache::new(dir.path());
         let key = LyricsCache::key("a", "b", None, None);
-        cache.store_at(&key, None, 1_000).unwrap();
+        cache.store_at(&key, None, 1_000, None).unwrap();
         assert_eq!(cache.lookup_at(&key, 1_000), CacheLookup::KnownMissing);
         assert_eq!(
             cache.lookup_at(&key, 1_000 + NEGATIVE_TTL_SECS - 1),
@@ -167,6 +195,28 @@ mod tests {
         );
         assert_eq!(
             cache.lookup_at(&key, 1_000 + NEGATIVE_TTL_SECS),
+            CacheLookup::Miss
+        );
+    }
+
+    #[test]
+    fn plugin_misses_expire_sooner() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LyricsCache::new(dir.path());
+        let key = LyricsCache::uri_key("plugin://demo/track%2F1");
+        assert_ne!(
+            key,
+            LyricsCache::key("plugin://demo/track%2F1", "", None, None)
+        );
+        cache
+            .store_at(&key, None, 1_000, Some(PLUGIN_NEGATIVE_TTL_SECS))
+            .unwrap();
+        assert_eq!(
+            cache.lookup_at(&key, 1_000 + PLUGIN_NEGATIVE_TTL_SECS - 1),
+            CacheLookup::KnownMissing
+        );
+        assert_eq!(
+            cache.lookup_at(&key, 1_000 + PLUGIN_NEGATIVE_TTL_SECS),
             CacheLookup::Miss
         );
     }

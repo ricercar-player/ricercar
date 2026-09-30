@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use crate::config::ReplayGain;
 use crate::library::{Library, Track};
 use crate::meta;
-use crate::plugin::{Purpose, Resolved, Resolver, is_plugin_uri};
+use crate::plugin::{
+    Delivery, PluginError, Purpose, RADIO_LIMIT, Resolved, Resolver, is_plugin_uri,
+};
 
 /// Metadata about a playable item (library track, pushed stream, radio).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -45,6 +47,12 @@ pub struct TrackInfo {
     pub mb_album_id: Option<String>,
     /// Endless stream (internet radio): no duration, no gapless successor.
     pub live: bool,
+    /// Plugin tracks: the ref of their album in the plugin, when it gave one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_ref: Option<String>,
+    /// Plugin tracks: the ref of their artist in the plugin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist_ref: Option<String>,
 }
 
 impl From<&Track> for TrackInfo {
@@ -89,6 +97,8 @@ impl From<&Track> for TrackInfo {
             rg_album_peak: t.rg_album_peak,
             mb_album_id: t.mb_album_id.clone(),
             live: false,
+            album_ref: None,
+            artist_ref: None,
         }
     }
 }
@@ -100,6 +110,24 @@ impl From<Track> for TrackInfo {
 }
 
 impl TrackInfo {
+    /// A plugin track's album: (plugin id, album ref), to open with the
+    /// plugin's `browse.list`. `None` for other items, or when the plugin
+    /// gave no `album_ref` (fall back to a search by name).
+    pub fn plugin_album_ref(&self) -> Option<(String, String)> {
+        self.plugin_ref(self.album_ref.as_deref())
+    }
+
+    /// A plugin track's artist: (plugin id, artist ref).
+    pub fn plugin_artist_ref(&self) -> Option<(String, String)> {
+        self.plugin_ref(self.artist_ref.as_deref())
+    }
+
+    fn plugin_ref(&self, r: Option<&str>) -> Option<(String, String)> {
+        let r = r.filter(|r| crate::plugin::valid_ref(r))?;
+        let (id, _) = crate::plugin::parse_plugin_uri(&self.uri)?;
+        Some((id, r.to_string()))
+    }
+
     /// Minimal info for a bare URI (MPRIS OpenUri, UPnP without DIDL).
     pub fn from_uri(uri: &str) -> TrackInfo {
         if let Some(path) = meta::uri_to_path(uri) {
@@ -223,6 +251,11 @@ pub struct CtlState {
     pub queue_rev: u64,
     /// Plugin item whose URL is being resolved before it can load.
     pub resolving: Option<u64>,
+    /// How the playing plugin item's stream reaches the engine (from
+    /// `track.resolve`); `None` for anything else.
+    pub delivery: Option<Delivery>,
+    /// Continuous playback is asking the plugin for more tracks.
+    pub radio_pending: bool,
 }
 
 impl CtlState {
@@ -300,6 +333,9 @@ struct Pending {
     preloading: HashSet<u64>,
     /// Items whose refused URL was already resolved again.
     retried: HashSet<u64>,
+    /// Continuous playback: `radio.next` asked (or being asked) after this
+    /// item, the last of the queue.
+    radio_after: Option<u64>,
 }
 
 pub struct Controller {
@@ -309,13 +345,14 @@ pub struct Controller {
     pending: Arc<Mutex<Pending>>,
     events: Arc<EventHub>,
     device_name: RwLock<String>,
-    next_id: AtomicU64,
+    next_id: Arc<AtomicU64>,
     alive: Arc<AtomicBool>,
     session_path: Arc<Mutex<Option<PathBuf>>>,
     /// Restored session waiting for the first "play".
     resume_at: Mutex<Option<u64>>,
     rg_preamp: Mutex<f32>,
     resolver: Arc<RwLock<Option<Arc<dyn Resolver>>>>,
+    continuous: Arc<AtomicBool>,
 }
 
 fn chain_stub(device: &str) -> ChainInfo {
@@ -367,16 +404,19 @@ impl Controller {
                 stream_title: None,
                 queue_rev: 0,
                 resolving: None,
+                delivery: None,
+                radio_pending: false,
             })),
             pending: Arc::new(Mutex::new(Pending::default())),
             events: Arc::new(EventHub::default()),
             device_name: RwLock::new(device.into()),
-            next_id: AtomicU64::new(1),
+            next_id: Arc::new(AtomicU64::new(1)),
             alive: Arc::new(AtomicBool::new(true)),
             session_path: Arc::new(Mutex::new(None)),
             resume_at: Mutex::new(None),
             rg_preamp: Mutex::new(0.0),
             resolver: Arc::new(RwLock::new(None)),
+            continuous: Arc::new(AtomicBool::new(false)),
         };
         ctl.spawn_bridge();
         ctl
@@ -395,13 +435,7 @@ impl Controller {
     }
 
     fn new_items(&self, infos: Vec<TrackInfo>) -> Vec<QueueItem> {
-        infos
-            .into_iter()
-            .map(|info| QueueItem {
-                id: self.next_id.fetch_add(1, Ordering::Relaxed),
-                info,
-            })
-            .collect()
+        new_items(&self.next_id, infos)
     }
 
     // ------------------------------------------------------------ engine bridge
@@ -507,12 +541,53 @@ impl Controller {
             pending: self.pending.clone(),
             events: self.events.clone(),
             resolver: self.resolver.clone(),
+            next_id: self.next_id.clone(),
+            continuous: self.continuous.clone(),
         }
     }
 
     /// Where `plugin://` items get their URLs (the plugin host).
     pub fn set_resolver(&self, r: Arc<dyn Resolver>) {
         *self.resolver.write().unwrap() = Some(r);
+    }
+
+    /// Continuous playback (`[audio] continuous_playback`): when the queue
+    /// ends on a track of a plugin that declares `radio`, ask it for more
+    /// and keep playing.
+    pub fn set_continuous(&self, on: bool) {
+        if self.continuous.swap(on, Ordering::SeqCst) != on {
+            self.pending.lock().unwrap().radio_after = None;
+            self.bridge().rearm();
+        }
+    }
+
+    pub fn continuous(&self) -> bool {
+        self.continuous.load(Ordering::SeqCst)
+    }
+
+    /// Replace the queue with a radio of the plugin behind `seed` (a
+    /// `plugin://` URI of a track, album or artist), `lead` first when
+    /// given (usually the seed track itself). Blocking (`radio.next`):
+    /// call it off the UI thread. Returns how many tracks were queued.
+    pub fn start_radio(&self, seed: &str, lead: Option<TrackInfo>) -> Result<usize, PluginError> {
+        let res = self.resolver.read().unwrap().clone();
+        let res = res.ok_or(PluginError::NotRunning)?;
+        if !res.has_radio(seed) {
+            return Err(PluginError::Other {
+                code: -32601,
+                message: "radio not supported".into(),
+            });
+        }
+        let mut exclude = vec![seed.to_string()];
+        exclude.extend(lead.iter().map(|l| l.uri.clone()).filter(|u| u != seed));
+        let mut infos: Vec<TrackInfo> = lead.into_iter().collect();
+        infos.extend(res.radio_next(seed, &exclude, RADIO_LIMIT)?);
+        if infos.is_empty() {
+            return Err(PluginError::NotFound);
+        }
+        let n = infos.len();
+        self.play_tracks(infos, 0, PlayContext::None);
+        Ok(n)
     }
 
     /// Display name of the plugin behind a `plugin://` URI.
@@ -907,9 +982,12 @@ impl Controller {
     }
 
     pub fn stop(&self) {
+        // A stop by the user also ends continuous playback.
+        self.pending.lock().unwrap().radio_after = None;
         self.player().stop();
         let mut st = self.lock();
         st.pos_ms = 0;
+        st.radio_pending = false;
     }
 
     pub fn seek_ms(&self, ms: u64) {
@@ -1074,6 +1152,16 @@ impl Controller {
     }
 }
 
+fn new_items(next_id: &AtomicU64, infos: Vec<TrackInfo>) -> Vec<QueueItem> {
+    infos
+        .into_iter()
+        .map(|info| QueueItem {
+            id: next_id.fetch_add(1, Ordering::Relaxed),
+            info,
+        })
+        .collect()
+}
+
 fn save_session_to(state: &Mutex<CtlState>, path: &std::path::Path) {
     let s = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1106,6 +1194,8 @@ struct Bridge {
     pending: Arc<Mutex<Pending>>,
     events: Arc<EventHub>,
     resolver: Arc<RwLock<Option<Arc<dyn Resolver>>>>,
+    next_id: Arc<AtomicU64>,
+    continuous: Arc<AtomicBool>,
 }
 
 /// HTTP statuses after which a resolved URL is resolved once more.
@@ -1179,6 +1269,7 @@ impl Bridge {
             st.pos_ms = 0;
             st.stream_title = None;
             st.resolving = None;
+            st.delivery = None;
             st.dur_ms = st.current_item().map(|q| q.info.duration_ms).unwrap_or(0);
             st.current_item().cloned()
         };
@@ -1236,6 +1327,7 @@ impl Bridge {
                     p.resolved.insert(item.id, res.clone());
                     self.opts_for(&info, p.replaygain)
                 };
+                self.lock_state().delivery = Some(res.delivery);
                 self.player().load_with(&res.url, opts);
                 self.events.publish(CtlEvent::TrackChanged);
             }
@@ -1251,9 +1343,21 @@ impl Bridge {
 
     /// Hand the engine the item that should follow the current one.
     fn rearm(&self) {
-        let want = {
+        let (want, last) = {
             let st = self.lock_state();
-            if st.status == TransportStatus::Stopped {
+            // The current item ends the queue: continuous playback may
+            // follow it.
+            let last = st
+                .current
+                .filter(|&i| {
+                    st.status != TransportStatus::Stopped
+                        && st.repeat == Repeat::Off
+                        && i + 1 == st.queue.len()
+                })
+                .and_then(|i| st.queue.get(i))
+                .filter(|q| !q.info.live && is_plugin_uri(&q.info.uri))
+                .cloned();
+            let want = if st.status == TransportStatus::Stopped {
                 None
             } else {
                 st.current.and_then(|i| {
@@ -1268,8 +1372,12 @@ impl Bridge {
                     };
                     next.cloned()
                 })
-            }
+            };
+            (want, last)
         };
+        if let Some(last) = last {
+            self.maybe_continue(last);
+        }
         // A plugin successor needs its URL first: resolve it (once at a time)
         // and come back here when it is known.
         let want = match want {
@@ -1306,6 +1414,88 @@ impl Bridge {
                 self.player().enqueue_next_with(uri, opts);
             }
             p.armed = want.map(|(id, uri, _)| (id, uri));
+        }
+    }
+
+    /// Continuous playback: ask the plugin of `last` (the last item of the
+    /// queue, playing) for tracks to follow it, once per item.
+    fn maybe_continue(&self, last: QueueItem) {
+        if !self.continuous.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(res) = self.resolver() else { return };
+        if !res.has_radio(&last.info.uri) {
+            return;
+        }
+        {
+            let mut p = self.lock_pending();
+            if p.radio_after == Some(last.id) {
+                return;
+            }
+            p.radio_after = Some(last.id);
+        }
+        self.lock_state().radio_pending = true;
+        let b = self.clone();
+        std::thread::Builder::new()
+            .name("ricercar-radio".into())
+            .spawn(move || b.continue_radio(res, last))
+            .expect("spawn radio");
+    }
+
+    /// `radio.next` off the controller lock, then append what came (tracks
+    /// of the seed's plugin only) and go on playing. Nothing, or an error:
+    /// playback stops at the end of the queue as usual.
+    fn continue_radio(&self, res: Arc<dyn Resolver>, seed: QueueItem) {
+        let plugin = crate::plugin::parse_plugin_uri(&seed.info.uri).map(|p| p.0);
+        let same_plugin = |uri: &str| crate::plugin::parse_plugin_uri(uri).map(|p| p.0) == plugin;
+        let exclude: Vec<String> = {
+            let st = self.lock_state();
+            let mut seen = HashSet::new();
+            st.queue
+                .iter()
+                .rev()
+                .map(|q| q.info.uri.clone())
+                .filter(|u| same_plugin(u) && seen.insert(u.clone()))
+                .take(50)
+                .collect()
+        };
+        let r = res.radio_next(&seed.info.uri, &exclude, RADIO_LIMIT);
+        let infos: Vec<TrackInfo> = match r {
+            Ok(v) => v
+                .into_iter()
+                .filter(|t| same_plugin(&t.uri) && !exclude.contains(&t.uri))
+                .collect(),
+            Err(e) => {
+                tracing::info!("continuous playback after {}: {e}", seed.info.uri);
+                Vec::new()
+            }
+        };
+        let wanted = self.lock_pending().radio_after == Some(seed.id);
+        let start = {
+            let mut st = self.lock_state();
+            st.radio_pending = false;
+            let still_last = st.queue.last().map(|q| q.id) == Some(seed.id)
+                && st.current_item().map(|q| q.id) == Some(seed.id);
+            if !wanted || !still_last || infos.is_empty() {
+                drop(st);
+                self.events.publish(CtlEvent::QueueChanged);
+                return;
+            }
+            let at = st.queue.len();
+            st.queue.extend(new_items(&self.next_id, infos));
+            st.queue_rev += 1;
+            // The seed ended while the plugin was answering.
+            let ended = st.status == TransportStatus::Stopped;
+            if ended {
+                st.current = Some(at);
+            }
+            ended
+        };
+        self.events.publish(CtlEvent::QueueChanged);
+        if start {
+            self.load_current();
+        } else {
+            self.rearm();
         }
     }
 
@@ -1386,11 +1576,15 @@ impl Bridge {
             st.current_item().map(|q| q.id)
         };
         // Resolved URLs are short-lived: keep only the playing one.
-        {
+        let delivery = {
             let mut p = self.lock_pending();
             p.resolved.retain(|id, _| Some(*id) == started_id);
             p.retried.retain(|id| Some(*id) == started_id);
-        }
+            started_id
+                .and_then(|id| p.resolved.get(&id))
+                .map(|r| r.delivery)
+        };
+        self.lock_state().delivery = delivery;
         if let (Some((id, pos)), Some(sid)) = (seek, started_id)
             && id == sid
             && pos > 0
@@ -1644,7 +1838,10 @@ mod tests {
         let p = dir.path().join("session.json");
         let c = ctl();
         c.enable_session(p.clone(), false);
-        c.enqueue((1..=3).map(info).collect(), EnqueueAt::End);
+        let mut items: Vec<TrackInfo> = (1..=3).map(info).collect();
+        items[1].album_ref = Some("album/7".into());
+        items[1].artist_ref = Some("artist/2".into());
+        c.enqueue(items, EnqueueAt::End);
         c.set_repeat(Repeat::One);
         {
             let mut st = c.lock();
@@ -1659,5 +1856,10 @@ mod tests {
         assert_eq!(st.current, Some(2));
         assert_eq!(st.pos_ms, 42_000);
         assert_eq!(st.repeat, Repeat::One);
+        assert_eq!(st.queue[1].info.album_ref.as_deref(), Some("album/7"));
+        assert_eq!(st.queue[1].info.artist_ref.as_deref(), Some("artist/2"));
+        // Sessions saved before these fields still load.
+        let old: TrackInfo = serde_json::from_str(r#"{"uri":"plugin://d/t","title":"x"}"#).unwrap();
+        assert_eq!((old.album_ref, old.artist_ref), (None, None));
     }
 }

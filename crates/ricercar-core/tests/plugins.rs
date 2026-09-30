@@ -515,3 +515,283 @@ fn settings_apply_live_or_restart_the_plugin() {
         serde_json::json!("Bonjour")
     );
 }
+
+#[test]
+fn lyrics_from_the_plugin() {
+    let rig = Rig::new(&["--no-auth"]);
+    let h = &rig.host;
+    assert!(h.status("demo").unwrap().caps.lyrics);
+    let l = h.lyrics_get("demo", "track/1").unwrap();
+    let synced = l.synced.unwrap();
+    assert_eq!(synced.len(), 3);
+    assert!(synced.windows(2).all(|w| w[0].time_ms <= w[1].time_ms));
+    assert!(l.plain.unwrap().starts_with("First light"));
+    let l = h.lyrics_get("demo", "track/2").unwrap();
+    assert!(l.synced.is_none() && l.plain.is_some());
+    assert!(h.lyrics_get("demo", "track/3").unwrap().instrumental);
+    assert_eq!(h.lyrics_get("demo", "track/4"), Err(PluginError::NotFound));
+}
+
+#[test]
+fn contextual_refs_actions_and_favorites() {
+    let rig = Rig::new(&["--no-auth"]);
+    let h = &rig.host;
+    let t = h.item_get("demo", "track/4").unwrap();
+    assert_eq!(t.album_ref.as_deref(), Some("album/2"));
+    assert_eq!(t.artist_ref.as_deref(), Some("artist/1"));
+    assert_eq!(t.label_ref.as_deref(), Some("label/1"));
+    assert_eq!(t.favorite, Some(false));
+    let info = t.to_track_info("demo");
+    assert_eq!(
+        info.plugin_album_ref(),
+        Some(("demo".to_string(), "album/2".to_string()))
+    );
+    assert_eq!(
+        info.plugin_artist_ref(),
+        Some(("demo".to_string(), "artist/1".to_string()))
+    );
+    // The label opens like any browsable ref.
+    assert_eq!(h.browse_list("demo", "label/1", 0, 50).unwrap().0.len(), 2);
+
+    h.favorites_set("demo", "track/4", true).unwrap();
+    assert_eq!(h.item_get("demo", "track/4").unwrap().favorite, Some(true));
+
+    let album = h.item_get("demo", "album/1").unwrap();
+    use ricercar_core::plugin::ActionKind;
+    let kinds: Vec<(&str, ActionKind)> = album
+        .actions
+        .iter()
+        .map(|a| (a.id.as_str(), a.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        [("radio", ActionKind::Play), ("similar", ActionKind::Browse)]
+    );
+    // "play": the tracks under the action's ref, ready to queue.
+    let tracks = h
+        .playable_tracks("demo", &album.actions[0].reference, 500)
+        .unwrap();
+    assert_eq!(
+        tracks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+        ["Blue Hour", "Lanterns"]
+    );
+    assert!(tracks[0].uri.starts_with("plugin://demo/"));
+    // "browse": a page of items.
+    let (similar, _, _) = h
+        .browse_list("demo", &album.actions[1].reference, 0, 50)
+        .unwrap();
+    assert_eq!(similar[0].title, "Night Studies");
+}
+
+#[test]
+fn details_of_artists_and_albums() {
+    let rig = Rig::new(&["--no-auth"]);
+    let d = rig.host.item_details("demo", "artist/1").unwrap();
+    let bio = d.biography.unwrap();
+    assert!(bio.text.contains("Demo Ensemble"));
+    assert_eq!(bio.source.as_deref(), Some("Demo Music"));
+    assert_eq!(d.related.len(), 2);
+    assert_eq!(d.related[0].items.len(), 2);
+    assert_eq!(d.facts[0].label, "Formed");
+    let d = rig.host.item_details("demo", "album/1").unwrap();
+    assert!(d.biography.is_none());
+    assert_eq!(d.related[0].title, "Similar albums");
+    assert_eq!(
+        rig.host.item_details("demo", "nope"),
+        Err(PluginError::NotFound)
+    );
+}
+
+#[test]
+fn playlist_editing() {
+    let rig = Rig::new(&["--no-auth"]);
+    let h = &rig.host;
+    use ricercar_core::plugin::LibraryList;
+    let lists = h.library_all("demo", LibraryList::Playlists, 100).unwrap();
+    assert_eq!(
+        lists.iter().map(|p| p.editable).collect::<Vec<_>>(),
+        [true, false]
+    );
+    // Not the user's: refused without asking the plugin.
+    assert!(matches!(
+        h.playlist_rename("demo", "playlist/2", "Mine now"),
+        Err(PluginError::Other { code: -32602, .. })
+    ));
+    assert!(!rig.log().contains("playlists.rename"));
+
+    let created = h
+        .playlist_create("demo", "  Road trip ", None, Some(false))
+        .unwrap();
+    assert_eq!(created.value.title, "Road trip");
+    assert!(created.value.editable);
+    assert_eq!(created.playlists.as_ref().unwrap().len(), 3);
+    let p = created.value.reference.clone();
+
+    let e = h
+        .playlist_add(
+            "demo",
+            &p,
+            &[
+                "plugin://demo/track%2F1".into(),
+                "plugin://demo/track%2F4".into(),
+            ],
+        )
+        .unwrap();
+    let listed = e.playlists.unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .find(|x| x.reference == p)
+            .unwrap()
+            .track_count,
+        Some(2)
+    );
+    // Tracks of another plugin, or local files, never go in.
+    for bad in ["plugin://other/track%2F1", "file:///music/a.flac"] {
+        assert!(matches!(
+            h.playlist_add("demo", &p, &[bad.to_string()]),
+            Err(PluginError::Other { code: -32602, .. })
+        ));
+    }
+
+    let (tracks, _, _) = h.browse_list("demo", &p, 0, 50).unwrap();
+    let entries: Vec<String> = tracks.iter().map(|t| t.entry_id.clone().unwrap()).collect();
+    assert!(h.playlist_move_supported("demo"));
+    h.playlist_move("demo", &p, &entries[1], 0).unwrap();
+    let (tracks, _, _) = h.browse_list("demo", &p, 0, 50).unwrap();
+    assert_eq!(tracks[0].title, "Blue Hour");
+    h.playlist_remove("demo", &p, &entries[1..]).unwrap();
+    assert_eq!(h.browse_list("demo", &p, 0, 50).unwrap().0.len(), 1);
+    h.playlist_rename("demo", &p, "Road trip II").unwrap();
+    let gone = h.playlist_delete("demo", &p).unwrap();
+    assert_eq!(gone.playlists.unwrap().len(), 2);
+    assert!(rig.wait_log("playlists.delete playlist/3"));
+}
+
+#[test]
+fn playlist_move_can_be_missing() {
+    let rig = Rig::new(&["--no-auth", "--no-move"]);
+    let h = &rig.host;
+    let (tracks, _, _) = h.browse_list("demo", "playlist/1", 0, 50).unwrap();
+    let entry = tracks[0].entry_id.clone().unwrap();
+    assert!(h.playlist_move_supported("demo"));
+    assert!(matches!(
+        h.playlist_move("demo", "playlist/1", &entry, 2),
+        Err(PluginError::Other { code: -32601, .. })
+    ));
+    assert!(!h.playlist_move_supported("demo"));
+}
+
+#[test]
+fn resolve_carries_the_delivery() {
+    use ricercar_core::plugin::{Delivery, Purpose};
+    let rig = Rig::new(&["--no-auth"]);
+    let direct = rig
+        .host
+        .resolve("plugin://demo/track%2F1", Purpose::Play)
+        .unwrap();
+    assert_eq!(direct.delivery, Delivery::Direct);
+    let relayed = rig
+        .host
+        .resolve("plugin://demo/track%2F4", Purpose::Play)
+        .unwrap();
+    assert_eq!(relayed.delivery, Delivery::Proxied);
+    let ctl = rig.controller();
+    ctl.play_tracks(rig.tracks("album/2")[..1].to_vec(), 0, PlayContext::None);
+    assert!(rig.wait_log("playback.started track/4"), "{}", rig.log());
+    assert!(wait(5, || ctl.lock().delivery == Some(Delivery::Proxied)));
+}
+
+fn continuous_rig(args: &[&str], on: bool) -> (Rig, Arc<Controller>) {
+    let rig = Rig::new(args);
+    let ctl = rig.controller();
+    ctl.set_continuous(on);
+    (rig, ctl)
+}
+
+#[test]
+fn queue_end_stops_without_continuous_playback() {
+    let (rig, ctl) = continuous_rig(&["--no-auth"], false);
+    ctl.play_tracks(rig.tracks("album/1")[2..].to_vec(), 0, PlayContext::None);
+    assert!(rig.wait_log("playback.ended track/3"), "{}", rig.log());
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!rig.log().contains("radio.next"));
+    assert_eq!(ctl.lock().queue.len(), 1);
+}
+
+#[test]
+fn continuous_playback_appends_and_plays() {
+    let (rig, ctl) = continuous_rig(&["--no-auth"], true);
+    ctl.play_tracks(rig.tracks("album/1")[2..].to_vec(), 0, PlayContext::None);
+    assert!(
+        rig.wait_log("radio.next track/3 exclude=track/3 limit=20"),
+        "{}",
+        rig.log()
+    );
+    // Track 1 comes after track 3, played without a gap.
+    assert!(rig.wait_log("playback.started track/1"), "{}", rig.log());
+    let st = ctl.lock();
+    assert_eq!(st.queue.len(), 5);
+    assert!(
+        st.queue
+            .iter()
+            .all(|q| q.info.uri.starts_with("plugin://demo/"))
+    );
+}
+
+#[test]
+fn continuous_playback_stops_on_error() {
+    let (rig, ctl) = continuous_rig(&["--no-auth", "--radio-fail"], true);
+    ctl.play_tracks(rig.tracks("album/1")[2..].to_vec(), 0, PlayContext::None);
+    assert!(rig.wait_log("playback.ended track/3"), "{}", rig.log());
+    assert_eq!(rig.log().matches("radio.next").count(), 1);
+    assert_eq!(ctl.lock().queue.len(), 1);
+    assert!(!ctl.lock().radio_pending);
+}
+
+#[test]
+fn continuous_playback_never_follows_a_local_track() {
+    let (rig, ctl) = continuous_rig(&["--no-auth"], true);
+    let file = rig.dir.path().join("local.flac");
+    ricercar_core::synth::write_flac(
+        &file,
+        &ricercar_core::meta::TagInfo {
+            title: Some("Local".into()),
+            sample_rate: Some(44_100),
+            bits: Some(16),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut list = rig.tracks("album/1")[..1].to_vec();
+    list.push(TrackInfo::from_uri(&ricercar_core::meta::file_uri(&file)));
+    let events = ctl.subscribe();
+    ctl.play_tracks(list, 0, PlayContext::None);
+    assert!(rig.wait_log("playback.ended track/1"), "{}", rig.log());
+    // The local track plays, then the queue ends.
+    assert!(wait(10, || events.try_iter().any(|e| matches!(
+        e,
+        ricercar_core::CtlEvent::StatusChanged(ricercar_audio::TransportStatus::Stopped)
+    )) && ctl.lock().current == Some(1)));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!rig.log().contains("radio.next"), "{}", rig.log());
+    assert_eq!(ctl.lock().queue.len(), 2);
+}
+
+#[test]
+fn radio_from_an_item() {
+    let rig = Rig::new(&["--no-auth"]);
+    let ctl = rig.controller();
+    let lead = rig.tracks("album/2")[..1].to_vec().pop();
+    let n = ctl.start_radio("plugin://demo/track%2F4", lead).unwrap();
+    assert_eq!(n, 5);
+    assert!(
+        rig.wait_log("radio.next track/4 exclude=track/4 limit=20"),
+        "{}",
+        rig.log()
+    );
+    assert_eq!(ctl.lock().queue[0].info.title, "Blue Hour");
+    assert!(rig.wait_log("playback.started track/4"));
+    // An album seeds too.
+    assert_eq!(ctl.start_radio("plugin://demo/album%2F1", None).unwrap(), 2);
+}

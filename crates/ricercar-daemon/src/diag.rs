@@ -81,7 +81,7 @@ pub fn kernel() -> String {
 }
 
 impl AppContext {
-    /// One line per declared plugin: state, version, sign-in.
+    /// One line per declared plugin: state, version, sign-in, capabilities.
     pub fn plugins_report(&self) -> String {
         use ricercar_core::plugin::RunState;
         let list = self.plugins.statuses();
@@ -101,7 +101,16 @@ impl AppContext {
                     Some(a) => format!(" · {:?}", a.state),
                     None => String::new(),
                 };
-                format!("- {} ({} {}) · {state}{auth}", s.id, s.name, s.version)
+                let caps = s.caps.names();
+                let caps = if caps.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · capabilities: {}", caps.join(", "))
+                };
+                format!(
+                    "- {} ({} {}) · {state}{auth}{caps}",
+                    s.id, s.name, s.version
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")

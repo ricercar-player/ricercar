@@ -193,7 +193,7 @@ pub fn load_albums(ui: &Rc<Ui>) {
         });
         enum Entry {
             Local(ricercar_core::Album),
-            Plugin(String, String, ricercar_core::plugin::Item),
+            Plugin(String, String, Box<ricercar_core::plugin::Item>),
         }
         let key = |e: &Entry| match e {
             Entry::Local(a) => album_key(sort, &a.title, &a.artist, a.year, a.added_at),
@@ -209,7 +209,7 @@ pub fn load_albums(ui: &Rc<Ui>) {
             albums.into_iter().map(Entry::Local).collect(),
             extra
                 .into_iter()
-                .map(|(id, name, it)| Entry::Plugin(id, name, it))
+                .map(|(id, name, it)| Entry::Plugin(id, name, Box::new(it)))
                 .collect(),
             key,
         )

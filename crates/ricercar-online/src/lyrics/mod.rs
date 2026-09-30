@@ -3,7 +3,7 @@
 mod cache;
 pub mod lrclib;
 
-pub use cache::{CacheLookup, LyricsCache, NEGATIVE_TTL_SECS};
+pub use cache::{CacheLookup, LyricsCache, NEGATIVE_TTL_SECS, PLUGIN_NEGATIVE_TTL_SECS};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub struct LyricLine {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LyricsSource {
     Lrclib,
@@ -23,6 +23,8 @@ pub enum LyricsSource {
     Embedded,
     /// A `.lrc` file next to the audio file.
     Sidecar,
+    /// The source plugin of a `plugin://` track (its id).
+    Plugin(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +113,65 @@ pub fn fetch_cached(
         tracing::warn!(error = %e, "failed to cache lyrics");
     }
     Ok(found)
+}
+
+/// What a source plugin answered for a track's lyrics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginAnswer {
+    /// Its lyrics (`source` should be [`LyricsSource::Plugin`]).
+    Found(Lyrics),
+    /// The plugin has none (`not_found`): cached for a while.
+    NotFound,
+    /// Error, timeout, plugin not running: not cached.
+    Failed,
+}
+
+/// The LRCLIB lookup of a track (see [`fetch_cached`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LrclibQuery {
+    pub artist: String,
+    pub title: String,
+    pub album: Option<String>,
+    pub duration_s: Option<u32>,
+}
+
+/// Lyrics of a track that comes from a source plugin (`uri` is its
+/// `plugin://` URI): first the plugin, through `ask` (pass `None` when the
+/// plugin does not declare `lyrics`), cached under the URI, "not found"
+/// included for [`PLUGIN_NEGATIVE_TTL_SECS`]; then LRCLIB when `lrclib` is
+/// given (the user allows it and the track has an artist). This crate knows
+/// nothing of plugins: the caller does the asking.
+pub fn fetch_for_plugin_track(
+    cache: &LyricsCache,
+    uri: &str,
+    ask: Option<&mut dyn FnMut() -> PluginAnswer>,
+    lrclib: Option<&LrclibQuery>,
+) -> Result<Option<Lyrics>> {
+    if let Some(ask) = ask {
+        let key = LyricsCache::uri_key(uri);
+        match cache.lookup(&key) {
+            CacheLookup::Hit(l) => return Ok(Some(l)),
+            CacheLookup::KnownMissing => {}
+            CacheLookup::Miss => match ask() {
+                PluginAnswer::Found(l) => {
+                    if let Err(e) = cache.store(&key, Some(&l)) {
+                        tracing::warn!(error = %e, "failed to cache lyrics");
+                    }
+                    return Ok(Some(l));
+                }
+                PluginAnswer::NotFound => {
+                    if let Err(e) = cache.store_missing_for(&key, PLUGIN_NEGATIVE_TTL_SECS) {
+                        tracing::warn!(error = %e, "failed to cache lyrics");
+                    }
+                }
+                PluginAnswer::Failed => {}
+            },
+        }
+    }
+    match lrclib {
+        Some(q) => fetch_cached(cache, &q.artist, &q.title, q.album.as_deref(), q.duration_s),
+        None => Ok(None),
+    }
 }
 
 fn parse_timestamp(tag: &str) -> Option<u64> {
@@ -312,6 +373,61 @@ mod tests {
         assert_eq!(line_at(&lines, 4_999), Some(2));
         assert_eq!(line_at(&lines, 60_000), Some(3));
         assert_eq!(line_at(&[], 1_000), None);
+    }
+
+    #[test]
+    fn plugin_first_then_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LyricsCache::new(dir.path());
+        let uri = "plugin://demo/track%2F1";
+        let found = Lyrics {
+            synced: None,
+            plain: Some("la".into()),
+            source: LyricsSource::Plugin("demo".into()),
+            instrumental: false,
+        };
+        let mut asked = 0;
+        let mut ask = || {
+            asked += 1;
+            PluginAnswer::Found(found.clone())
+        };
+        let got = fetch_for_plugin_track(&cache, uri, Some(&mut ask), None).unwrap();
+        assert_eq!(got.as_ref(), Some(&found));
+        let got = fetch_for_plugin_track(&cache, uri, Some(&mut ask), None).unwrap();
+        assert_eq!(got, Some(found));
+        assert_eq!(asked, 1, "the second answer comes from the cache");
+
+        let other = "plugin://demo/track%2F2";
+        let mut asked = 0;
+        let mut ask = || {
+            asked += 1;
+            PluginAnswer::NotFound
+        };
+        assert_eq!(
+            fetch_for_plugin_track(&cache, other, Some(&mut ask), None).unwrap(),
+            None
+        );
+        assert_eq!(
+            fetch_for_plugin_track(&cache, other, Some(&mut ask), None).unwrap(),
+            None
+        );
+        assert_eq!(asked, 1, "not found is cached");
+        let mut failing = || PluginAnswer::Failed;
+        let third = "plugin://demo/track%2F3";
+        fetch_for_plugin_track(&cache, third, Some(&mut failing), None).unwrap();
+        assert_eq!(
+            cache.lookup(&LyricsCache::uri_key(third)),
+            CacheLookup::Miss,
+            "errors are not cached"
+        );
+    }
+
+    #[test]
+    fn plugin_source_serde() {
+        let s = LyricsSource::Plugin("demo".into());
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(json, r#"{"plugin":"demo"}"#);
+        assert_eq!(serde_json::from_str::<LyricsSource>(&json).unwrap(), s);
     }
 
     #[test]

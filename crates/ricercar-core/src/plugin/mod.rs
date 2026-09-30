@@ -3,6 +3,7 @@
 //! The host never contains service-specific code or credentials.
 
 pub mod catalog;
+mod content;
 mod host;
 mod rpc;
 pub mod settings;
@@ -11,7 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::controller::TrackInfo;
 
-pub use host::{PluginHost, PluginStatus, RunState};
+pub use content::{
+    Biography, Fact, ItemDetails, LyricLine, MAX_BIOGRAPHY, MAX_FACTS, MAX_LYRIC_LINES,
+    MAX_SHELF_ITEMS, MAX_SHELVES, PluginLyrics, Shelf,
+};
+pub use host::{PlaylistEdited, PluginHost, PluginStatus, RADIO_LIMIT, RunState, TRACKS_MAX};
 
 /// Protocol version spoken by this host.
 pub const PROTOCOL: u32 = 1;
@@ -42,7 +47,55 @@ pub struct Capabilities {
     pub remote_control: bool,
     /// Albums, artists and tracks join the host's own pages.
     pub library: bool,
+    /// `lyrics.get`.
+    pub lyrics: bool,
+    /// `playlists.create`, `.rename`, `.delete`, `.add`, `.remove` (and
+    /// optionally `.move`).
+    pub playlist_edit: bool,
+    /// `item.details`.
+    pub details: bool,
+    /// `radio.next`.
+    pub radio: bool,
 }
+
+impl Capabilities {
+    /// Names of the capabilities declared, in protocol order.
+    pub fn names(&self) -> Vec<&'static str> {
+        [
+            ("auth", self.auth),
+            ("browse", self.browse),
+            ("search", self.search),
+            ("resolve", self.resolve),
+            ("favorites", self.favorites),
+            ("reporting", self.reporting),
+            ("remote_control", self.remote_control),
+            ("library", self.library),
+            ("lyrics", self.lyrics),
+            ("playlist_edit", self.playlist_edit),
+            ("details", self.details),
+            ("radio", self.radio),
+        ]
+        .into_iter()
+        .filter_map(|(n, on)| on.then_some(n))
+        .collect()
+    }
+}
+
+/// Every capability name of protocol 1.
+pub const CAPABILITY_NAMES: [&str; 12] = [
+    "auth",
+    "browse",
+    "search",
+    "resolve",
+    "favorites",
+    "reporting",
+    "remote_control",
+    "library",
+    "lyrics",
+    "playlist_edit",
+    "details",
+    "radio",
+];
 
 /// The lists of the `library` capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -151,10 +204,85 @@ pub struct Item {
     pub format: Option<Format>,
     pub playable: Option<bool>,
     pub browsable: Option<bool>,
+    /// Tracks: their album, to open in the generic browse page.
+    pub album_ref: Option<String>,
+    /// Tracks and albums: their artist.
+    pub artist_ref: Option<String>,
+    /// Albums and tracks: their label or publisher.
+    pub label_ref: Option<String>,
+    /// Related content offered in the item's menu (at most
+    /// [`MAX_ACTIONS`], invalid entries dropped).
+    #[serde(deserialize_with = "lenient_actions")]
+    pub actions: Vec<Action>,
+    /// In the user's favourites on the service; `None`: unknown.
+    pub favorite: Option<bool>,
+    /// Tracks listed by a playlist's `browse.list`: the entry in that
+    /// playlist (a track may appear twice), for `playlists.remove` and
+    /// `playlists.move`.
+    pub entry_id: Option<String>,
+    /// Playlists: the user may edit it (`playlist_edit`).
+    pub editable: bool,
 }
 
 /// Longest `ref` accepted from a plugin.
 pub const MAX_REF: usize = 1024;
+/// Most actions kept per item.
+pub const MAX_ACTIONS: usize = 8;
+const MAX_ACTION_ID: usize = 64;
+const MAX_ACTION_LABEL: usize = 80;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionKind {
+    /// Play the tracks of `browse.list(ref)`.
+    #[default]
+    Play,
+    /// Open `ref` in the generic browse page.
+    Browse,
+}
+
+/// An entry of `Item.actions`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Action {
+    pub id: String,
+    /// Short text, in the host's locale; plain text.
+    pub label: String,
+    #[serde(rename = "ref")]
+    pub reference: String,
+    pub kind: ActionKind,
+}
+
+impl Action {
+    fn valid(&self) -> bool {
+        let id = self.id.trim();
+        let label = self.label.trim();
+        !id.is_empty()
+            && id.chars().count() <= MAX_ACTION_ID
+            && !label.is_empty()
+            && label.chars().count() <= MAX_ACTION_LABEL
+            && valid_ref(&self.reference)
+    }
+}
+
+/// Actions that parse and pass the checks, up to [`MAX_ACTIONS`].
+fn lenient_actions<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Action>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.as_ref()
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| serde_json::from_value::<Action>(x.clone()).ok())
+                .filter(Action::valid)
+                .take(MAX_ACTIONS)
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// A ref the host accepts: not empty, at most [`MAX_REF`] bytes.
+pub fn valid_ref(r: &str) -> bool {
+    !r.is_empty() && r.len() <= MAX_REF
+}
 
 impl Item {
     pub fn is_playable(&self) -> bool {
@@ -164,6 +292,20 @@ impl Item {
     pub fn is_browsable(&self) -> bool {
         self.browsable
             .unwrap_or(!matches!(self.kind, ItemKind::Track))
+    }
+
+    /// Drop optional refs that are empty or too long; an `entry_id` too.
+    pub(crate) fn sanitize(&mut self) {
+        for r in [
+            &mut self.album_ref,
+            &mut self.artist_ref,
+            &mut self.label_ref,
+            &mut self.entry_id,
+        ] {
+            if r.as_deref().is_some_and(|x| !valid_ref(x)) {
+                *r = None;
+            }
+        }
     }
 
     /// Queue entry for a track item of plugin `id`.
@@ -188,8 +330,33 @@ impl Item {
             sample_rate: f.sample_rate,
             bits: f.bits,
             codec: f.codec.map(|c| c.to_uppercase()),
+            album_ref: self.album_ref.clone(),
+            artist_ref: self.artist_ref.clone(),
             ..Default::default()
         }
+    }
+}
+
+/// How the URL of `track.resolve` delivers the stream.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Delivery {
+    /// Straight from where the service serves it.
+    #[default]
+    Direct,
+    /// Relayed by the plugin itself (for example on 127.0.0.1), the
+    /// original codec delivered unchanged.
+    Proxied,
+}
+
+/// Unknown values read as `direct`.
+impl<'de> Deserialize<'de> for Delivery {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Option::<serde_json::Value>::deserialize(d)?;
+        Ok(match v.as_ref().and_then(serde_json::Value::as_str) {
+            Some("proxied") => Delivery::Proxied,
+            _ => Delivery::Direct,
+        })
     }
 }
 
@@ -203,6 +370,7 @@ pub struct Resolved {
     pub format: Option<Format>,
     pub replaygain: Option<ReplayGainInfo>,
     pub live: bool,
+    pub delivery: Delivery,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -301,6 +469,38 @@ pub trait Resolver: Send + Sync {
     fn resolve(&self, uri: &str, purpose: Purpose) -> Result<Resolved, PluginError>;
     /// Display name of the plugin behind a URI.
     fn plugin_name(&self, uri: &str) -> Option<String>;
+    /// The plugin behind `uri` runs and declares `radio`.
+    fn has_radio(&self, _uri: &str) -> bool {
+        false
+    }
+    /// `radio.next` seeded by `seed` (a `plugin://` URI): playable tracks
+    /// of the seed's plugin only. `exclude`: `plugin://` URIs, those of
+    /// other plugins are left out.
+    fn radio_next(
+        &self,
+        _seed: &str,
+        _exclude: &[String],
+        _limit: usize,
+    ) -> Result<Vec<TrackInfo>, PluginError> {
+        Err(PluginError::NotRunning)
+    }
+}
+
+/// Items of a JSON array; entries that do not parse, or with a missing or
+/// oversized ref, are dropped.
+pub(crate) fn items_of(v: Option<&serde_json::Value>) -> Vec<Item> {
+    v.and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value::<Item>(i.clone()).ok())
+                .filter(|i| valid_ref(&i.reference))
+                .map(|mut i| {
+                    i.sanitize();
+                    i
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- URIs
@@ -376,6 +576,67 @@ mod tests {
         let art: Item =
             serde_json::from_str(r#"{"ref":"t","title":"X","art":"file:///etc/passwd"}"#).unwrap();
         assert_eq!(art.to_track_info("d").cover, None);
+    }
+
+    #[test]
+    fn optional_fields_are_checked() {
+        let long = "x".repeat(MAX_REF + 1);
+        let mut actions: Vec<serde_json::Value> = (0..12)
+            .map(|i| serde_json::json!({"id": format!("a{i}"), "label": "L", "ref": "r", "kind": "play"}))
+            .collect();
+        actions.insert(
+            0,
+            serde_json::json!({"id": "x", "label": "L", "ref": "r", "kind": "fly"}),
+        );
+        actions.insert(
+            0,
+            serde_json::json!({"id": "x", "label": " ", "ref": "r", "kind": "browse"}),
+        );
+        actions.insert(
+            0,
+            serde_json::json!({"id": "x", "label": "L", "ref": long, "kind": "browse"}),
+        );
+        let items = items_of(Some(&serde_json::json!([{
+            "ref": "t", "title": "T", "album_ref": "album/1", "artist_ref": "",
+            "label_ref": long, "favorite": true, "actions": actions, "entry_id": "e1"
+        }, {"ref": "p", "kind": "playlist", "title": "P", "editable": true, "actions": "nope"}])));
+        let t = &items[0];
+        assert_eq!(t.album_ref.as_deref(), Some("album/1"));
+        assert_eq!(
+            (t.artist_ref.as_deref(), t.label_ref.as_deref()),
+            (None, None)
+        );
+        assert_eq!(t.favorite, Some(true));
+        assert_eq!(t.entry_id.as_deref(), Some("e1"));
+        assert_eq!(t.actions.len(), MAX_ACTIONS);
+        assert_eq!(t.actions[0].id, "a0");
+        assert!(items[1].editable && items[1].actions.is_empty());
+        let info = t.to_track_info("demo");
+        assert_eq!(
+            info.plugin_album_ref(),
+            Some(("demo".into(), "album/1".into()))
+        );
+        assert_eq!(info.plugin_artist_ref(), None);
+    }
+
+    #[test]
+    fn delivery_defaults_to_direct() {
+        let r: Resolved = serde_json::from_str(r#"{"url":"http://x"}"#).unwrap();
+        assert_eq!(r.delivery, Delivery::Direct);
+        let r: Resolved =
+            serde_json::from_str(r#"{"url":"http://x","delivery":"proxied"}"#).unwrap();
+        assert_eq!(r.delivery, Delivery::Proxied);
+        let r: Resolved =
+            serde_json::from_str(r#"{"url":"http://x","delivery":"teleported"}"#).unwrap();
+        assert_eq!(r.delivery, Delivery::Direct);
+    }
+
+    #[test]
+    fn capability_names() {
+        let c: Capabilities =
+            serde_json::from_str(r#"{"browse":true,"lyrics":true,"radio":true}"#).unwrap();
+        assert_eq!(c.names(), ["browse", "lyrics", "radio"]);
+        assert!(c.names().iter().all(|n| CAPABILITY_NAMES.contains(n)));
     }
 
     #[test]

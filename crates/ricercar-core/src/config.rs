@@ -58,6 +58,9 @@ pub struct AudioConfig {
     pub preamp_db: f32,
     /// Resume the previous queue/position at startup (paused).
     pub restore_session: bool,
+    /// When the queue ends on a track of a plugin that declares `radio`,
+    /// go on with tracks the plugin suggests (docs/plugins.md).
+    pub continuous_playback: bool,
 }
 
 impl Default for AudioConfig {
@@ -67,6 +70,7 @@ impl Default for AudioConfig {
             replaygain: ReplayGain::Off,
             preamp_db: 0.0,
             restore_session: true,
+            continuous_playback: false,
         }
     }
 }

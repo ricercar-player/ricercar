@@ -13,6 +13,7 @@ use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
 pub mod diag;
 pub mod logging;
+pub mod lyrics;
 mod scrobble;
 
 /// Up, non-loopback IPv4 interfaces (name, address) the UPnP services can
@@ -370,6 +371,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         config::cache_dir(),
     );
     ctl.set_resolver(Arc::new(plugins.clone()));
+    ctl.set_continuous(cfg.audio.continuous_playback);
     plugins.attach(&ctl);
     plugins.set_output(output_info(&cfg.audio.device, None));
     plugins.reconcile(&cfg.plugins);
@@ -592,6 +594,7 @@ impl AppContext {
             self.plugins
                 .set_output(output_info(&cfg.audio.device, None));
         }
+        self.ctl.set_continuous(cfg.audio.continuous_playback);
         if old_plugins != cfg.plugins {
             self.apply_plugins();
         }
