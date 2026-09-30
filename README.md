@@ -70,7 +70,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - FLAC · ALAC · WAV · AIFF · AAC · MP3 · Ogg Vorbis
 - Hardware pause, device hot-switch, clean stop on unplug
 - ReplayGain (track / album / auto) with peak protection (off by default)
-- Seekable HTTP streams, internet radio with live titles
+- HTTP streams seek at once with Range requests (sequential fallback);
+  internet radio with live titles
 
 </td>
 <td width="50%" valign="top">
@@ -82,7 +83,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Favorites, play counts, history, most played
 - Playlists with M3U / M3U8 import & export
 - Covers: embedded, folder images, or Cover Art Archive
-- Synced lyrics from `.lrc` files, tags or lrclib.net
+- Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net
 
 </td>
 </tr>
@@ -95,8 +96,9 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Full-screen now playing with synced, clickable lyrics
 - Colours that follow the playing album cover
 - Queue drawer with drag-to-reorder, context menus everywhere
-- Dark & light themes, 7 accents, English & French
-- Keyboard shortcuts, notifications, tray icon
+- Dark & light themes, 7 accents, six languages
+- Keyboard shortcuts and full keyboard navigation (focus rings,
+  Space/Enter, arrows on sliders), notifications, tray icon
 - Diagnostic report and rotating log for compatibility reports
 - Remembers your queue and position, and reopens as you left it (window
   size, page, sorts)
@@ -107,18 +109,25 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 ### Network & integration
 - **UPnP AV MediaRenderer + OpenHome** (Product, Playlist, Info, Time, Volume) on one device
 - **UPnP MediaServer**: browse your library from any DLNA app
+- **Choice of network interface**: announce and serve on one interface
+  only (VPN, Docker, virtual machines)
 - **MPRIS**: media keys, desktop widgets, `playerctl`
 - **Scrobbling** to ListenBrainz & Last.fm (offline queue)
 - **Source plugins**: catalogues from third-party programs, installed from
   the [community hub](https://github.com/ricercar-player/ricercar-plugins) or
   declared by hand (browse, search, sign-in in your browser); their albums,
-  artists and tracks join your library pages and search; plugins can
-  declare their own settings; playback stays bit-perfect
+  artists and tracks join your library pages and search; playback stays
+  bit-perfect. Plugins can also bring their own settings (gear button on
+  the Plugins page), lyrics, favourites, "Go to album / artist / label",
+  extra menu actions, playlists you edit on the service, artist biographies
+  and related shelves, and radios, with optional continuous playback when
+  the queue ends (off by default)
 - **Updates**: a new release or plugin update is shown in the app; Settings →
   About checks on demand and installs the new release (AppImage, or the
   .deb / .rpm / pacman package through your password prompt), checked
   against its SHA256SUMS, itself signed with the project's minisign key
-- **English and French** interface, chosen in Settings or from the system
+- **English, French, German, Spanish, Italian and Japanese** interface,
+  chosen in Settings or from the system; plugins get the same language
 - `ricercar-cli` remote and a headless daemon for a dedicated audio box
 
 </td>
@@ -197,6 +206,9 @@ Arch, build it from source with `dist/arch/PKGBUILD`):
 | Arch, Manjaro, EndeavourOS, CachyOS, Omarchy | `.pkg.tar.zst` | `sudo pacman -U ricercar-*.pkg.tar.zst` |
 | Anything else | `.AppImage` | `chmod +x ricercar-*.AppImage && ./ricercar-*.AppImage` |
 
+Packages need glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36,
+RHEL 10 and later).
+
 To check a download, verify the signed checksum list with
 [minisign](https://jedisct1.github.io/minisign/) and the key in
 [`dist/minisign.pub`](dist/minisign.pub), then the file itself:
@@ -212,7 +224,7 @@ sha256sum --check --ignore-missing SHA256SUMS
 <summary><b>Arch / Manjaro / Omarchy</b></summary>
 
 ```sh
-sudo pacman -S --needed rust alsa-lib fontconfig libxkbcommon
+sudo pacman -S --needed rust clang alsa-lib fontconfig libxkbcommon
 git clone https://github.com/ricercar-player/ricercar && cd ricercar
 cargo build --release
 ```
@@ -224,7 +236,8 @@ Or build the package: `cd dist/arch && makepkg -si`.
 <summary><b>Debian / Ubuntu</b></summary>
 
 ```sh
-sudo apt install cargo libasound2-dev libfontconfig1-dev libxkbcommon-dev pkg-config
+# the distribution's cargo is too old: install Rust 1.92+ with https://rustup.rs
+sudo apt install libasound2-dev libfontconfig1-dev libxkbcommon-dev pkg-config clang libclang-dev
 git clone https://github.com/ricercar-player/ricercar && cd ricercar
 cargo build --release
 ```
@@ -234,7 +247,7 @@ cargo build --release
 <summary><b>Fedora</b></summary>
 
 ```sh
-sudo dnf install cargo alsa-lib-devel fontconfig-devel libxkbcommon-devel
+sudo dnf install cargo clang alsa-lib-devel fontconfig-devel libxkbcommon-devel
 git clone https://github.com/ricercar-player/ricercar && cd ricercar
 cargo build --release
 ```
@@ -323,7 +336,7 @@ Phone app doesn't see ricercar, or sees it at a strange address? On machines
 with a VPN, Docker or virtual machines, ricercar is announced on every
 interface. Pick your home network under **Settings → Network → Network
 interface** (or `interface = "eth0"` in `[network]`, `--interface eth0` on
-the daemon): ricercar then listens and announces there only. If that
+the command line): ricercar then listens and announces there only. If that
 interface goes away (cable unplugged, Wi-Fi down), sharing pauses and comes
 back on its own when the interface has an address again.
 
@@ -358,10 +371,14 @@ container.
 
 | Keys | Action | | Keys | Action |
 |---|---|---|---|---|
-| <kbd>Space</kbd> | Play / pause | | <kbd>Ctrl</kbd> <kbd>F</kbd> | Search |
+| <kbd>Space</kbd> | Play / pause | | <kbd>Ctrl</kbd> <kbd>F</kbd> or <kbd>Ctrl</kbd> <kbd>K</kbd> | Search |
 | <kbd>Ctrl</kbd> <kbd>→</kbd> / <kbd>←</kbd> | Next / previous | | <kbd>Ctrl</kbd> <kbd>L</kbd> | Now playing & lyrics |
 | <kbd>→</kbd> / <kbd>←</kbd> | Seek ± 10 s | | <kbd>Ctrl</kbd> <kbd>Q</kbd> | Queue |
-| <kbd>Ctrl</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> | Volume | | <kbd>Esc</kbd> | Close panel |
+| <kbd>Ctrl</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> | Volume | | <kbd>Alt</kbd> <kbd>←</kbd> | Back |
+| | | | <kbd>Esc</kbd> | Close menu / panel |
+
+<kbd>Tab</kbd> moves between controls, <kbd>Space</kbd> or <kbd>Enter</kbd>
+activates, and the arrows adjust sliders and choices.
 
 ## ⚙️ Configuration
 
@@ -375,6 +392,7 @@ device = "hw:1,0"          # see --print-devices
 replaygain = "off"         # off | track | album | auto
 preamp_db = 0.0
 restore_session = true
+continuous_playback = false  # more tracks from a plugin radio when the queue ends
 
 [library]
 roots = ["/home/me/Music", "/mnt/nas/flac"]
@@ -390,17 +408,28 @@ interface = "eth0"         # serve on this interface only; omit for all
 theme = "dark"             # dark | light
 accent = "#d4a35a"
 adaptive_colors = true     # tint the UI from the album cover
+notifications = true
 tray = true
 close_to_tray = false
+language = ""              # en, fr, de, es, it, ja; empty follows the system
 
 [scrobble]
 listenbrainz_token = ""
-lastfm_api_key = ""        # your own Last.fm API account
+lastfm_api_key = ""        # your own Last.fm API account…
+lastfm_secret = ""         # …and its secret (the sign-in fills the session)
 
 [online]
 lyrics = true              # lrclib.net when no local lyrics exist
 cover_art = true           # MusicBrainz / Cover Art Archive for missing covers
-radio = true
+radio = true               # Radio Browser directory (Radio page)
+plugin_catalog = true      # community plugin catalogue (GitHub)
+updates = true             # new release and plugin updates, once a day
+
+[[plugins]]                # one table per plugin, see docs/plugins.md
+id = "example"
+command = "/usr/local/bin/example-plugin"
+enabled = true
+[plugins.settings]         # values of the settings the plugin declares
 ```
 
 <details>
@@ -411,6 +440,7 @@ ricercar [FILE|URI]... [--headless] [--config FILE] [--device NAME] [--name NAME
          [--db PATH] [--library DIR]... [--interface IFACE] [--no-mpris] [--no-upnp]
          [--no-session]
 ricercar --print-devices
+ricercar --help | --version       # ricercar-daemon takes the same flags
 
 ricercar-cli status | play | pause | toggle | stop | next | prev
 ricercar-cli open FILE|URI      seek ±SECONDS      volume [0..1]
@@ -429,11 +459,12 @@ running hands the file to the running instance.
 | `~/.config/ricercar/config.toml` | settings |
 | `~/.local/share/ricercar/library.db` | library index, stats, playlists |
 | `~/.local/share/ricercar/session.json` | queue & position |
+| `~/.local/share/ricercar/radio.json` | saved radio stations |
 | `~/.local/share/ricercar/ui-state.json` | window size, last page, sorts, DAC capabilities |
 | `~/.local/state/ricercar/ricercar.log` | log (3 × 2 MB, rotated) |
 | `~/.local/share/ricercar/plugins/<id>/` | a plugin's own data (ricercar never reads it) |
 | `~/.local/share/ricercar/plugin-bin/<id>/` | plugins installed from the hub |
-| `~/.cache/ricercar/` | cover thumbnails, lyrics, stream spool |
+| `~/.cache/ricercar/` | cover thumbnails, lyrics, stream spool, update check (`update.json`), plugin caches (`plugins/<id>/`) |
 </details>
 
 ## 🔒 Privacy
@@ -444,7 +475,7 @@ ricercar works fully offline. Its optional online features contact only:
 |---|---|---|
 | lrclib.net | synced lyrics | Settings → Online extras |
 | MusicBrainz / Cover Art Archive | missing album covers | Settings → Online extras |
-| Radio Browser | the Radio page | opening the page |
+| Radio Browser | the Radio page | opening the Radio page · `radio = false` in `[online]` |
 | ListenBrainz / Last.fm | scrobbling | only with your own credentials |
 | GitHub (raw.githubusercontent.com) | community plugin catalogue | opening the Plugins page · Settings → Online extras |
 | a plugin author's download host | the plugin binary | only when you click Install or Update |
@@ -453,16 +484,18 @@ ricercar works fully offline. Its optional online features contact only:
 
 No telemetry, no account, and never a streaming-service API in ricercar
 itself. Plugins you declare are separate programs: what they contact is up
-to them.
+to them. ricercar tells them the interface language, so they can translate
+their pages, and, only for plugins that ask for it, what you play (see
+their settings to turn that off).
 
 ## 🏗️ Architecture
 
 ```mermaid
 flowchart TB
     ui["ricercar-ui<br/><sub>Slint desktop app</sub>"]
-    daemon["ricercar-daemon<br/><sub>startup · scrobbler · headless</sub>"]
+    daemon["ricercar-daemon<br/><sub>startup · scrobbler · plugin lyrics · headless</sub>"]
     cli["ricercar-cli"]
-    core["ricercar-core<br/><sub>library · queue controller · covers · config</sub>"]
+    core["ricercar-core<br/><sub>library · queue controller · covers · config · plugin host · updater</sub>"]
     audio["ricercar-audio<br/><sub>symphonia decode · ALSA sink · engine</sub>"]
     upnp["ricercar-upnp<br/><sub>SSDP · AVTransport · OpenHome · ContentDirectory</sub>"]
     mpris["ricercar-mpris"]
@@ -478,21 +511,21 @@ flowchart TB
 
 | crate | role |
 |---|---|
-| [`ricercar-audio`](crates/ricercar-audio) | decode + sink pipeline, engine thread, HTTP spooling |
-| [`ricercar-core`](crates/ricercar-core) | SQLite/FTS5 library, tags, covers, queue controller, config |
-| [`ricercar-upnp`](crates/ricercar-upnp) | SSDP / HTTP / SOAP / GENA, AVTransport, OpenHome, MediaServer |
+| [`ricercar-audio`](crates/ricercar-audio) | decode + sink pipeline, engine thread, HTTP spooling with Range seeking |
+| [`ricercar-core`](crates/ricercar-core) | SQLite/FTS5 library, tags, covers, queue controller, config, source-plugin host and hub catalogue, updater |
+| [`ricercar-upnp`](crates/ricercar-upnp) | SSDP / HTTP / SOAP / GENA, AVTransport, OpenHome, MediaServer, interface selection |
 | [`ricercar-mpris`](crates/ricercar-mpris) | `org.mpris.MediaPlayer2` on the session bus |
 | [`ricercar-online`](crates/ricercar-online) | scrobbling, lyrics, radio directory, cover art |
-| [`ricercar-daemon`](crates/ricercar-daemon) | shared startup, scrobbler, headless binary |
+| [`ricercar-daemon`](crates/ricercar-daemon) | shared startup, scrobbler, plugin lyrics, diagnostic report, headless binary |
 | [`ricercar-ui`](crates/ricercar-ui) | Slint desktop app (`ricercar` binary) |
 | [`ricercar-cli`](crates/ricercar-cli) | MPRIS remote control |
 
 ## 🛠️ Development
 
 ```sh
-cargo test --workspace                          # 180+ tests
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-dbus-run-session -- cargo test -p ricercar-mpris
+dbus-run-session -- cargo test --workspace --locked   # 320+ tests
 ```
 
 - **Your speakers are safe:** tests only use `null` and `file:` sinks; no
@@ -548,6 +581,15 @@ outputs that only exist in PipeWire are listed by name, also shared.
 </details>
 
 <details>
+<summary><b>My phone app doesn't see ricercar.</b></summary>
+
+Check that the phone and the computer are on the same network, and that the
+renderer is on (Settings → Network). With a VPN, Docker or virtual
+machines, pick your home network under **Settings → Network → Network
+interface** so ricercar announces itself there.
+</details>
+
+<details>
 <summary><b>Can I run it on a Raspberry Pi without a screen?</b></summary>
 
 Yes. Use `ricercar-daemon` (or `ricercar --headless`) with the systemd user
@@ -558,10 +600,14 @@ unit in `dist/`, and control it from your phone over UPnP / OpenHome.
 
 - [x] Bit-perfect ALSA engine, gapless, native-rate switching
 - [x] UPnP AV + OpenHome renderer, UPnP MediaServer
-- [x] Desktop app: library, lyrics, queue, playlists, radio, EN/FR
+- [x] Desktop app: library, lyrics, queue, playlists, radio, six languages
 - [x] Scrobbling, MPRIS, tray, headless daemon
+- [x] Device capabilities panel (rates and formats your DAC accepts)
+- [x] Source plugins and community hub: settings, lyrics, navigation,
+  actions, service playlists, details, radio
+- [x] Signed releases (minisign) and in-app updates
+- [x] Network interface choice, keyboard navigation, AppStream metadata
 - [ ] Reports from real control points ([help wanted](docs/CONTROLS.md))
-- [ ] Device capabilities panel (rates and formats your DAC accepts)
 - [ ] Optional parametric EQ / convolution (clearly marked non bit-perfect)
 - [ ] DSD over PCM (DoP), CUE sheets
 - [ ] Composer / work views for classical music
