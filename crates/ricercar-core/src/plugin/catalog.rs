@@ -254,6 +254,7 @@ pub fn install(entry: &Entry, root: &Path, local: bool) -> Result<PluginConfig, 
         enabled: true,
         version: Some(entry.version.clone()),
         host: url_host(&asset.url),
+        settings: Default::default(),
     })
 }
 
@@ -424,6 +425,7 @@ mod tests {
             enabled: true,
             version: Some(v.into()),
             host: Some("github.com".into()),
+            settings: Default::default(),
         };
         e.version = "1.0.0".into();
         assert!(update_info(&installed("1.0.0"), &e).is_none());

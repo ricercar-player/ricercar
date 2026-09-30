@@ -11,6 +11,11 @@
 //!
 //! Everything interesting is appended to `<data_dir>/calls.log`, one line
 //! per event, so tests can check what the host did.
+//!
+//! Settings (docs/plugins.md, "Settings"): `report_playback` gates the
+//! `playback.*` lines, `page_size` caps `browse.list` pages, `greeting` is
+//! logged at start (it asks for a restart), and signing in adds a choice
+//! to `quality`, sent with `settings.declared`.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
@@ -100,6 +105,7 @@ struct State {
     resolved: HashSet<String>,
     last_player_status: String,
     next_id: u64,
+    settings: serde_json::Map<String, Value>,
 }
 
 impl State {
@@ -128,6 +134,45 @@ impl State {
     fn base(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
+
+    fn setting(&self, key: &str) -> Value {
+        self.settings.get(key).cloned().unwrap_or_else(|| {
+            schema(true)
+                .as_array()
+                .and_then(|a| a.iter().find(|s| s["key"] == key))
+                .map(|s| s["default"].clone())
+                .unwrap_or(Value::Null)
+        })
+    }
+}
+
+/// The settings this plugin declares; signed in, `quality` offers one more
+/// choice.
+fn schema(signed_in: bool) -> Value {
+    let mut quality = vec![
+        json!({"value": "standard", "label": "Standard"}),
+        json!({"value": "lossless", "label": "Lossless (CD quality)"}),
+    ];
+    if signed_in {
+        quality.push(json!({"value": "hires", "label": "Hi-Res (up to 24-bit)"}));
+    }
+    json!([
+        {"key": "report_playback", "type": "bool", "section": "Playback",
+         "label": "Report what I play",
+         "description": "Tell the service which tracks you listen to.",
+         "default": true},
+        {"key": "quality", "type": "choice", "section": "Playback",
+         "label": "Streaming quality",
+         "description": "The best format to ask for. The DAC's limits still apply.",
+         "options": quality, "default": "lossless"},
+        {"key": "page_size", "type": "number", "section": "Browsing",
+         "label": "Items per page", "integer": true, "min": 10, "max": 200,
+         "unit": "items", "default": 100},
+        {"key": "greeting", "type": "string", "section": "Browsing",
+         "label": "Greeting", "description": "Written to the log when the plugin starts.",
+         "placeholder": "Hello", "max_length": 80, "restart": true,
+         "default": "Hello from Demo Music"}
+    ])
 }
 
 fn err(code: i64, message: &str) -> Value {
@@ -344,6 +389,7 @@ fn main() {
         resolved: HashSet::new(),
         last_player_status: String::new(),
         next_id: 1,
+        settings: serde_json::Map::new(),
     };
     let stdout = std::io::stdout();
     let send = |v: Value| {
@@ -382,6 +428,14 @@ fn main() {
         let Some(id) = id else {
             // Notifications from the host.
             match method.as_str() {
+                "settings.changed" => {
+                    if let Some(m) = params.get("settings").and_then(Value::as_object) {
+                        st.settings = m.clone();
+                    }
+                    st.log(&format!("settings.changed {}", params["settings"]));
+                }
+                m if m.starts_with("playback.")
+                    && st.setting("report_playback") == Value::Bool(false) => {}
                 "player.state" => {
                     let s = params
                         .get("status")
@@ -437,6 +491,14 @@ fn main() {
                         params["output"]["device"].as_str().unwrap_or("")
                     ));
                     eprintln!("demo plugin serving on port {}", st.port);
+                    if let Some(m) = params.get("settings").and_then(Value::as_object) {
+                        st.settings = m.clone();
+                    }
+                    st.log(&format!("settings {}", params["settings"]));
+                    st.log(&format!(
+                        "greeting {}",
+                        st.setting("greeting").as_str().unwrap_or("")
+                    ));
                     Ok(json!({
                         "protocol": st.opts.protocol,
                         "plugin": {"id": "demo", "name": "Demo Music", "version": "1.0.0"},
@@ -444,7 +506,8 @@ fn main() {
                             "auth": st.opts.auth, "browse": true, "search": true, "resolve": true,
                             "favorites": true, "reporting": true, "remote_control": true,
                             "library": true
-                        }
+                        },
+                        "settings": schema(false)
                     }))
                 }
                 "shutdown" => {
@@ -491,7 +554,8 @@ fn main() {
                 "browse.list" => match children(&st, &r) {
                     Some(items) => {
                         let offset = params["offset"].as_u64().unwrap_or(0) as usize;
-                        let limit = params["limit"].as_u64().unwrap_or(200).min(200) as usize;
+                        let page_size = st.setting("page_size").as_u64().unwrap_or(200);
+                        let limit = params["limit"].as_u64().unwrap_or(200).min(page_size) as usize;
                         let total = items.len();
                         let page: Vec<Value> = items.into_iter().skip(offset).take(limit).collect();
                         Ok(
@@ -608,5 +672,16 @@ fn main() {
             Err(e) => json!({"jsonrpc": "2.0", "id": id, "error": e}),
         };
         send(reply);
+        // Choices that depend on the account: declared again once it is
+        // known, and whenever it changes.
+        if matches!(
+            method.as_str(),
+            "initialize" | "auth.complete" | "auth.sign_out"
+        ) && (method != "initialize" || st.signed_in())
+        {
+            send(json!({"jsonrpc": "2.0", "method": "settings.declared",
+                "params": {"settings": schema(st.signed_in())}}));
+            st.log(&format!("settings.declared {}", st.signed_in()));
+        }
     }
 }

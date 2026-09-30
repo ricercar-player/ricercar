@@ -7,7 +7,7 @@ import { Sidebar, PlayerBar, ChainPanel } from "chrome.slint";
 import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, GenresPage, GenrePage, FavoritesPage, PlaylistPage, SearchPage } from "pages.slint";
 import { RadioPage, SettingsPage } from "more.slint";
 import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays.slint";
-import { BrowsePage, SignInDialog, PluginsPage } from "plugins.slint";
+import { BrowsePage, SignInDialog, PluginSettingsDialog, PluginsPage } from "plugins.slint";
 
 export { App, Page, Theme, TrackMenu }
 export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, MenuEntry } from "state.slint";
@@ -56,6 +56,10 @@ export component MainWindow inherits Window {
     changed w-page => {
         App.now-playing-open = false;
     }
+    private property <bool> w-psettings: App.psettings-open;
+    changed w-psettings => {
+        if !w-psettings { keys.focus(); }
+    }
 
     toast-timer := Timer {
         interval: 3200ms;
@@ -68,7 +72,7 @@ export component MainWindow inherits Window {
 
     keys := FocusScope {
         key-pressed(e) => {
-            if dialog != 0 || App.signin-open || App.install-open || App.root-path-open { return reject; }
+            if dialog != 0 || App.signin-open || App.install-open || App.root-path-open || App.psettings-open { return reject; }
             if e.text == " " {
                 App.play-pause();
                 return accept;
@@ -260,6 +264,8 @@ export component MainWindow inherits Window {
     if App.signin-open: SignInDialog {
         init => { self.focus-input(); }
     }
+
+    if App.psettings-open: PluginSettingsDialog { }
 
     init => {
         Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;

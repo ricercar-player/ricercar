@@ -596,8 +596,8 @@ fn perf_search(ui: &Rc<Ui>) {
 /// `RICERCAR_SNAPSHOT_TOUR=plugins`: declares the reference plugin
 /// (`ricercar-demo-plugin`, next to this binary; build it with
 /// `cargo build -p ricercar-core --bin ricercar-demo-plugin`), then captures
-/// the sign-in dialog, the browse pages, a playing plugin track and the
-/// plugin search tab.
+/// the sign-in dialog, the browse pages, a playing plugin track, the
+/// plugin search tab and the plugin's settings dialog.
 fn plugins_tour(dir: std::path::PathBuf) {
     let bin = std::env::current_exe()
         .ok()
@@ -774,6 +774,37 @@ fn plugins_tour(dir: std::path::PathBuf) {
                     app.set_search_kind(0);
                     app.set_search_scope(1);
                     app.invoke_search_scope_changed();
+                }),
+            ),
+        ),
+        (
+            "plugin-settings",
+            (
+                600,
+                Box::new(|ui| {
+                    ui.app().set_search_scope(0);
+                    ui.navigate(Page::Plugins, "", true);
+                    crate::plugin_settings::open(ui, "demo");
+                }),
+            ),
+        ),
+        (
+            "plugin-settings-error",
+            (
+                200,
+                Box::new(|ui| {
+                    // A value out of range, typed then confirmed.
+                    use slint::Model;
+                    let rows = ui.app().get_psettings_rows();
+                    if let Some(i) = (0..rows.row_count())
+                        .find(|i| rows.row_data(*i).unwrap().key == "page_size")
+                    {
+                        let mut r = rows.row_data(i).unwrap();
+                        r.text = "500".into();
+                        rows.set_row_data(i, r);
+                    }
+                    ui.app()
+                        .invoke_psettings_text("page_size".into(), "500".into());
                 }),
             ),
         ),

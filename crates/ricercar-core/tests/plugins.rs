@@ -96,6 +96,7 @@ fn config(args: &[&str], enabled: bool) -> PluginConfig {
         enabled,
         version: None,
         host: None,
+        settings: Default::default(),
     }
 }
 
@@ -408,5 +409,109 @@ fn toggling_applies_live() {
             .unwrap()
             .url
             .starts_with("http://127.0.0.1:")
+    );
+}
+
+fn with_settings(args: &[&str], settings: &[(&str, toml::Value)]) -> PluginConfig {
+    let mut c = config(args, true);
+    c.settings = settings
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+    c
+}
+
+fn quality_options(rig: &Rig) -> usize {
+    use ricercar_core::plugin::settings::Kind;
+    let st = rig.host.status("demo").unwrap();
+    match st
+        .settings
+        .iter()
+        .find(|s| s.key == "quality")
+        .map(|s| &s.kind)
+    {
+        Some(Kind::Choice { options }) => options.len(),
+        _ => 0,
+    }
+}
+
+#[test]
+fn settings_are_declared_and_sent_at_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = PluginHost::new("t", dir.path().join("data"), dir.path().join("cache"));
+    host.reconcile(&[with_settings(
+        &[],
+        &[
+            ("page_size", toml::Value::Integer(20)),
+            ("old_key", toml::Value::Boolean(true)),
+        ],
+    )]);
+    let rig = Rig { dir, host };
+    assert!(wait(10, || rig.state() == RunState::Running));
+    // Every stored value goes in `initialize`, declared or not.
+    assert!(
+        rig.wait_log(r#"settings {"old_key":true,"page_size":20}"#),
+        "{}",
+        rig.log()
+    );
+    assert!(rig.wait_log("greeting Hello from Demo Music"));
+    let st = rig.host.status("demo").unwrap();
+    let keys: Vec<&str> = st.settings.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["report_playback", "quality", "page_size", "greeting"]
+    );
+    assert_eq!(st.values["page_size"], serde_json::json!(20));
+    assert_eq!(st.values["quality"], serde_json::json!("lossless"));
+    assert!(!st.values.contains_key("old_key"));
+    assert_eq!(quality_options(&rig), 2);
+    // Signed in, the plugin declares its settings again.
+    rig.sign_in();
+    assert!(wait(5, || quality_options(&rig) == 3));
+    rig.host.auth_sign_out("demo").unwrap();
+    assert!(wait(5, || quality_options(&rig) == 2));
+}
+
+#[test]
+fn settings_apply_live_or_restart_the_plugin() {
+    let rig = Rig::new(&["--no-auth"]);
+    assert!(wait(5, || quality_options(&rig) == 3));
+    let off = [("report_playback", toml::Value::Boolean(false))];
+    rig.host.reconcile(&[with_settings(&["--no-auth"], &off)]);
+    assert!(
+        rig.wait_log(
+            r#"settings.changed {"greeting":"Hello from Demo Music","page_size":100,"quality":"lossless","report_playback":false}"#
+        ),
+        "{}",
+        rig.log()
+    );
+    assert_eq!(rig.log().matches("initialize").count(), 1, "no restart");
+    assert_eq!(rig.state(), RunState::Running);
+    // The same config again changes nothing.
+    rig.host.reconcile(&[with_settings(&["--no-auth"], &off)]);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(rig.log().matches("settings.changed").count(), 1);
+
+    // Reporting is off: the plugin ignores playback reports.
+    let ctl = rig.controller();
+    ctl.play_tracks(rig.tracks("album/1")[..1].to_vec(), 0, PlayContext::None);
+    assert!(rig.wait_log("track.resolve track/1 play"), "{}", rig.log());
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!rig.log().contains("playback."), "{}", rig.log());
+    ctl.stop();
+
+    // Back to the defaults.
+    rig.host.reconcile(&[config(&["--no-auth"], true)]);
+    assert!(wait(5, || rig.log().contains(r#""report_playback":true}"#)));
+
+    // `greeting` asks for a restart.
+    let hi = [("greeting", toml::Value::String("Bonjour".into()))];
+    rig.host.reconcile(&[with_settings(&["--no-auth"], &hi)]);
+    assert!(rig.wait_log("greeting Bonjour"), "{}", rig.log());
+    assert_eq!(rig.log().matches("initialize").count(), 2);
+    assert!(wait(10, || rig.state() == RunState::Running));
+    assert_eq!(
+        rig.host.status("demo").unwrap().values["greeting"],
+        serde_json::json!("Bonjour")
     );
 }

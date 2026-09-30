@@ -76,6 +76,8 @@ pub struct PluginsView {
     home: HashMap<String, Vec<Item>>,
     pub home_shelves: Vec<HomeShelfRows>,
     loading_home: std::collections::HashSet<String>,
+    /// The settings dialog, when open.
+    pub settings: Option<crate::plugin_settings::Open>,
 }
 
 /// A Home shelf from a plugin: plugin id, title, cards.
@@ -217,6 +219,7 @@ pub fn poll(ui: &Rc<Ui>) {
     let statuses = host(ui).statuses();
     refresh_libraries(ui, &statuses);
     refresh_rows(ui, &statuses);
+    crate::plugin_settings::refresh(ui);
     refresh_sections(ui, &statuses);
     refresh_search_scopes(ui, &statuses);
     let open = ui.plugins.borrow().signin.clone();
@@ -293,6 +296,8 @@ fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
                         .find(|e| e.id == s.id)
                         .is_some_and(|e| e.installable() && catalog::update_available(d, e))
                 }),
+                has_settings: !s.settings.is_empty(),
+                running: s.state == RunState::Running,
             }
         })
         .collect();
@@ -1948,7 +1953,12 @@ pub fn do_install(ui: &Ui) {
                 Ok(cfg) => {
                     ui.ctx
                         .update_config(|c| match c.plugins.iter_mut().find(|p| p.id == cfg.id) {
-                            Some(p) => *p = cfg.clone(),
+                            // An update keeps the user's settings.
+                            Some(p) => {
+                                let settings = std::mem::take(&mut p.settings);
+                                *p = cfg.clone();
+                                p.settings = settings;
+                            }
                             None => c.plugins.push(cfg.clone()),
                         });
                     ui.toast(format!("{} {}", t("Installed"), e.name), false);
@@ -2077,6 +2087,7 @@ pub fn wire(ui: &Rc<Ui>) {
             crate::views::run_search(ui, &q);
         })
     });
+    crate::plugin_settings::wire(ui);
     push_output(ui);
     poll(ui);
 }

@@ -1,10 +1,11 @@
-// Source plugins (docs/plugins.md): the generic browse page and the
-// sign-in dialog. Everything a plugin sends is shown as plain text.
+// Source plugins (docs/plugins.md): the generic browse page, the sign-in
+// and settings dialogs. Everything a plugin sends is shown as plain text.
 
+import { ComboBox } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App } from "state.slint";
-import { Button, TextField, Toggle, SectionTitle } from "widgets.slint";
+import { Button, IconButton, TextField, Toggle, Segmented, SectionTitle } from "widgets.slint";
 import { BrowseContent } from "lists.slint";
 import { PageScroll } from "pages.slint";
 
@@ -154,6 +155,150 @@ export component SignInDialog inherits Rectangle {
     }
 }
 
+/// A text field that hands its text over on Enter and when it loses the
+/// keyboard focus (not on every key).
+component CommitField inherits TextField {
+    callback commit(string);
+    private property <bool> focused: self.has-focus;
+    changed focused => {
+        if !focused { root.commit(root.text); }
+    }
+    accepted(t) => { root.commit(t); }
+}
+
+/// The settings a plugin declares, grouped by section. Each change applies
+/// at once; refused values say why under their line.
+export component PluginSettingsDialog inherits Rectangle {
+    background: Theme.scrim;
+    TouchArea { clicked => { App.psettings-close(); } }
+    forward-focus: keys;
+    // Escape closes it, wherever the focus is inside.
+    keys := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                App.psettings-close();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: 560px;
+            height: lay.preferred-height;
+            border-radius: Theme.r-lg;
+            background: Theme.overlay;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 16px;
+            drop-shadow-color: #000000b3;
+            TouchArea { }
+            lay := VerticalLayout {
+                padding: 24px;
+                spacing: 10px;
+                Text { text: App.psettings-title; font-size: Theme.fs-xl; font-weight: 700; color: Theme.text; overflow: elide; }
+                Text { text: App.psettings-note; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+                fl := Flickable {
+                    height: min(body.preferred-height, root.height - 220px);
+                    content-height: body.preferred-height;
+                    body := VerticalLayout {
+                        width: fl.width;
+                        for r[i] in App.psettings-rows: VerticalLayout {
+                            if r.kind == 0: Text {
+                                text: r.label;
+                                font-size: Theme.fs-sm;
+                                font-weight: 700;
+                                color: Theme.text2;
+                                height: self.preferred-height + (i > 0 ? 18px : 6px);
+                                vertical-alignment: bottom;
+                                overflow: elide;
+                            }
+                            if r.kind != 0: HorizontalLayout {
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+                                spacing: 16px;
+                                min-height: 52px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    horizontal-stretch: 1;
+                                    Text { text: r.label; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; wrap: word-wrap; }
+                                    if r.description != "": Text { text: r.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+                                    if r.restart: Text { text: @tr("Restarts the plugin when changed."); font-size: Theme.fs-xs; color: Theme.text3; wrap: word-wrap; }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        alignment: end;
+                                        spacing: 8px;
+                                        if r.kind == 1: VerticalLayout {
+                                            alignment: center;
+                                            Toggle {
+                                                label: r.label;
+                                                checked <=> r.on;
+                                                toggled(on) => { App.psettings-bool(r.key, on); }
+                                            }
+                                        }
+                                        if r.kind == 2: CommitField {
+                                            width: 220px;
+                                            placeholder: r.placeholder;
+                                            text <=> r.text;
+                                            commit(t) => { App.psettings-text(r.key, t); }
+                                            escape => { App.psettings-close(); }
+                                        }
+                                        if r.kind == 3: CommitField {
+                                            width: 96px;
+                                            placeholder: r.placeholder;
+                                            text <=> r.text;
+                                            commit(t) => { App.psettings-text(r.key, t); }
+                                            escape => { App.psettings-close(); }
+                                        }
+                                        if r.kind == 3 && r.unit != "": Text {
+                                            text: r.unit;
+                                            font-size: Theme.fs-sm;
+                                            color: Theme.text2;
+                                            vertical-alignment: center;
+                                        }
+                                        if r.kind == 4: VerticalLayout {
+                                            alignment: center;
+                                            Segmented {
+                                                label: r.label;
+                                                options: r.options;
+                                                selected <=> r.selected;
+                                                changed(i) => { App.psettings-choice(r.key, i); }
+                                            }
+                                        }
+                                        if r.kind == 5: ComboBox {
+                                            width: 220px;
+                                            model: r.options;
+                                            current-index <=> r.selected;
+                                            selected => { App.psettings-choice(r.key, self.current-index); }
+                                        }
+                                    }
+                                }
+                            }
+                            if r.error != "": Text {
+                                text: r.error;
+                                font-size: Theme.fs-sm;
+                                color: Theme.bad;
+                                horizontal-alignment: right;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    padding-top: 6px;
+                    Button { text: @tr("Reset to defaults"); clicked => { App.psettings-reset(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: @tr("Close"); primary: true; clicked => { App.psettings-close(); } }
+                }
+            }
+        }
+    }
+    init => { keys.focus(); }
+}
+
 component PanelRow inherits HorizontalLayout {
     padding-left: 16px;
     padding-right: 16px;
@@ -239,6 +384,15 @@ export component PluginsPage inherits PageScroll {
                             if p.enabled && p.signed-in: Button {
                                 text: @tr("Sign out");
                                 clicked => { App.plugin-sign-out(p.id); }
+                            }
+                            if p.has-settings: VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    icon: Icons.settings;
+                                    enabled: p.running;
+                                    tooltip: p.running ? @tr("Plugin settings") : @tr("Plugin settings (available while the plugin runs)");
+                                    clicked => { App.plugin-settings(p.id); }
+                                }
                             }
                             if p.update: Button {
                                 text: @tr("Update");

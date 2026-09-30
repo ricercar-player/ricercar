@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use ricercar_audio::device::list_devices;
 use ricercar_core::config::{self, Config};
 use ricercar_core::covers::CoverCache;
+use ricercar_core::plugin::settings;
 use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
 pub mod diag;
@@ -397,6 +398,19 @@ pub fn output_info(
     }
 }
 
+/// Config saves still running on another thread: until they are done the
+/// file is older than the config in memory, and not a hand edit.
+static SAVES_PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Start, stop or tell plugins to match the config as it is now, one call
+/// at a time.
+fn reconcile_plugins(host: &ricercar_core::plugin::PluginHost, config: &RwLock<Config>) {
+    static APPLYING: Mutex<()> = Mutex::new(());
+    let _one = APPLYING.lock().unwrap_or_else(|e| e.into_inner());
+    let list = config.read().unwrap().plugins.clone();
+    host.reconcile(&list);
+}
+
 /// `[[plugins]]` edited in config.toml by hand applies without a restart:
 /// only that section is taken from the file (the rest is ours to save).
 fn watch_plugin_tables(
@@ -413,7 +427,7 @@ fn watch_plugin_tables(
             while !quit.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 let now = mtime(&path);
-                if now == seen {
+                if now == seen || SAVES_PENDING.load(Ordering::SeqCst) > 0 {
                     continue;
                 }
                 seen = now;
@@ -432,7 +446,7 @@ fn watch_plugin_tables(
                 };
                 if changed {
                     tracing::info!("plugins changed in {}", path.display());
-                    host.reconcile(&file.plugins);
+                    reconcile_plugins(&host, &config);
                 }
             }
         });
@@ -495,9 +509,7 @@ impl AppContext {
                 .set_output(output_info(&cfg.audio.device, None));
         }
         if old_plugins != cfg.plugins {
-            // Stopping a plugin can take its 2 s grace: not on the caller.
-            let (host, list) = (self.plugins.clone(), cfg.plugins.clone());
-            std::thread::spawn(move || host.reconcile(&list));
+            self.apply_plugins();
         }
         if old_roots != cfg.library {
             self.lib.retain_roots(&cfg.library.roots);
@@ -506,6 +518,79 @@ impl AppContext {
         if old_network != cfg.network {
             self.restart_network();
         }
+    }
+
+    /// Bring the plugin processes in line with the config, off the calling
+    /// thread: stopping a plugin can take its 2 s grace. Applied one at a
+    /// time, each with the config as it is then, so a burst of changes
+    /// ends on the latest.
+    fn apply_plugins(&self) {
+        let (host, config) = (self.plugins.clone(), self.config.clone());
+        std::thread::spawn(move || reconcile_plugins(&host, &config));
+    }
+
+    /// Change one setting a plugin declares (docs/plugins.md, "Settings"):
+    /// checked against its declaration, then saved and sent to the plugin
+    /// (or the plugin restarted, when the setting asks for it) off the
+    /// calling thread. Returns the value in effect.
+    pub fn set_plugin_setting(
+        &self,
+        id: &str,
+        key: &str,
+        value: &settings::Value,
+    ) -> Result<settings::Value, settings::SettingError> {
+        let schema = self
+            .plugins
+            .status(id)
+            .map(|s| s.settings)
+            .unwrap_or_default();
+        let v = {
+            let mut c = self.config.write().unwrap();
+            let p = c
+                .plugins
+                .iter_mut()
+                .find(|p| p.id == id)
+                .ok_or(settings::SettingError::UnknownKey)?;
+            let before = p.settings.clone();
+            let v = settings::store(&schema, &mut p.settings, key, value)?;
+            if p.settings == before {
+                return Ok(v);
+            }
+            v
+        };
+        self.save_plugin_settings();
+        Ok(v)
+    }
+
+    /// Forget every stored value of a plugin's settings: the defaults apply.
+    pub fn reset_plugin_settings(&self, id: &str) {
+        {
+            let mut c = self.config.write().unwrap();
+            match c.plugins.iter_mut().find(|p| p.id == id) {
+                Some(p) if !p.settings.is_empty() => p.settings.clear(),
+                _ => return,
+            }
+        }
+        self.save_plugin_settings();
+    }
+
+    /// Save the config and tell the plugins, off the calling thread. The
+    /// config stays locked while it is written, so an older state never
+    /// lands on disk after a newer one.
+    fn save_plugin_settings(&self) {
+        let (host, config, path) = (
+            self.plugins.clone(),
+            self.config.clone(),
+            self.config_path.clone(),
+        );
+        SAVES_PENDING.fetch_add(1, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            if let Err(e) = config.read().unwrap().save(&path) {
+                tracing::warn!("save config: {e}");
+            }
+            SAVES_PENDING.fetch_sub(1, Ordering::SeqCst);
+            reconcile_plugins(&host, &config);
+        });
     }
 
     /// Restart the UPnP services with the current settings, off the calling

@@ -1276,6 +1276,18 @@ msgctxt "SignInDialog"
 msgid "Sign in"
 msgstr "Se connecter"
 
+msgctxt "PluginSettingsDialog"
+msgid "Restarts the plugin when changed."
+msgstr "Modifier ce réglage redémarre le plugin."
+
+msgctxt "PluginSettingsDialog"
+msgid "Reset to defaults"
+msgstr "Rétablir les valeurs par défaut"
+
+msgctxt "PluginSettingsDialog"
+msgid "Close"
+msgstr "Fermer"
+
 msgctxt "PluginsPage"
 msgid "Plugins"
 msgstr "Plugins"
@@ -1299,6 +1311,14 @@ msgstr "Se connecter"
 msgctxt "PluginsPage"
 msgid "Sign out"
 msgstr "Se déconnecter"
+
+msgctxt "PluginsPage"
+msgid "Plugin settings"
+msgstr "Réglages du plugin"
+
+msgctxt "PluginsPage"
+msgid "Plugin settings (available while the plugin runs)"
+msgstr "Réglages du plugin (disponibles quand le plugin est lancé)"
 
 msgctxt "PluginsPage"
 msgid "Update"

@@ -131,6 +131,30 @@ export struct PluginRow {
     from-hub: bool,
     // the hub has another version
     update: bool,
+    // declares settings, and is running (they can be changed)
+    has-settings: bool,
+    running: bool,
+}
+
+// A line of a plugin's settings dialog.
+export struct SettingRow {
+    // 0 section heading, 1 switch, 2 text, 3 number, 4 choice among a
+    // few short options (segmented), 5 choice (drop-down list)
+    kind: int,
+    key: string,
+    label: string,
+    description: string,
+    // takes effect after the plugin restarts
+    restart: bool,
+    on: bool,
+    text: string,
+    placeholder: string,
+    // number: its unit
+    unit: string,
+    options: [string],
+    selected: int,
+    // why the last value was refused
+    error: string,
 }
 
 // A plugin of the community hub.
@@ -441,6 +465,17 @@ export global App {
     in property <[PluginNav]> plugin-nav;
     callback plugin-update(string);
     callback plugin-remove(string);
+    // settings a plugin declares (dialog)
+    callback plugin-settings(string);
+    in-out property <bool> psettings-open;
+    in property <string> psettings-title;
+    in property <string> psettings-note;
+    in-out property <[SettingRow]> psettings-rows;
+    callback psettings-bool(string, bool);
+    callback psettings-text(string, string);
+    callback psettings-choice(string, int);
+    callback psettings-reset();
+    callback psettings-close();
     // community catalogue (Plugins page)
     in-out property <bool> plugins-online;
     // installed plugins with an update in the catalogue

@@ -9,6 +9,7 @@ mod extras;
 mod images;
 mod merge;
 mod player;
+mod plugin_settings;
 mod plugins;
 mod profile;
 mod snapshot;

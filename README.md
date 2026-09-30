@@ -111,8 +111,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - **Source plugins**: catalogues from third-party programs, installed from
   the [community hub](https://github.com/ricercar-player/ricercar-plugins) or
   declared by hand (browse, search, sign-in in your browser); their albums,
-  artists and tracks join your library pages and search; playback stays
-  bit-perfect
+  artists and tracks join your library pages and search; plugins can
+  declare their own settings; playback stays bit-perfect
 - **Updates**: a new release or plugin update is shown in the app; Settings →
   About checks on demand and installs the new release (AppImage, or the
   .deb / .rpm / pacman package through your password prompt), checked

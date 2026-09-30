@@ -108,6 +108,10 @@ args = ["--serve"]
 enabled = true
 # version = "1.2.0"            # set by installs from the hub only
 # host = "github.com"          # likewise: where the binary was downloaded
+
+[plugins.settings]             # optional: values of the plugin's settings
+quality = "lossless"
+page_size = 50
 ```
 
 - The host passes nothing secret on the command line and does not expand
@@ -143,7 +147,8 @@ enabled = true
   at once with a timeout instead of blocking the player.
 - **Config changes** (plugin added, removed, toggled, from the settings or
   by editing `config.toml`) apply without a restart, like the network
-  settings.
+  settings. A change of `[plugins.settings]` alone keeps the process
+  running and sends it `settings.changed` (see [Settings](#settings-optional)).
 
 ## Transport
 
@@ -171,7 +176,8 @@ enabled = true
   "output": {                       // what the current DAC accepts natively
     "device": "hw:3,0", "bit_perfect": true,
     "max_rate": 192000, "max_bits": 24, "rates": [44100,48000,88200,96000,176400,192000]
-  }
+  },
+  "settings": {"quality": "hires"}  // stored setting values, see Settings
 }}
 // plugin → host
 {"jsonrpc":"2.0","id":1,"result":{
@@ -181,7 +187,8 @@ enabled = true
     "auth": true, "browse": true, "search": true, "resolve": true,
     "favorites": true, "reporting": false, "remote_control": false,
     "library": true
-  }
+  },
+  "settings": [ … ]                 // optional, see Settings
 }}
 ```
 
@@ -343,6 +350,95 @@ for plugins that expose ricercar to an external control protocol.
 The queue set this way uses a new `Origin` value, `Plugin(id)`, and the UI
 shows "Playing from <plugin name>".
 
+## Settings (optional)
+
+A plugin can declare a few settings of its own (streaming quality, what
+to report, page sizes…). The host stores the values and shows them in a
+dialog opened from the plugin's row on the Plugins page, with the host's
+own controls: a plugin still defines no UI of its own.
+
+**Not for credentials.** Sign-in stays in the [authentication](#authentication)
+flow. Setting values are stored in plain text in `config.toml` (mode 0600)
+and appear in the dialog as typed.
+
+### Declaring
+
+`settings` in the `initialize` result, a list of entries:
+
+```jsonc
+"settings": [
+  {"key": "report_playback", "type": "bool", "section": "Playback",
+   "label": "Report what I play",
+   "description": "Tell the service which tracks you listen to.",
+   "default": true},
+  {"key": "quality", "type": "choice", "section": "Playback",
+   "label": "Streaming quality",
+   "options": [{"value": "standard", "label": "Standard"},
+               {"value": "lossless", "label": "Lossless (CD quality)"}],
+   "default": "lossless"},
+  {"key": "page_size", "type": "number", "section": "Browsing",
+   "label": "Items per page", "integer": true, "min": 10, "max": 200,
+   "unit": "items", "default": 100},
+  {"key": "greeting", "type": "string", "section": "Browsing",
+   "label": "Greeting", "placeholder": "Hello", "max_length": 80,
+   "restart": true, "default": "Hello from Demo Music"}
+]
+```
+
+Every entry has:
+- `key`: `[a-z0-9_.-]`, 1 to 64 characters, unique;
+- `type`: one of the types below;
+- `label`, and optionally `description`: plain text, never markup;
+- `default`: required, of the entry's type and acceptable for it;
+- `section` (optional): a heading; entries with the same `section` are
+  shown together, in declaration order, after those without one;
+- `restart` (optional, default `false`): the setting only takes effect when
+  the plugin starts. The host then restarts the plugin when the user changes
+  it, instead of sending `settings.changed`, and says so next to it.
+
+| `type` | Value | Extra fields |
+|---|---|---|
+| `bool` | `true` / `false` | none (a switch) |
+| `string` | text, one line | `placeholder`; `max_length` (default and upper bound 1024 characters) |
+| `number` | a JSON number | `min`, `max`, `step` (> 0), `integer` (bool), `unit` (short text shown after the field) |
+| `choice` | the `value` of one option | `options`: 1 to 50 `{value, label}`, values unique |
+
+- The host checks the declaration. An entry that breaks a rule (bad key,
+  default of the wrong type or not among the options, `min` above `max`…)
+  is dropped with a warning in the log; the others are kept. At most 100
+  entries are kept.
+- Labels are shown as sent: plugins translate them themselves, from
+  `locale` in `initialize`.
+- The plugin may send `settings.declared {"settings": [...]}`
+  (notification) at any time to replace its declaration, for example when
+  the choices depend on the signed-in account. The dialog follows.
+
+### Values
+
+- The host stores, in the plugin's `[[plugins]]` table as
+  `[plugins.settings]`, only the values that differ from their default.
+  **Reset to defaults** in the dialog clears them.
+- `initialize` carries `"settings": {key: value}` with every stored value.
+  The host does not know the declaration yet at that point, so a value may
+  belong to a key the plugin no longer declares; the plugin ignores those
+  and applies its own defaults to the keys that are missing.
+- When the user changes a value, the host checks it against the
+  declaration: type, `min`/`max`, `max_length`, membership of the options.
+  Numbers are snapped to `step` (counted from `min`, else 0) and rounded
+  when `integer`; a value out of range is refused and the dialog says why.
+  The value is then saved and sent as the notification
+  `settings.changed {"settings": {…}}`, which holds every declared key with
+  its value in effect (defaults included). A value stored for an entry with
+  `restart: true` restarts the plugin instead (it gets the new values in
+  `initialize`).
+- Values edited by hand in `config.toml` are applied the same way: a
+  changed `[plugins.settings]` table sends `settings.changed` (or restarts
+  the plugin, per `restart`) without restarting anything else. A stored
+  value that does not fit the declaration is ignored, and the default
+  applies.
+- While the plugin is not running, the dialog cannot be opened; values
+  changed by hand reach it with the next `initialize`.
+
 ## Errors
 
 Plugins answer with JSON-RPC errors using these codes. The host maps each code
@@ -360,11 +456,11 @@ to a UI message and never shows raw text from the plugin as HTML.
 
 | Crate | Change |
 |---|---|
-| `ricercar-core` | New `plugin` module: config `[[plugins]]`, process supervision, JSON-RPC over stdio, `PluginHost` API. `TrackInfo::from_uri` understands `plugin://`. `Origin::Plugin(id)`. |
+| `ricercar-core` | New `plugin` module: config `[[plugins]]`, process supervision, JSON-RPC over stdio, `PluginHost` API. `TrackInfo::from_uri` understands `plugin://`. `Origin::Plugin(id)`. `plugin::settings`: declared settings checked, values stored in `[plugins.settings]`, `settings.changed` on change; `reconcile` ignores settings when deciding restarts. |
 | `ricercar-core` / `Controller` | Resolution step in `load_current` and `rearm`, done asynchronously: load the item once its URL is known, and drop the result if the current item changed meanwhile. **`on_track_started` matches items by URI**, so keep a map `item id → resolved URL` for the loading and armed items and match against it. Session save/restore keeps `plugin://` URIs. ReplayGain from `resolve` feeds `opts_for`. |
 | `ricercar-audio` | Surface the HTTP status of failed fetches in `EngineEvent::Error` (or a typed variant), so the controller can re-resolve on 401/403/404/410. |
-| `ricercar-daemon` | Start and stop the `PluginHost` in `AppContext`. Send `output.changed` on device switch. Plugin status in the diagnostic report. |
-| `ricercar-ui` | Sidebar section per signed-in plugin, from `browse.root`. Generic browse page (grid for albums and playlists, track table for tracks). Plugins with `library` feed the Albums, Artists and Tracks pages (merged in the page's order, with a source badge and a source filter); plugin albums open on the album page. The global search shows local results at once, then each signed-in plugin's (its `search`, or matches in its library list) as they come, marked with their source. Sign-in dialog (open browser, QR code, paste field). A settings row per plugin (status, sign in/out, enable). "Source: <plugin>" hop in the signal path. Every new string goes through `@tr()`. |
+| `ricercar-daemon` | Start and stop the `PluginHost` in `AppContext`. Send `output.changed` on device switch. Plugin status in the diagnostic report. `set_plugin_setting` / `reset_plugin_settings`: check, save and apply off the calling thread. |
+| `ricercar-ui` | Sidebar section per signed-in plugin, from `browse.root`. Generic browse page (grid for albums and playlists, track table for tracks). Plugins with `library` feed the Albums, Artists and Tracks pages (merged in the page's order, with a source badge and a source filter); plugin albums open on the album page. The global search shows local results at once, then each signed-in plugin's (its `search`, or matches in its library list) as they come, marked with their source. Sign-in dialog (open browser, QR code, paste field). A settings row per plugin (status, sign in/out, enable, and a settings button for plugins that declare settings, opening a dialog of switches, text and number fields and choices, grouped by section). "Source: <plugin>" hop in the signal path. Every new string goes through `@tr()`. |
 | `ricercar-online` / scrobble | Plugin tracks scrobble from their metadata (`path` is `None`). |
 | `ricercar-upnp` | No change. ContentDirectory still serves the local library only. Plugin tracks in the queue are shown with their metadata. |
 | Docs | README: "Features", "Is this a … client?" FAQ and the promise wording (the core ships no service API; third-party plugins may add catalogues). HACKING.md: plugin host map. |
@@ -383,7 +479,12 @@ to a UI message and never shows raw text from the plugin as HTML.
   - URL expiry and re-resolve;
   - `auth_required` handling;
   - session restore with `plugin://` items.
-- A snapshot scenario for the browse page and the sign-in dialog.
+- Settings: the declaration is checked, values are checked and stored,
+  `initialize` carries them, a change sends `settings.changed` without a
+  restart, `restart: true` restarts, `settings.declared` replaces the
+  declaration.
+- A snapshot scenario for the browse page, the sign-in and the settings
+  dialogs.
 
 ## Security
 

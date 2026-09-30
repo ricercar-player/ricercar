@@ -343,6 +343,7 @@ export component SeekBar inherits Rectangle {
 export component Toggle inherits Rectangle {
     in-out property <bool> checked;
     in property <bool> enabled: true;
+    in property <string> label;
     callback toggled(bool);
     width: 38px;
     height: 22px;
@@ -350,9 +351,36 @@ export component Toggle inherits Rectangle {
     background: checked ? Theme.accent : Theme.line-strong;
     opacity: enabled ? 1 : 0.4;
     animate background { duration: Theme.quick; }
+    function flip() {
+        if root.enabled {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+    forward-focus: fs;
     accessible-role: checkbox;
+    accessible-label: label;
     accessible-checked: checked;
-    accessible-action-default => { checked = !checked; toggled(checked); }
+    accessible-enabled: enabled;
+    accessible-action-default => { flip(); }
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                flip();
+                return accept;
+            }
+            reject
+        }
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
+    }
     Rectangle {
         x: root.checked ? root.width - self.width - 3px : 3px;
         y: 3px;
@@ -365,22 +393,53 @@ export component Toggle inherits Rectangle {
     TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
-        clicked => {
-            root.checked = !root.checked;
-            root.toggled(root.checked);
-        }
+        clicked => { flip(); }
     }
 }
 
-/// A row of mutually exclusive options.
+/// A row of mutually exclusive options. With the keyboard focus, the
+/// arrow keys pick the previous or next one.
 export component Segmented inherits Rectangle {
     in property <[string]> options;
     in-out property <int> selected;
+    in property <string> label;
     callback changed(int);
     height: 32px;
     width: lay.preferred-width;
     border-radius: self.height / 2;
     background: Theme.hover;
+    function pick(i: int) {
+        if i >= 0 && i < root.options.length && i != root.selected {
+            root.selected = i;
+            root.changed(i);
+        }
+    }
+    forward-focus: fs;
+    accessible-role: combobox;
+    accessible-label: label;
+    accessible-value: selected >= 0 && selected < options.length ? options[selected] : "";
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.modifiers.control || e.modifiers.alt { return reject; }
+            if e.text == Key.RightArrow || e.text == Key.DownArrow {
+                pick(root.selected + 1);
+                return accept;
+            }
+            if e.text == Key.LeftArrow || e.text == Key.UpArrow {
+                pick(root.selected - 1);
+                return accept;
+            }
+            reject
+        }
+    }
+    if fs.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
+    }
     lay := HorizontalLayout {
         padding: 3px;
         spacing: 2px;

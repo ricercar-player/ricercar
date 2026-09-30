@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::rpc::{CallError, Incoming, Rpc, RpcError};
+use super::settings::{self, Setting, Stored};
 use super::{
     AuthBegin, AuthState, AuthStatus, Capabilities, Item, OutputInfo, PROTOCOL, PluginError,
     PluginInfo, Purpose, Resolved, Resolver, parse_plugin_uri,
@@ -60,9 +61,26 @@ pub struct PluginStatus {
     pub state: RunState,
     pub caps: Capabilities,
     pub auth: Option<AuthStatus>,
+    /// Settings the plugin declares (empty until it has answered).
+    pub settings: Vec<Setting>,
+    /// The value in effect for each of them.
+    pub values: serde_json::Map<String, Value>,
 }
 
 impl PluginStatus {
+    fn new(id: &str, state: RunState) -> PluginStatus {
+        PluginStatus {
+            id: id.to_string(),
+            name: id.to_string(),
+            version: String::new(),
+            state,
+            caps: Capabilities::default(),
+            auth: None,
+            settings: Vec::new(),
+            values: serde_json::Map::new(),
+        }
+    }
+
     pub fn signed_in(&self) -> bool {
         self.state == RunState::Running
             && (!self.caps.auth
@@ -74,7 +92,12 @@ impl PluginStatus {
 }
 
 struct Slot {
+    /// Without its settings, which change live (`values`).
     cfg: PluginConfig,
+    values: RwLock<Stored>,
+    /// The running process declared its settings with `settings.declared`
+    /// (which then wins over the declaration in `initialize`).
+    declared: AtomicBool,
     stop: AtomicBool,
     rpc: RwLock<Option<Arc<Rpc>>>,
     status: RwLock<PluginStatus>,
@@ -223,19 +246,19 @@ impl PluginHost {
         configs
             .iter()
             .map(|c| match slots.get(&c.id) {
-                Some(s) => s.status.read().unwrap().clone(),
-                None => PluginStatus {
-                    id: c.id.clone(),
-                    name: c.id.clone(),
-                    version: String::new(),
-                    state: if c.enabled {
+                Some(s) => {
+                    let mut st = s.status.read().unwrap().clone();
+                    st.values = settings::effective(&st.settings, &c.settings);
+                    st
+                }
+                None => PluginStatus::new(
+                    &c.id,
+                    if c.enabled {
                         RunState::Failed("invalid id".into())
                     } else {
                         RunState::Disabled
                     },
-                    caps: Capabilities::default(),
-                    auth: None,
-                },
+                ),
             })
             .collect()
     }
@@ -245,6 +268,9 @@ impl PluginHost {
     }
 
     /// Start, stop or restart processes to match `configs` (applied live).
+    /// A change of `settings` alone keeps the process and sends it
+    /// `settings.changed`, or restarts it when a changed setting says
+    /// `restart`.
     pub fn reconcile(&self, configs: &[PluginConfig]) {
         let mut seen = std::collections::HashSet::new();
         let configs: Vec<PluginConfig> = configs
@@ -260,31 +286,50 @@ impl PluginHost {
             .collect();
         *self.inner.configs.lock().unwrap() = configs.clone();
         let mut to_stop = Vec::new();
+        let mut to_notify = Vec::new();
         {
             let mut slots = self.inner.slots.lock().unwrap();
             let ids: Vec<String> = slots.keys().cloned().collect();
             for id in ids {
-                let keep = configs
+                let slot = slots[&id].clone();
+                let cfg = configs
                     .iter()
-                    .any(|c| c.enabled && c.id == id && slots[&id].cfg == *c);
+                    .find(|c| c.enabled && c.id == id && slot.cfg.same_process(c));
+                let mut keep = cfg.is_some();
+                if let Some(c) = cfg {
+                    let changed = settings::changed_keys(&slot.values.read().unwrap(), &c.settings);
+                    if !changed.is_empty() {
+                        let restart = slot
+                            .status
+                            .read()
+                            .unwrap()
+                            .settings
+                            .iter()
+                            .any(|s| s.restart && changed.contains(&s.key));
+                        if restart {
+                            tracing::info!("plugin[{id}]: settings changed, restarting");
+                            keep = false;
+                        } else {
+                            *slot.values.write().unwrap() = c.settings.clone();
+                            to_notify.push(slot);
+                        }
+                    }
+                }
                 if !keep && let Some(s) = slots.remove(&id) {
                     to_stop.push(s);
                 }
             }
             for c in configs.iter().filter(|c| c.enabled) {
                 if !slots.contains_key(&c.id) {
+                    let mut cfg = c.clone();
+                    let values = std::mem::take(&mut cfg.settings);
                     let slot = Arc::new(Slot {
-                        cfg: c.clone(),
+                        cfg,
+                        values: RwLock::new(values),
+                        declared: AtomicBool::new(false),
                         stop: AtomicBool::new(false),
                         rpc: RwLock::new(None),
-                        status: RwLock::new(PluginStatus {
-                            id: c.id.clone(),
-                            name: c.id.clone(),
-                            version: String::new(),
-                            state: RunState::Starting,
-                            caps: Capabilities::default(),
-                            auth: None,
-                        }),
+                        status: RwLock::new(PluginStatus::new(&c.id, RunState::Starting)),
                         thread: Mutex::new(None),
                         blocked_until: Mutex::new(None),
                     });
@@ -299,10 +344,26 @@ impl PluginHost {
                 }
             }
         }
+        for s in to_notify {
+            Self::notify_settings(&s);
+        }
         for s in to_stop {
             Self::stop_slot(&s);
         }
         self.touch();
+    }
+
+    /// `settings.changed` with every declared setting's value in effect.
+    fn notify_settings(slot: &Slot) {
+        let Some(rpc) = slot.rpc.read().unwrap().clone() else {
+            // Not running: `initialize` carries them.
+            return;
+        };
+        let values = settings::effective(
+            &slot.status.read().unwrap().settings,
+            &slot.values.read().unwrap(),
+        );
+        rpc.notify("settings.changed", json!({ "settings": values }));
     }
 
     fn stop_slot(slot: &Slot) {
@@ -433,6 +494,7 @@ impl PluginHost {
                     }
                 });
         }
+        slot.declared.store(false, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel::<Incoming>();
         let rpc = Rpc::start(&id, stdout, stdin, move |m| {
             let _ = tx.send(m);
@@ -452,6 +514,7 @@ impl PluginHost {
         }
 
         let output = self.inner.output.read().unwrap().clone();
+        let sent = slot.values.read().unwrap().clone();
         let init = rpc.call(
             "initialize",
             json!({
@@ -461,6 +524,7 @@ impl PluginHost {
                 "cache_dir": cache_dir,
                 "locale": self.inner.locale,
                 "output": output,
+                "settings": settings::stored_json(&sent),
             }),
             DEFAULT_TIMEOUT,
         );
@@ -499,8 +563,16 @@ impl PluginHost {
             st.version = info.version.chars().take(40).collect();
             st.caps = caps.clone();
             st.auth = None;
+            // A `settings.declared` already handled is newer.
+            if !slot.declared.load(Ordering::SeqCst) {
+                st.settings = settings::parse_schema(&id, init.get("settings"));
+            }
         }
         *slot.rpc.write().unwrap() = Some(rpc.clone());
+        // Changed while it was starting.
+        if *slot.values.read().unwrap() != sent {
+            Self::notify_settings(slot);
+        }
         tracing::info!("plugin[{id}] ready ({} {})", info.name, info.version);
         if caps.auth {
             self.refresh_auth(slot);
@@ -797,7 +869,14 @@ impl PluginHost {
     fn handle_incoming(&self, slot: &Arc<Slot>, rpc: &Rpc, m: Incoming) {
         match m {
             Incoming::Notification { method, params } => {
-                if method == "auth.changed" {
+                if method == "settings.declared" {
+                    let schema = settings::parse_schema(&slot.cfg.id, params.get("settings"));
+                    let mut st = slot.status.write().unwrap();
+                    st.settings = schema;
+                    slot.declared.store(true, Ordering::SeqCst);
+                    drop(st);
+                    self.touch();
+                } else if method == "auth.changed" {
                     match serde_json::from_value::<AuthStatus>(params.clone()) {
                         Ok(st) if params.get("state").is_some() => {
                             self.store_auth(&slot.cfg.id, st)

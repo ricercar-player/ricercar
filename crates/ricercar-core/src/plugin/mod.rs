@@ -5,6 +5,7 @@
 pub mod catalog;
 mod host;
 mod rpc;
+pub mod settings;
 
 use serde::{Deserialize, Serialize};
 

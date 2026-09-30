@@ -198,6 +198,16 @@ pub fn t(en: &'static str) -> &'static str {
         "Enter the API key and shared secret of your Last.fm API account first." => {
             "Saisissez d'abord la clé API et le secret partagé de votre compte API Last.fm."
         }
+        "Settings for" => "Réglages de",
+        "Changes apply at once." => "Les modifications s'appliquent tout de suite.",
+        "The plugin is not running: changes apply when it starts." => {
+            "Le plugin n'est pas lancé : les modifications s'appliqueront à son démarrage."
+        }
+        "At least" => "Au moins",
+        "At most" => "Au plus",
+        "characters" => "caractères",
+        "Enter a number" => "Saisissez un nombre",
+        "This value is not accepted" => "Cette valeur n'est pas acceptée",
         _ => en,
     }
 }

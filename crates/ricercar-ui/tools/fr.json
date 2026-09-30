@@ -271,5 +271,9 @@
 "Position": "Position",
 "Space": "Espace",
 "User interface": "Interface",
+"Restarts the plugin when changed.": "Modifier ce réglage redémarre le plugin.",
+"Reset to defaults": "Rétablir les valeurs par défaut",
+"Plugin settings": "Réglages du plugin",
+"Plugin settings (available while the plugin runs)": "Réglages du plugin (disponibles quand le plugin est lancé)",
 "Built with the Slint toolkit, used under its royalty-free licence. Third-party licences are installed with ricercar.": "Réalisée avec la boîte à outils Slint, utilisée sous sa licence libre de redevances. Les licences des composants tiers sont installées avec ricercar."
 }

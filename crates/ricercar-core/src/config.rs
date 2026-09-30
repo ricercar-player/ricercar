@@ -183,6 +183,11 @@ pub struct PluginConfig {
     /// comes from somewhere else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// `[plugins.settings]`: values of the settings the plugin declares,
+    /// only those that differ from their default. Changing them does not
+    /// restart the plugin (unless a setting asks for it).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub settings: crate::plugin::settings::Stored,
 }
 
 fn yes() -> bool {
@@ -190,6 +195,16 @@ fn yes() -> bool {
 }
 
 impl PluginConfig {
+    /// Same process: equal but for `settings`, which apply live.
+    pub fn same_process(&self, other: &PluginConfig) -> bool {
+        self.id == other.id
+            && self.command == other.command
+            && self.args == other.args
+            && self.enabled == other.enabled
+            && self.version == other.version
+            && self.host == other.host
+    }
+
     pub fn valid_id(id: &str) -> bool {
         !id.is_empty()
             && id.len() <= 64
@@ -352,6 +367,36 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
+    fn text_of(p: &Path) -> String {
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    #[test]
+    fn plugin_settings_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            "[[plugins]]\nid = \"demo\"\ncommand = \"demo\"\n\n[plugins.settings]\nquality = \"lossless\"\npage_size = 50\nratio = 0.5\nreport_playback = false\n\n[[plugins]]\nid = \"two\"\ncommand = \"two\"\n",
+        )
+        .unwrap();
+        let c = Config::load(&p);
+        let s = &c.plugins[0].settings;
+        assert_eq!(s["quality"], toml::Value::String("lossless".into()));
+        assert_eq!(s["page_size"], toml::Value::Integer(50));
+        assert_eq!(s["ratio"], toml::Value::Float(0.5));
+        assert_eq!(s["report_playback"], toml::Value::Boolean(false));
+        assert!(c.plugins[1].settings.is_empty());
+        c.save(&p).unwrap();
+        assert!(text_of(&p).contains("[plugins.settings]"));
+        assert_eq!(Config::load(&p), c);
+        let mut other = c.plugins[0].clone();
+        other.settings.clear();
+        assert!(other.same_process(&c.plugins[0]) && other != c.plugins[0]);
+        other.args.push("x".into());
+        assert!(!other.same_process(&c.plugins[0]));
+    }
+
     #[test]
     fn plugin_tables() {
         let dir = tempfile::tempdir().unwrap();
@@ -368,6 +413,10 @@ mod tests {
         c.save(&p).unwrap();
         assert_eq!(Config::load(&p), c);
         assert!(PluginConfig::valid_id("my-plugin-2"));
+        assert!(
+            !text_of(&p).contains("settings"),
+            "empty settings not written"
+        );
         assert!(!PluginConfig::valid_id("My plugin") && !PluginConfig::valid_id(""));
     }
 }
