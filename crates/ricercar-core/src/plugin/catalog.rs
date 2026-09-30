@@ -1,7 +1,8 @@
 //! The community plugin hub (github.com/ricercar-player/ricercar-plugins): an index
 //! of entries that point at their authors' repositories and release
-//! binaries. The hub hosts no code. ricercar reads the index only when the
-//! user opens the Plugins page, downloads a binary only when the user asks,
+//! binaries. The hub hosts no code. ricercar reads the index when the user
+//! opens the Plugins page, and at startup when a plugin installed from the
+//! hub may have an update; it downloads a binary only when the user asks,
 //! checks it against the SHA-256 pinned in the index, and runs nothing
 //! from the index itself.
 
@@ -84,6 +85,14 @@ impl std::fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+/// Host part of an `https://` or `file://` URL, lowercased.
+pub fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.rsplit_once('@').map_or(authority, |a| a.1);
+    Some(host.to_ascii_lowercase())
+}
 
 fn https(url: &str) -> bool {
     url.starts_with("https://") && url.len() > "https://".len()
@@ -244,6 +253,7 @@ pub fn install(entry: &Entry, root: &Path, local: bool) -> Result<PluginConfig, 
         args: entry.args.clone(),
         enabled: true,
         version: Some(entry.version.clone()),
+        host: url_host(&asset.url),
     })
 }
 
@@ -260,12 +270,40 @@ pub fn uninstall(root: &Path, id: &str) -> Result<(), CatalogError> {
     }
 }
 
+/// A newer catalogue version of an installed plugin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateInfo {
+    pub version: String,
+    /// The binary for this machine is now served from another host than
+    /// the installed one: ask the user again before installing.
+    pub host_changed: bool,
+}
+
+/// The update offered for an installed plugin, if the catalogue version is
+/// strictly newer (a pre-release is older than its release).
+pub fn update_info(installed: &PluginConfig, entry: &Entry) -> Option<UpdateInfo> {
+    let current = installed.version.as_deref()?;
+    let newer = !entry.version.trim().is_empty()
+        && entry
+            .version
+            .trim_start_matches('v')
+            .starts_with(|c: char| c.is_ascii_digit())
+        && crate::update::compare(&entry.version, current) == std::cmp::Ordering::Greater;
+    if !newer {
+        return None;
+    }
+    let now = entry
+        .asset_for(current_arch())
+        .and_then(|a| url_host(&a.url));
+    Some(UpdateInfo {
+        version: entry.version.clone(),
+        host_changed: installed.host.is_some() && now != installed.host,
+    })
+}
+
 /// Whether a newer catalogue version exists for an installed plugin.
 pub fn update_available(installed: &PluginConfig, entry: &Entry) -> bool {
-    installed
-        .version
-        .as_ref()
-        .is_some_and(|v| !entry.version.is_empty() && *v != entry.version)
+    update_info(installed, entry).is_some()
 }
 
 #[cfg(test)]
@@ -367,11 +405,51 @@ mod tests {
         assert!(update_available(&cfg, &e2));
         let cfg2 = install(&e2, &root, true).unwrap();
         assert!(cfg2.command.exists() && !cfg.command.exists());
+        assert_eq!(cfg2.host.as_deref(), Some(""));
 
         uninstall(&root, "demo").unwrap();
         assert!(!root.join("demo").exists());
         uninstall(&root, "demo").unwrap();
         assert!(uninstall(&root, "../x").is_err());
+    }
+
+    #[test]
+    fn updates_only_go_forward() {
+        let sha = "0".repeat(64);
+        let mut e = entry("https://github.com/a/b/releases/download/v1/p", &sha);
+        let installed = |v: &str| PluginConfig {
+            id: "demo".into(),
+            command: "/x".into(),
+            args: vec![],
+            enabled: true,
+            version: Some(v.into()),
+            host: Some("github.com".into()),
+        };
+        e.version = "1.0.0".into();
+        assert!(update_info(&installed("1.0.0"), &e).is_none());
+        assert!(update_info(&installed("1.1.0"), &e).is_none());
+        assert!(update_info(&installed("1.0.0-rc.1"), &e).is_some());
+        e.version = "1.0.1-beta".into();
+        assert!(update_info(&installed("1.0.1"), &e).is_none());
+        e.version = "nightly".into();
+        assert!(update_info(&installed("1.0.0"), &e).is_none());
+        e.version = "1.2.0".into();
+        assert_eq!(
+            update_info(&installed("1.0.0"), &e),
+            Some(UpdateInfo {
+                version: "1.2.0".into(),
+                host_changed: false
+            })
+        );
+        e.assets[0].url = "https://evil.example/p".into();
+        assert!(update_info(&installed("1.0.0"), &e).unwrap().host_changed);
+        let mut by_hand = installed("1.0.0");
+        by_hand.version = None;
+        assert!(!update_available(&by_hand, &e));
+        assert_eq!(
+            url_host("https://User@Example.org:443/x?y").as_deref(),
+            Some("example.org:443")
+        );
     }
 
     #[test]

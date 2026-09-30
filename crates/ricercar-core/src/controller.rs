@@ -1257,7 +1257,7 @@ impl Bridge {
                 None
             } else {
                 st.current.and_then(|i| {
-                    let cur = &st.queue[i];
+                    let cur = st.queue.get(i)?;
                     if cur.info.live {
                         return None;
                     }

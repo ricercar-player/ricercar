@@ -58,9 +58,10 @@ It hosts no plugin code: each entry points at its author's repository and at
 prebuilt binaries the author publishes, with their SHA-256 pinned in the
 entry. Listing is not a review or an endorsement.
 
-The hub's CI turns the entries into `index.json`, which the app reads only
-when the Plugins page opens (and never when Settings → Online extras →
-Plugin catalogue is off):
+The hub's CI turns the entries into `index.json`, which the app reads when
+the Plugins page opens, and once at startup when a plugin installed from the
+hub is declared (to count available updates). It is never read when
+Settings → Online extras → Plugin catalogue is off:
 
 ```jsonc
 {"version": 1, "plugins": [{
@@ -84,8 +85,12 @@ Plugin catalogue is off):
   what is and is not checked), downloads the binary for this architecture
   (256 MB at most), checks its SHA-256, puts it in
   `$XDG_DATA_HOME/ricercar/plugin-bin/<id>/<version>/<id>` and adds a
-  `[[plugins]]` table with `version` set. **Update** does the same with the
-  newer version and removes the old one. **Remove** deletes the table and,
+  `[[plugins]]` table with `version` and `host` (where the binary came
+  from) set. **Update** is offered only when the index version is strictly
+  newer than the installed one (a pre-release is older than its release);
+  if the binary now comes from another host, the app asks again before
+  installing. It does the same as Install with the newer version and removes
+  the old one. **Remove** deletes the table and,
   for hub installs only, the binaries; the plugin's data directory stays.
 - `RICERCAR_PLUGIN_INDEX` points the app at another index (a URL or a local
   file, whose assets may then be `file://`), for tests and the screenshot
@@ -102,10 +107,16 @@ command = "/usr/local/bin/example-plugin"
 args = ["--serve"]
 enabled = true
 # version = "1.2.0"            # set by installs from the hub only
+# host = "github.com"          # likewise: where the binary was downloaded
 ```
 
 - The host passes nothing secret on the command line and does not expand
   environment variables.
+- The environment is cleared, then only these variables are passed on:
+  `HOME`, `USER`, `LOGNAME`, `PATH`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`,
+  `XDG_*`, `TMPDIR`, `http_proxy`, `https_proxy`, `no_proxy` (and their
+  upper-case forms), `SSL_CERT_FILE`, `SSL_CERT_DIR` and
+  `DBUS_SESSION_BUS_ADDRESS`.
 - Each plugin gets its own directories, created by the host and sent in
   `initialize`:
   - `$XDG_DATA_HOME/ricercar/plugins/<id>/`: credentials and state, owned by
@@ -118,12 +129,18 @@ enabled = true
 - `ricercar-daemon` (the `AppContext`, shared by the daemon and the desktop
   app) spawns every enabled plugin at startup, one process each.
   `ricercar-cli` does not.
+- Each plugin runs in its own process group; stopping it kills the whole
+  group, helpers it started included.
 - `stdin`/`stdout` carry the protocol. Each `stderr` line goes to the ricercar
   log, prefixed with `plugin[<id>]`.
 - **Crash or exit:** the host restarts the plugin with backoff (1 s, 2 s, 5 s,
   then every 30 s) and marks its items unavailable meanwhile. Queue entries
   stay in place and resolve again once the plugin is back.
-- **Shutdown:** the host sends `shutdown`, waits 2 s, then kills the process.
+- **Shutdown:** the host sends `shutdown`, waits 2 s, then kills the process
+  group.
+- **Back-pressure:** messages to a plugin go through a bounded queue. If the
+  plugin stops reading its `stdin`, notifications are dropped and calls fail
+  at once with a timeout instead of blocking the player.
 - **Config changes** (plugin added, removed, toggled, from the settings or
   by editing `config.toml`) apply without a restart, like the network
   settings.
@@ -147,7 +164,7 @@ enabled = true
 // host → plugin
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
   "protocol": 1,
-  "host": {"name":"ricercar","version":"0.5.0"},
+  "host": {"name":"ricercar","version":"0.5.2"},
   "data_dir": "/home/u/.local/share/ricercar/plugins/example",
   "cache_dir": "/home/u/.cache/ricercar/plugins/example",
   "locale": "fr-FR",
@@ -205,6 +222,7 @@ Every entry a plugin returns is an **item**:
   "artist": "…", "album": "…", "album_artist": "…",
   "track_no": 3, "disc_no": 1, "year": 2019, "genre": "…",
   "duration_ms": 245000,
+  "track_count": 12,              // albums, playlists: number of tracks (artist page total)
   "art": "https://…/cover.jpg",   // http(s) image, fetched by the host's cover cache
   "format": {"sample_rate": 96000, "bits": 24, "codec": "flac"},  // best available, informative
   "playable": true,               // tracks: false when region/subscription forbids it
@@ -335,7 +353,7 @@ to a UI message and never shows raw text from the plugin as HTML.
 | -32001 | `auth_required` | Mark the plugin signed out and offer to sign in. |
 | -32002 | `not_found` | Grey the item out. |
 | -32003 | `unavailable` | "Not available (region, subscription or format)". Skip to the next track when playing. |
-| -32004 | `rate_limited` | `data.retry_after` in seconds. Back off. |
+| -32004 | `rate_limited` | `data.retry_after` in seconds (capped at 3600). Back off. |
 | -32005 | `network` | Retry once, then show an offline state. |
 
 ## Changes in ricercar

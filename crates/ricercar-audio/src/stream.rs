@@ -62,9 +62,9 @@ fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
         {
-            out.push(v);
+            out.push(h << 4 | l);
             i += 3;
             continue;
         }
@@ -72,6 +72,24 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn percent_decode_edges() {
+    assert_eq!(percent_decode("%aé"), "%aé");
+    assert_eq!(percent_decode("a%41"), "aA");
+    assert_eq!(percent_decode("%"), "%");
+    assert_eq!(percent_decode("%4"), "%4");
 }
 
 fn extension_of(uri: &str) -> Option<String> {
@@ -223,12 +241,19 @@ impl TrackSource {
                     self.decoder.reset();
                     continue;
                 }
-                // A truncated final frame surfaces as an IO error, not as
-                // `Ok(None)` — treat it as end of stream.
-                Err(symphonia::core::errors::Error::IoError(_)) => {
+                // A truncated final frame surfaces as an unexpected EOF, not
+                // as `Ok(None)` — treat it as end of stream.
+                Err(symphonia::core::errors::Error::IoError(e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
                     self.end_of_stream = true;
                     let _ = self.decoder.finalize();
                     return Ok(!self.pending.is_empty());
+                }
+                // Anything else is the transport failing (network, disk):
+                // not an end of track.
+                Err(symphonia::core::errors::Error::IoError(e)) => {
+                    return Err(AudioError::Io(e));
                 }
                 Err(e) => return Err(AudioError::Decode(format!("packet: {e}"))),
             }

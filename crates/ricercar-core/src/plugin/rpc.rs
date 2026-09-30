@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 
 /// Longest line read from a plugin; longer ones are dropped.
 const MAX_LINE: usize = 32 * 1024 * 1024;
+/// Messages waiting for the writer thread; a plugin that stops reading its
+/// stdin fills this instead of blocking callers.
+const OUT_QUEUE: usize = 256;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RpcError {
@@ -24,6 +27,8 @@ pub enum CallError {
     Rpc(RpcError),
     Timeout,
     Closed,
+    /// The plugin is not reading its input: nothing was sent.
+    Busy,
 }
 
 /// A message the other side started.
@@ -43,7 +48,7 @@ pub enum Incoming {
 type Waiter = Sender<Result<Value, RpcError>>;
 
 pub struct Rpc {
-    out: Mutex<Box<dyn Write + Send>>,
+    out: SyncSender<Vec<u8>>,
     next_id: AtomicU64,
     waiting: Arc<Mutex<HashMap<u64, Waiter>>>,
     closed: Arc<AtomicBool>,
@@ -58,8 +63,9 @@ impl Rpc {
         output: impl Write + Send + 'static,
         incoming: impl Fn(Incoming) + Send + 'static,
     ) -> Arc<Rpc> {
+        let (out, lines) = mpsc::sync_channel::<Vec<u8>>(OUT_QUEUE);
         let rpc = Arc::new(Rpc {
-            out: Mutex::new(Box::new(output)),
+            out,
             next_id: AtomicU64::new(1),
             waiting: Arc::new(Mutex::new(HashMap::new())),
             closed: Arc::new(AtomicBool::new(false)),
@@ -67,6 +73,21 @@ impl Rpc {
         let waiting = rpc.waiting.clone();
         let closed = rpc.closed.clone();
         let label = name.to_string();
+        {
+            let closed = rpc.closed.clone();
+            let mut output = output;
+            std::thread::Builder::new()
+                .name(format!("ricercar-rpc-{name}-out"))
+                .spawn(move || {
+                    for line in lines {
+                        if output.write_all(&line).is_err() || output.flush().is_err() {
+                            closed.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                    }
+                })
+                .expect("spawn rpc writer");
+        }
         std::thread::Builder::new()
             .name(format!("ricercar-rpc-{name}"))
             .spawn(move || {
@@ -110,11 +131,15 @@ impl Rpc {
         self.closed.load(Ordering::SeqCst)
     }
 
-    fn send(&self, msg: &Value) -> bool {
-        let mut line = msg.to_string();
-        line.push('\n');
-        let mut out = self.out.lock().unwrap();
-        out.write_all(line.as_bytes()).is_ok() && out.flush().is_ok()
+    /// Queue one message for the writer thread; never blocks.
+    fn send(&self, msg: &Value) -> Result<(), CallError> {
+        let mut line = msg.to_string().into_bytes();
+        line.push(b'\n');
+        match self.out.try_send(line) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(CallError::Busy),
+            Err(TrySendError::Disconnected(_)) => Err(CallError::Closed),
+        }
     }
 
     pub fn call(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
@@ -125,9 +150,9 @@ impl Rpc {
         let (tx, rx) = mpsc::channel();
         self.waiting.lock().unwrap().insert(id, tx);
         let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        if !self.send(&msg) {
+        if let Err(e) = self.send(&msg) {
             self.waiting.lock().unwrap().remove(&id);
-            return Err(CallError::Closed);
+            return Err(e);
         }
         let r = rx.recv_timeout(timeout);
         self.waiting.lock().unwrap().remove(&id);
@@ -140,8 +165,11 @@ impl Rpc {
     }
 
     pub fn notify(&self, method: &str, params: Value) {
-        if !self.is_closed() {
-            self.send(&json!({"jsonrpc": "2.0", "method": method, "params": params}));
+        if !self.is_closed()
+            && self.send(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
+                == Err(CallError::Busy)
+        {
+            tracing::debug!("plugin not reading its input: {method} dropped");
         }
     }
 
@@ -156,7 +184,7 @@ impl Rpc {
                 json!({"jsonrpc": "2.0", "id": id, "error": err})
             }
         };
-        self.send(&msg);
+        let _ = self.send(&msg);
     }
 }
 
@@ -237,6 +265,23 @@ mod tests {
             let _ = tx.send(m);
         });
         (rpc, rx)
+    }
+
+    #[test]
+    fn a_peer_that_does_not_read_never_blocks_the_caller() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let rpc = Rpc::start("stuck", a.try_clone().unwrap(), a, |_| {});
+        let t0 = std::time::Instant::now();
+        let big = "x".repeat(4096);
+        for _ in 0..10_000 {
+            rpc.notify("playback.progress", json!({ "pad": big }));
+        }
+        assert_eq!(
+            rpc.call("echo", json!({}), Duration::from_secs(5)),
+            Err(CallError::Busy)
+        );
+        assert!(t0.elapsed() < Duration::from_secs(5));
+        drop(b);
     }
 
     #[test]

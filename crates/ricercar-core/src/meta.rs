@@ -253,9 +253,9 @@ pub fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
         {
-            out.push(v);
+            out.push(h << 4 | l);
             i += 3;
             continue;
         }
@@ -263,6 +263,15 @@ pub fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +284,17 @@ mod tests {
         let uri = file_uri(p);
         assert!(!uri.contains(' ') && !uri.contains('#'));
         assert_eq!(uri_to_path(&uri).unwrap(), p);
+    }
+
+    #[test]
+    fn percent_decode_edges() {
+        assert_eq!(percent_decode("%aé"), "%aé");
+        assert_eq!(percent_decode("%é1"), "%é1");
+        assert_eq!(percent_decode("a%41"), "aA");
+        assert_eq!(percent_decode("%c3%A9"), "é");
+        assert_eq!(percent_decode("%"), "%");
+        assert_eq!(percent_decode("%4"), "%4");
+        assert_eq!(percent_decode("%zz"), "%zz");
     }
 
     #[test]

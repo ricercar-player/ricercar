@@ -179,6 +179,10 @@ pub struct PluginConfig {
     /// absent for plugins declared by hand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Host the hub binary was downloaded from, to notice when an update
+    /// comes from somewhere else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
 }
 
 fn yes() -> bool {
@@ -257,13 +261,54 @@ fn default_music_dir() -> Option<PathBuf> {
 }
 
 /// Write via a temp file + rename so a crash never leaves a truncated file.
+/// The file is private to the user (0600: the config holds secrets) and
+/// synced to disk before and after the rename.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
+    write_private(path, bytes, true)
+}
+
+/// Same, without the syncs: for caches that can be rebuilt.
+pub(crate) fn write_cache(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_private(path, bytes, false)
+}
+
+fn write_private(path: &Path, bytes: &[u8], durable: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    if let Some(parent) = parent {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let tmp = path.with_file_name(name);
+    let written = (|| {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        if durable {
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return written;
+    }
+    if durable {
+        std::fs::File::open(parent.unwrap_or(Path::new(".")))?.sync_all()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -285,6 +330,26 @@ mod tests {
         assert_eq!(c.audio.replaygain, ReplayGain::Album);
         assert_eq!(c.audio.device, "default");
         assert_eq!(c.network.name, "ricercar");
+    }
+
+    #[test]
+    fn writes_are_private_and_concurrent_safe() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("session.json");
+        std::fs::write(&p, b"old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                let p = &p;
+                s.spawn(move || write_atomic(p, format!("v{i}").as_bytes()).unwrap());
+            }
+        });
+        assert!(std::fs::read_to_string(&p).unwrap().starts_with('v'));
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        // No temp file left behind.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]

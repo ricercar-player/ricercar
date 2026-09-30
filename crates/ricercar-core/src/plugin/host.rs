@@ -2,7 +2,9 @@
 //! URL resolution for the controller, playback reporting and remote control.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -31,6 +33,8 @@ const BACKOFF: [u64; 4] = [1, 2, 5, 30];
 /// A process that ran this long starts the backoff over.
 const STABLE: Duration = Duration::from_secs(60);
 const PROGRESS_EVERY: Duration = Duration::from_secs(30);
+/// Longest rate-limit block honoured, whatever the plugin asks for.
+const MAX_RETRY_AFTER: u64 = 3600;
 
 /// What a plugin is doing, for the settings page and the diagnostic report.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,10 +113,54 @@ fn locale() -> String {
         .replace('_', "-")
 }
 
+/// Variables a plugin inherits; everything else in ricercar's environment
+/// is left out.
+fn plugin_env() -> Vec<(OsString, OsString)> {
+    const KEEP: [&str; 17] = [
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "PATH",
+        "LANG",
+        "TZ",
+        "TMPDIR",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "LANGUAGE",
+    ];
+    std::env::vars_os()
+        .filter(|(k, _)| {
+            k.to_str()
+                .is_some_and(|k| KEEP.contains(&k) || k.starts_with("LC_") || k.starts_with("XDG_"))
+        })
+        .collect()
+}
+
+/// SIGKILL the plugin's process group (it runs in its own), so helpers it
+/// started go too.
+fn kill_group(child: &Child) {
+    if let Ok(pid) = libc::pid_t::try_from(child.id())
+        && pid > 1
+    {
+        // SAFETY: plain syscall; a negative pid names the process group.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+}
+
 fn map_call_error(e: CallError) -> PluginError {
     match e {
         CallError::Timeout => PluginError::Timeout,
         CallError::Closed => PluginError::NotRunning,
+        CallError::Busy => PluginError::Timeout,
         CallError::Rpc(RpcError {
             code,
             message,
@@ -290,10 +338,16 @@ impl PluginHost {
         }
         *self.inner.output.write().unwrap() = output.clone();
         let params = serde_json::to_value(&output).unwrap_or(Value::Null);
-        for s in self.inner.slots.lock().unwrap().values() {
-            if let Some(rpc) = s.rpc.read().unwrap().clone() {
-                rpc.notify("output.changed", json!({ "output": params }));
-            }
+        let rpcs: Vec<Arc<Rpc>> = self
+            .inner
+            .slots
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(|s| s.rpc.read().unwrap().clone())
+            .collect();
+        for rpc in rpcs {
+            rpc.notify("output.changed", json!({ "output": params }));
         }
     }
 
@@ -346,6 +400,9 @@ impl PluginHost {
         let _ = std::fs::create_dir_all(&cache_dir);
         let mut child = match Command::new(&slot.cfg.command)
             .args(&slot.cfg.args)
+            .env_clear()
+            .envs(plugin_env())
+            .process_group(0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -459,6 +516,7 @@ impl PluginHost {
             match child.try_wait() {
                 Ok(Some(status)) => {
                     tracing::warn!("plugin[{id}] exited: {status}");
+                    kill_group(&child);
                     return Ok(());
                 }
                 Ok(None) => {}
@@ -468,7 +526,8 @@ impl PluginHost {
         }
     }
 
-    /// `shutdown` (when `polite`), up to 2 s, then kill.
+    /// `shutdown` (when `polite`), up to 2 s, then kill the whole group.
+    /// Never waits longer: the request is only queued, not written here.
     fn kill(child: &mut Child, rpc: &Rpc, polite: bool) {
         let deadline = Instant::now() + SHUTDOWN_GRACE;
         if polite {
@@ -476,10 +535,12 @@ impl PluginHost {
         }
         while Instant::now() < deadline {
             if let Ok(Some(_)) = child.try_wait() {
+                kill_group(child);
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+        kill_group(child);
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -522,8 +583,8 @@ impl PluginHost {
         }
         match &r {
             Err(PluginError::RateLimited { retry_after }) => {
-                *slot.blocked_until.lock().unwrap() =
-                    Some(Instant::now() + Duration::from_secs(*retry_after));
+                let wait = Duration::from_secs((*retry_after).min(MAX_RETRY_AFTER));
+                *slot.blocked_until.lock().unwrap() = Instant::now().checked_add(wait);
             }
             Err(PluginError::AuthRequired) => {
                 slot.status.write().unwrap().auth = Some(AuthStatus {

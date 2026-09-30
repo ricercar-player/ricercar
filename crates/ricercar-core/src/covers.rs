@@ -38,7 +38,7 @@ impl CoverCache {
 
     /// Store art fetched online (Cover Art Archive…) for a key.
     pub fn put_original(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
-        crate::config::write_atomic(&self.original_path(key), bytes)?;
+        crate::config::write_cache(&self.original_path(key), bytes)?;
         self.misses.lock().unwrap().remove(key);
         for entry in std::fs::read_dir(&self.dir)?.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -96,7 +96,7 @@ impl CoverCache {
         let mut buf = Vec::new();
         let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 90);
         img.to_rgb8().write_with_encoder(enc).ok()?;
-        crate::config::write_atomic(&out, &buf).ok()?;
+        crate::config::write_cache(&out, &buf).ok()?;
         Some(out)
     }
 

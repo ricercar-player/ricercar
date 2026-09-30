@@ -95,6 +95,7 @@ fn config(args: &[&str], enabled: bool) -> PluginConfig {
         args: args.iter().map(|a| a.to_string()).collect(),
         enabled,
         version: None,
+        host: None,
     }
 }
 

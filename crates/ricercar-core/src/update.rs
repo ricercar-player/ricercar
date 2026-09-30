@@ -22,6 +22,8 @@ pub const INTERVAL: i64 = 24 * 3600;
 const DOWNLOADS: &str = "https://github.com/ricercar-player/ricercar/releases/download/";
 const SUMS: &str = "SHA256SUMS";
 const MAX_FILE: u64 = 512 << 20;
+/// Installed by the release packages: only they are upgraded in place.
+const PACKAGE_MARKER: &str = "/usr/share/ricercar/self-update";
 
 /// A published release.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -156,8 +158,8 @@ pub enum Install {
     AppImage(PathBuf),
     /// A package of the release, upgraded by the package manager.
     Package(Manager, PathBuf),
-    /// Built from source, unpacked by hand, or a distribution's own
-    /// package: the release page is the only offer.
+    /// Built from source, unpacked by hand, a distribution's own package,
+    /// or `RICERCAR_NO_SELF_UPDATE=1`: the release page is the only offer.
     Manual,
 }
 
@@ -185,6 +187,9 @@ pub fn install_kind() -> &'static Install {
 }
 
 fn detect() -> Install {
+    if std::env::var_os("RICERCAR_NO_SELF_UPDATE").is_some_and(|v| v == "1") {
+        return Install::Manual;
+    }
     if let Some(p) = std::env::var_os("APPIMAGE").map(PathBuf::from)
         && p.is_file()
     {
@@ -193,7 +198,7 @@ fn detect() -> Install {
     let Ok(exe) = std::env::current_exe() else {
         return Install::Manual;
     };
-    if !exe.starts_with("/usr/") {
+    if !exe.starts_with("/usr/") || !Path::new(PACKAGE_MARKER).exists() {
         return Install::Manual;
     }
     let owner = |cmd: &str, args: &[&str]| -> Option<String> {
@@ -291,6 +296,8 @@ pub enum InstallError {
     Checksum,
     /// The password prompt was closed.
     Cancelled,
+    /// Not authorised, or no polkit authentication agent to ask with.
+    NotAuthorized,
     Failed(String),
 }
 
@@ -301,6 +308,10 @@ impl std::fmt::Display for InstallError {
             InstallError::Network(e) => write!(f, "download: {e}"),
             InstallError::Checksum => write!(f, "the download does not match SHA256SUMS"),
             InstallError::Cancelled => write!(f, "cancelled"),
+            InstallError::NotAuthorized => write!(
+                f,
+                "not authorised (is a polkit authentication agent running?)"
+            ),
             InstallError::Failed(e) => write!(f, "{e}"),
         }
     }
@@ -332,7 +343,7 @@ pub fn install(release: &Release, kind: &Install, work: &Path) -> Result<(), Ins
             std::fs::create_dir_all(work).map_err(io)?;
             let file = work.join(&asset.name);
             std::fs::write(&file, &bytes).map_err(io)?;
-            let result = run_manager(*manager, &file);
+            let result = run_manager(*manager, &file, &want);
             let _ = std::fs::remove_file(&file);
             result
         }
@@ -346,11 +357,18 @@ fn replace_file(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let dir = target.parent().unwrap_or(Path::new("."));
     let tmp = dir.join(".ricercar-update.part");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    std::fs::rename(&tmp, target).inspect_err(|_| {
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        std::io::Write::write_all(&mut f, bytes)?;
+        f.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, target)
+    })();
+    if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
-    })
+        return written;
+    }
+    std::fs::File::open(dir)?.sync_all()
 }
 
 fn has(cmd: &str) -> bool {
@@ -358,10 +376,9 @@ fn has(cmd: &str) -> bool {
         .is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(cmd).is_file()))
 }
 
-/// The package manager's command for a local package file.
-fn manager_command(manager: Manager, file: &Path, has: impl Fn(&str) -> bool) -> Vec<String> {
-    let f = file.to_string_lossy().into_owned();
-    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).chain([f.clone()]).collect();
+/// The package manager's command; the package file goes last.
+fn manager_command(manager: Manager, has: impl Fn(&str) -> bool) -> Vec<String> {
+    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect();
     match manager {
         Manager::Pacman => v(&["pacman", "-U", "--noconfirm"]),
         Manager::Deb if has("apt-get") => v(&["apt-get", "install", "-y"]),
@@ -377,21 +394,66 @@ fn manager_command(manager: Manager, file: &Path, has: impl Fn(&str) -> bool) ->
     }
 }
 
+/// Runs as root. The package is first copied into a fresh root-only
+/// directory and checked again there, so the user-writable copy can not be
+/// swapped between the check and the install. Arguments: the package file,
+/// its SHA-256, then the manager command. Its own failures exit 90-93, and
+/// the manager's 126/127 become 1 so they are not taken for pkexec's.
+const ROOT_INSTALL: &str = r#"src=$1; want=$2; shift 2
+d=$(mktemp -d) || exit 90
+trap 'rm -rf "$d"' EXIT
+chmod 700 "$d" || exit 90
+pkg="$d/${src##*/}"
+cp -- "$src" "$pkg" || exit 91
+got=$(sha256sum < "$pkg") || exit 92
+[ "${got%% *}" = "$want" ] || exit 93
+"$@" "$pkg"
+rc=$?
+case $rc in 126|127) rc=1 ;; esac
+exit $rc"#;
+
+/// `pkexec` arguments that install `file` (expected digest `sha256`).
+fn root_command(cmd: &[String], file: &Path, sha256: &str) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        ROOT_INSTALL.into(),
+        "sh".into(),
+        file.into(),
+        sha256.into(),
+    ];
+    args.extend(cmd.iter().map(Into::into));
+    args
+}
+
+fn valid_sha256(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Run the package manager as root; `pkexec` shows the desktop's password
 /// prompt.
-fn run_manager(manager: Manager, file: &Path) -> Result<(), InstallError> {
+fn run_manager(manager: Manager, file: &Path, sha256: &str) -> Result<(), InstallError> {
+    if !valid_sha256(sha256) {
+        return Err(InstallError::Checksum);
+    }
     if !has("pkexec") {
         return Err(InstallError::Failed("pkexec is not installed".into()));
     }
-    let cmd = manager_command(manager, file, has);
+    let cmd = manager_command(manager, has);
     let out = Command::new("pkexec")
-        .args(&cmd)
+        .args(root_command(&cmd, file, &sha256.to_ascii_lowercase()))
         .output()
         .map_err(|e| InstallError::Failed(e.to_string()))?;
     match out.status.code() {
         Some(0) => Ok(()),
-        // pkexec: the dialog was dismissed, or authorisation refused.
-        Some(126 | 127) => Err(InstallError::Cancelled),
+        // pkexec: the dialog was dismissed.
+        Some(126) => Err(InstallError::Cancelled),
+        // pkexec: not authorised, no authentication agent, or its own error.
+        Some(127) => Err(InstallError::NotAuthorized),
+        Some(93) => Err(InstallError::Checksum),
+        Some(90..=92) => Err(InstallError::Failed(
+            "could not copy the package for installation".into(),
+        )),
         _ => {
             let err = String::from_utf8_lossy(&out.stderr);
             let line = err
@@ -593,28 +655,55 @@ mod tests {
 
     #[test]
     fn package_manager_commands() {
-        let f = Path::new("/c/p.rpm");
         let none = |_: &str| false;
         assert_eq!(
-            manager_command(Manager::Pacman, f, none),
-            ["pacman", "-U", "--noconfirm", "/c/p.rpm"]
+            manager_command(Manager::Pacman, none),
+            ["pacman", "-U", "--noconfirm"]
         );
         assert_eq!(
-            manager_command(Manager::Deb, f, |c| c == "apt-get"),
-            ["apt-get", "install", "-y", "/c/p.rpm"]
+            manager_command(Manager::Deb, |c| c == "apt-get"),
+            ["apt-get", "install", "-y"]
         );
+        assert_eq!(manager_command(Manager::Deb, none), ["dpkg", "-i"]);
         assert_eq!(
-            manager_command(Manager::Deb, f, none),
-            ["dpkg", "-i", "/c/p.rpm"]
-        );
-        assert_eq!(
-            manager_command(Manager::Rpm, f, |c| c == "zypper")[0..2],
+            manager_command(Manager::Rpm, |c| c == "zypper")[0..2],
             ["zypper", "--non-interactive"]
         );
-        assert_eq!(
-            manager_command(Manager::Rpm, f, none),
-            ["rpm", "-U", "/c/p.rpm"]
-        );
+        assert_eq!(manager_command(Manager::Rpm, none), ["rpm", "-U"]);
+        assert!(!valid_sha256("abc") && !valid_sha256(&"g".repeat(64)));
+        assert!(valid_sha256(&"aB".repeat(32)));
+    }
+
+    /// The root-side script, run unprivileged with `echo` as the manager.
+    fn run_root_script(file: &Path, sha256: &str) -> (Option<i32>, String) {
+        let args = root_command(&["echo".into(), "installing".into()], file, sha256);
+        let out = Command::new(&args[0]).args(&args[1..]).output().unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    }
+
+    #[test]
+    fn root_script_checks_its_own_copy() {
+        if !has("sha256sum") || !Path::new("/bin/sh").exists() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // A name that must not be read as shell code.
+        let file = dir.path().join("p$(touch pwned);'x'.pkg.tar.zst");
+        std::fs::write(&file, b"package").unwrap();
+        let good = crate::plugin::catalog::sha256_hex(b"package");
+        let (code, out) = run_root_script(&file, &good);
+        assert_eq!(code, Some(0));
+        assert!(out.starts_with("installing /"));
+        assert!(out.trim_end().ends_with("/p$(touch pwned);'x'.pkg.tar.zst"));
+        // The copy was removed with its directory.
+        let copy = out.trim_end().trim_start_matches("installing ");
+        assert!(!Path::new(copy).exists());
+        assert!(!dir.path().join("pwned").exists());
+        let (code, out) = run_root_script(&file, &"0".repeat(64));
+        assert_eq!((code, out.as_str()), (Some(93), ""));
     }
 
     #[test]

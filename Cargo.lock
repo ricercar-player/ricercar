@@ -4046,6 +4046,7 @@ version = "0.5.2"
 dependencies = [
  "alsa",
  "crossbeam-channel",
+ "libc",
  "serde_json",
  "symphonia",
  "thiserror 2.0.20",
@@ -4067,6 +4068,7 @@ version = "0.5.2"
 dependencies = [
  "crossbeam-channel",
  "image",
+ "libc",
  "lofty",
  "notify",
  "rayon",
@@ -4129,6 +4131,7 @@ name = "ricercar-ui"
 version = "0.5.2"
 dependencies = [
  "chrono",
+ "ctrlc",
  "image",
  "ksni",
  "qrcode",

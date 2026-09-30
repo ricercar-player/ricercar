@@ -144,6 +144,8 @@ pub struct Item {
     pub year: Option<i32>,
     pub genre: Option<String>,
     pub duration_ms: Option<u64>,
+    /// Albums and playlists: how many tracks they hold.
+    pub track_count: Option<u32>,
     pub art: Option<String>,
     pub format: Option<Format>,
     pub playable: Option<bool>,

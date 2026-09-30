@@ -16,6 +16,8 @@ pub const SUPPORTED_EXTS: &[&str] = &[
     "flac", "wav", "aiff", "aif", "aifc", "mp3", "ogg", "oga", "m4a", "mp4", "alac",
 ];
 
+/// Bump with a new step in `schema`: each step upgrades from the version
+/// before it and must keep user data (stats, playlists, `added_at`...).
 const SCHEMA_VERSION: i32 = 2;
 
 pub fn now_unix() -> i64 {
@@ -226,7 +228,7 @@ pub struct Library {
 
 fn schema(conn: &Connection) -> rusqlite::Result<()> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version < SCHEMA_VERSION {
+    if version < 2 {
         // v1 only held an index of files (no user data): rebuild it.
         conn.execute_batch(
             "DROP TABLE IF EXISTS tracks_fts;
@@ -320,7 +322,10 @@ fn schema(conn: &Connection) -> rusqlite::Result<()> {
     if !history_info {
         conn.execute_batch("ALTER TABLE history ADD COLUMN info TEXT")?;
     }
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    // Later steps go here, as `if version < N { ... }`.
+    if version < SCHEMA_VERSION {
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    }
     Ok(())
 }
 
@@ -585,7 +590,9 @@ impl Library {
         let mut seen: HashSet<String> = HashSet::new();
         let mut todo: Vec<Scanned> = Vec::new();
         let mut report = ScanReport::default();
-        let mut live_roots: Vec<String> = Vec::new();
+        let mut live_roots: Vec<PathBuf> = Vec::new();
+        // Directories the walk could not read: what is under them is kept.
+        let mut unreadable: Vec<PathBuf> = Vec::new();
 
         for root in roots {
             if !root.is_dir() {
@@ -593,8 +600,16 @@ impl Library {
                 tracing::warn!("library root {} is not available", root.display());
                 continue;
             }
-            live_roots.push(root.to_string_lossy().into_owned());
-            for entry in WalkDir::new(root).follow_links(true).into_iter().flatten() {
+            live_roots.push(root.clone());
+            for entry in WalkDir::new(root).follow_links(true) {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::warn!("library scan: {e}");
+                        unreadable.push(e.path().unwrap_or(root).to_path_buf());
+                        continue;
+                    }
+                };
                 if !entry.file_type().is_file() {
                     continue;
                 }
@@ -649,7 +664,12 @@ impl Library {
 
         let gone: Vec<&String> = known
             .keys()
-            .filter(|p| !seen.contains(*p) && live_roots.iter().any(|r| p.starts_with(r.as_str())))
+            .filter(|p| {
+                let path = Path::new(p.as_str());
+                !seen.contains(*p)
+                    && live_roots.iter().any(|r| path.starts_with(r))
+                    && !unreadable.iter().any(|d| path.starts_with(d))
+            })
             .collect();
         if !gone.is_empty() {
             let mut conn = self.w();
@@ -710,16 +730,12 @@ impl Library {
     /// from the settings).
     pub fn retain_roots(&self, roots: &[PathBuf]) -> usize {
         let paths: Vec<String> = self.query("SELECT path FROM tracks", [], |r| r.get(0));
-        let roots: Vec<String> = roots
-            .iter()
-            .map(|r| r.to_string_lossy().into_owned())
-            .collect();
         let mut n = 0;
         let mut conn = self.w();
         if let Ok(tx) = conn.transaction() {
             for p in paths
                 .iter()
-                .filter(|p| !roots.iter().any(|r| p.starts_with(r.as_str())))
+                .filter(|p| !roots.iter().any(|r| Path::new(p.as_str()).starts_with(r)))
             {
                 n += tx
                     .execute("DELETE FROM tracks WHERE path = ?1", [p])
@@ -1295,23 +1311,45 @@ impl Library {
         )
     }
 
+    /// Whether each stored entry shows in `playlist_tracks`, in order.
+    fn playlist_visibility(&self, id: i64) -> Vec<bool> {
+        self.query(
+            "SELECT t.path IS NOT NULL, i.info FROM playlist_items i
+             LEFT JOIN tracks t ON t.path = i.path
+             WHERE i.playlist_id = ?1 ORDER BY i.pos",
+            [id],
+            |r| {
+                let in_library: bool = r.get(0)?;
+                let info: Option<String> = r.get(1)?;
+                Ok(in_library
+                    || info
+                        .and_then(|j| serde_json::from_str::<crate::controller::TrackInfo>(&j).ok())
+                        .is_some_and(|i| crate::plugin::is_plugin_uri(&i.uri)))
+            },
+        )
+    }
+
     fn set_playlist_items(&self, id: i64, items: &[(String, Option<String>)]) {
         let mut conn = self.w();
-        if let Ok(tx) = conn.transaction() {
-            let _ = tx.execute("DELETE FROM playlist_items WHERE playlist_id = ?1", [id]);
+        let res = conn.transaction().and_then(|tx| {
+            tx.execute("DELETE FROM playlist_items WHERE playlist_id = ?1", [id])?;
             for (pos, (p, info)) in items.iter().enumerate() {
-                let _ = tx.execute(
+                tx.execute(
                     "INSERT INTO playlist_items (playlist_id, pos, path, info) VALUES (?1, ?2, ?3, ?4)",
                     params![id, pos as i64, p, info],
-                );
+                )?;
             }
-            let _ = tx.execute(
+            tx.execute(
                 "UPDATE playlists SET updated_at = ?2 WHERE id = ?1",
                 params![id, now_unix()],
-            );
-            let _ = tx.commit();
-        }
+            )?;
+            tx.commit()
+        });
         drop(conn);
+        if let Err(e) = res {
+            tracing::warn!("playlist {id} not saved: {e}");
+            return;
+        }
         self.touch();
     }
 
@@ -1360,19 +1398,27 @@ impl Library {
     /// Remove the items at the given positions (as returned by `playlist_tracks`
     /// order, which skips files no longer in the library).
     pub fn remove_from_playlist(&self, id: i64, positions: &[usize]) {
-        let visible: Vec<String> = self
-            .playlist_tracks(id)
+        // Stored index of each visible entry.
+        let stored: Vec<usize> = self
+            .playlist_visibility(id)
             .into_iter()
-            .map(|t| t.path)
+            .enumerate()
+            .filter_map(|(i, v)| v.then_some(i))
             .collect();
-        let drop_paths: Vec<&String> = positions.iter().filter_map(|&i| visible.get(i)).collect();
-        let mut remaining = self.playlist_paths(id);
-        for p in drop_paths {
-            if let Some(i) = remaining.iter().position(|x| x == p) {
-                remaining.remove(i);
-            }
+        let drop: HashSet<usize> = positions
+            .iter()
+            .filter_map(|&i| stored.get(i).copied())
+            .collect();
+        if drop.is_empty() {
+            return;
         }
-        self.set_playlist_paths(id, &remaining);
+        let remaining: Vec<(String, Option<String>)> = self
+            .playlist_items(id)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, item)| (!drop.contains(&i)).then_some(item))
+            .collect();
+        self.set_playlist_items(id, &remaining);
     }
 
     pub fn move_in_playlist(&self, id: i64, from: usize, to: usize) {
@@ -1717,6 +1763,91 @@ mod tests {
         lib.delete_playlist(id);
         assert_eq!(lib.playlists().len(), 1);
         assert_eq!(lib.playlists()[0].name, "Copy");
+    }
+
+    #[test]
+    fn remove_from_playlist_uses_the_position() {
+        let lib = lib_with(&[
+            ("/m/a/1.flac", tags("One", "A", "Al", Some("A"), 1)),
+            ("/m/a/2.flac", tags("Two", "A", "Al", Some("A"), 2)),
+        ]);
+        let id = lib.create_playlist("Dup");
+        lib.add_to_playlist(
+            id,
+            &[
+                "/m/gone.flac".into(),
+                "/m/a/1.flac".into(),
+                "/m/a/2.flac".into(),
+                "/m/a/1.flac".into(),
+            ],
+        );
+        // Visible positions skip the missing file.
+        lib.remove_from_playlist(id, &[2]);
+        assert_eq!(
+            lib.playlist_paths(id),
+            ["/m/gone.flac", "/m/a/1.flac", "/m/a/2.flac"]
+        );
+        lib.remove_from_playlist(id, &[0]);
+        assert_eq!(lib.playlist_paths(id), ["/m/gone.flac", "/m/a/2.flac"]);
+    }
+
+    #[test]
+    fn roots_are_path_prefixes_not_string_prefixes() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("music");
+        let hires = dir.path().join("music-hires");
+        std::fs::create_dir_all(&music).unwrap();
+        std::fs::create_dir_all(&hires).unwrap();
+        std::fs::write(music.join("a.flac"), b"x").unwrap();
+        std::fs::write(hires.join("b.flac"), b"x").unwrap();
+        let lib = Library::open(&dir.path().join("lib.db")).unwrap();
+        lib.scan_roots(&[music.clone(), hires.clone()]);
+        assert_eq!(lib.count(), 2);
+        // Scanning one root leaves the other alone.
+        assert_eq!(lib.scan_roots(std::slice::from_ref(&music)).removed, 0);
+        assert_eq!(lib.count(), 2);
+        assert_eq!(lib.retain_roots(std::slice::from_ref(&music)), 1);
+        assert!(lib.has_path(&music.join("a.flac").to_string_lossy()));
+    }
+
+    #[test]
+    fn unreadable_directories_are_not_pruned() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("m");
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("a.flac"), b"x").unwrap();
+        let lib = Library::open(&dir.path().join("lib.db")).unwrap();
+        lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!(lib.count(), 1);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = std::fs::read_dir(&locked).is_ok();
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !readable {
+            assert_eq!(r.removed, 0);
+            assert_eq!(lib.count(), 1);
+        }
+    }
+
+    #[test]
+    fn reopening_keeps_user_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("lib.db");
+        {
+            let lib = Library::open(&db).unwrap();
+            lib.upsert_many(&[(
+                "/m/a/1.flac".into(),
+                tags("One", "A", "Al", Some("A"), 1),
+                1,
+                1,
+            )]);
+            lib.record_play("/m/a/1.flac");
+        }
+        let lib = Library::open(&db).unwrap();
+        assert_eq!(lib.count(), 1);
+        assert_eq!(lib.most_played_tracks(5)[0].play_count, 1);
     }
 
     #[test]
