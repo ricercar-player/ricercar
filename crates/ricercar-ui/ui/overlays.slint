@@ -176,12 +176,17 @@ export component QueuePanel inherits Rectangle {
 
 component LyricsView inherits Rectangle {
     private property <length> target-y;
+    // The source line gets its own strip below the scrolling lyrics.
+    private property <bool> show-source: App.lyrics-source != "" && App.lyrics.length > 0;
+    private property <length> source-h: root.show-source ? 28px : 0px;
     public function recenter() {
         if App.lyric-index >= 0 {
             flick.content-y = min(0, -(root.target-y - flick.height * 0.36));
         }
     }
     flick := Flickable {
+        y: 0;
+        height: root.height - root.source-h;
         content-height: col.preferred-height;
         animate content-y { duration: 420ms; easing: ease-out; }
         col := VerticalLayout {
@@ -226,9 +231,13 @@ component LyricsView inherits Rectangle {
             wrap: word-wrap;
         }
     }
-    if App.lyrics-source != "" && App.lyrics.length > 0: Text {
+    if root.show-source: Text {
         x: 0;
-        y: parent.height - 22px;
+        y: root.height - root.source-h + 8px;
+        height: root.source-h - 8px;
+        vertical-alignment: center;
+        overflow: elide;
+        width: root.width;
         text: App.lyrics-source;
         font-size: Theme.fs-xs;
         color: #ffffff66;

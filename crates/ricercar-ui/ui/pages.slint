@@ -226,7 +226,7 @@ export component HomePage inherits PageScroll {
             open-label: App.album-id != "" ? @tr("Open album") : @tr("Lyrics");
             play => { App.play-pause(); }
             open => {
-                if App.album-id != "" { App.go-to-album(); } else { App.now-playing-open = true; }
+                if App.album-id != "" { App.go-to-album(); } else { App.np-tab = 0; App.now-playing-open = true; }
             }
         }
         if !App.has-track && App.home-played.length > 0: ListeningHero {
