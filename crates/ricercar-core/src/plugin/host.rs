@@ -130,7 +130,7 @@ struct Inner {
     rev: AtomicU64,
     ctl: RwLock<Weak<Controller>>,
     version: String,
-    locale: String,
+    locale: RwLock<String>,
     data_root: PathBuf,
     cache_root: PathBuf,
     alive: AtomicBool,
@@ -142,16 +142,36 @@ pub struct PluginHost {
     inner: Arc<Inner>,
 }
 
-fn locale() -> String {
+/// The system locale (LC_ALL > LC_MESSAGES > LANG), as a BCP 47 tag.
+fn system_locale() -> Option<String> {
     let lang = ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
         .filter_map(|v| std::env::var(v).ok())
-        .find(|v| !v.is_empty() && v != "C" && v != "POSIX")
-        .unwrap_or_else(|| "en_US".into());
+        .find(|v| !v.is_empty() && v != "C" && v != "POSIX")?;
     lang.split(['.', '@'])
         .next()
-        .unwrap_or("en_US")
-        .replace('_', "-")
+        .filter(|l| !l.is_empty())
+        .map(|l| l.replace('_', "-"))
+}
+
+/// The locale plugins get: the interface language chosen in ricercar
+/// (`[ui] language`, "en", "fr"…), with the system's region when it is the
+/// same language; the system locale when none is chosen; else "en-US".
+pub fn plugin_locale(ui_language: &str, system: Option<&str>) -> String {
+    let pref = ui_language.trim();
+    match system {
+        Some(sys) if pref.is_empty() => sys.to_string(),
+        None if pref.is_empty() => "en-US".into(),
+        Some(sys)
+            if sys
+                .split('-')
+                .next()
+                .is_some_and(|l| l.eq_ignore_ascii_case(pref)) =>
+        {
+            sys.to_string()
+        }
+        _ => pref.to_string(),
+    }
 }
 
 /// Variables a plugin inherits; everything else in ricercar's environment
@@ -228,7 +248,7 @@ impl PluginHost {
                 rev: AtomicU64::new(0),
                 ctl: RwLock::new(Weak::new()),
                 version: version.into(),
-                locale: locale(),
+                locale: RwLock::new(plugin_locale("", system_locale().as_deref())),
                 data_root,
                 cache_root,
                 alive: AtomicBool::new(true),
@@ -413,6 +433,28 @@ impl PluginHost {
     }
 
     /// The output changed (device switch, new capabilities).
+    /// Follow the interface language (`[ui] language`, empty = the
+    /// system's): the next `initialize` carries it, and running plugins get
+    /// `locale.changed`.
+    pub fn set_language(&self, ui_language: &str) {
+        let locale = plugin_locale(ui_language, system_locale().as_deref());
+        if *self.inner.locale.read().unwrap() == locale {
+            return;
+        }
+        *self.inner.locale.write().unwrap() = locale.clone();
+        let rpcs: Vec<Arc<Rpc>> = self
+            .inner
+            .slots
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(|s| s.rpc.read().unwrap().clone())
+            .collect();
+        for rpc in rpcs {
+            rpc.notify("locale.changed", json!({ "locale": locale }));
+        }
+    }
+
     pub fn set_output(&self, output: OutputInfo) {
         if *self.inner.output.read().unwrap() == output {
             return;
@@ -544,7 +586,7 @@ impl PluginHost {
                 "host": {"name": "ricercar", "version": self.inner.version},
                 "data_dir": data_dir,
                 "cache_dir": cache_dir,
-                "locale": self.inner.locale,
+                "locale": self.inner.locale.read().unwrap().clone(),
                 "output": output,
                 "settings": settings::stored_json(&sent),
             }),
@@ -1520,5 +1562,19 @@ impl Resolver for PluginHost {
             .iter()
             .map(|i| i.to_track_info(&id))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_locale;
+
+    #[test]
+    fn locale_follows_the_interface_language() {
+        assert_eq!(plugin_locale("", Some("fr-CA")), "fr-CA");
+        assert_eq!(plugin_locale("", None), "en-US");
+        assert_eq!(plugin_locale("fr", Some("en-US")), "fr");
+        assert_eq!(plugin_locale("fr", Some("fr-BE")), "fr-BE");
+        assert_eq!(plugin_locale("en", None), "en");
     }
 }

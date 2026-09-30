@@ -795,3 +795,18 @@ fn radio_from_an_item() {
     // An album seeds too.
     assert_eq!(ctl.start_radio("plugin://demo/album%2F1", None).unwrap(), 2);
 }
+
+#[test]
+fn interface_language_reaches_plugins() {
+    let rig = Rig::new(&["--no-auth"]);
+    rig.host.set_language("fr");
+    assert!(rig.wait_log(r#"locale.changed "fr""#), "{}", rig.log());
+    // Same language again: nothing sent.
+    rig.host.set_language("fr");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(rig.log().matches("locale.changed").count(), 1);
+    // A restart starts in the chosen language.
+    rig.host.reconcile(&[]);
+    rig.host.reconcile(&[config(&["--no-auth"], true)]);
+    assert!(rig.wait_log(r#"locale "fr""#), "{}", rig.log());
+}

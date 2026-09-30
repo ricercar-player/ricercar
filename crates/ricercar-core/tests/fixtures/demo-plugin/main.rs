@@ -591,6 +591,7 @@ fn main() {
                     }
                     st.log(&format!("settings.changed {}", params["settings"]));
                 }
+                "locale.changed" => st.log(&format!("locale.changed {}", params["locale"])),
                 m if m.starts_with("playback.")
                     && st.setting("report_playback") == Value::Bool(false) => {}
                 "player.state" => {
@@ -655,6 +656,7 @@ fn main() {
                         st.settings = m.clone();
                     }
                     st.log(&format!("settings {}", params["settings"]));
+                    st.log(&format!("locale {}", params["locale"]));
                     st.log(&format!(
                         "greeting {}",
                         st.setting("greeting").as_str().unwrap_or("")

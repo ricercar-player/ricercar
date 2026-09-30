@@ -374,6 +374,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     ctl.set_continuous(cfg.audio.continuous_playback);
     plugins.attach(&ctl);
     plugins.set_output(output_info(&cfg.audio.device, None));
+    plugins.set_language(&cfg.ui.language);
     plugins.reconcile(&cfg.plugins);
     if !args.no_session {
         ctl.enable_session(
@@ -595,6 +596,7 @@ impl AppContext {
                 .set_output(output_info(&cfg.audio.device, None));
         }
         self.ctl.set_continuous(cfg.audio.continuous_playback);
+        self.plugins.set_language(&cfg.ui.language);
         if old_plugins != cfg.plugins {
             self.apply_plugins();
         }

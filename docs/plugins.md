@@ -216,6 +216,13 @@ page_size = 50
 | `playlist_edit` | `playlists.*` | [Playlist editing](#playlist-editing-optional) |
 | `details` | `item.details` | [Details](#details-optional) |
 | `radio` | `radio.next` | [Radio](#radio-optional) |
+- `locale` is ricercar's interface language (Settings → Appearance, `[ui]
+  language`), a BCP 47 tag: the system's locale when it is the same
+  language (`fr-BE`), else the bare language (`fr`); the system's locale
+  when the user has not picked one. Use it for every label you send
+  (settings, actions, sections, details). When the user switches language,
+  running plugins get `locale.changed {locale}`; a plugin that ignores it
+  picks the new language up at its next start.
 - `output` is sent again with `output.changed` when the user switches device.
   Plugins use it to pick a stream format the DAC plays natively, since the
   engine refuses formats it would have to convert.
