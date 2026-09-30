@@ -294,48 +294,57 @@ export component PluginsPage inherits PageScroll {
         if App.catalog-rows.length > 0: Panel {
             for c[i] in App.catalog-rows: VerticalLayout {
                 if i > 0: Hairline { }
-                PanelRow {
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 3px;
-                        horizontal-stretch: 1;
-                        Text { text: c.name; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
-                        Text { text: c.byline; font-size: Theme.fs-sm; color: Theme.text3; overflow: elide; }
-                        if c.description != "": Text { text: c.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
-                        if c.caps != "": Text { text: c.caps; font-size: Theme.fs-xs; color: Theme.text3; }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            alignment: end;
-                            Button {
-                                text: @tr("Repository");
-                                clicked => { App.catalog-open-repo(c.id); }
-                            }
-                            if c.state == 0: Button {
-                                text: @tr("Install");
-                                icon: Icons.download;
-                                primary: true;
-                                clicked => { App.catalog-install(c.id); }
-                            }
-                            if c.state == 1: Text {
-                                width: 150px;
-                                text: @tr("Installed");
-                                font-size: Theme.fs-sm;
-                                color: Theme.text3;
-                                vertical-alignment: center;
-                            }
-                            if c.state == 2: Text {
-                                width: 150px;
-                                text: @tr("No build for this computer");
-                                font-size: Theme.fs-sm;
-                                color: Theme.text3;
-                                vertical-alignment: center;
-                                wrap: word-wrap;
+                // Name and actions on one line; the description under them
+                // at full width (wrapped text in a row does not get its
+                // height, and spills onto the next rows).
+                VerticalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 16px;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            Text { text: c.name; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
+                            Text { text: c.byline; font-size: Theme.fs-sm; color: Theme.text3; overflow: elide; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                alignment: end;
+                                Button {
+                                    text: @tr("Repository");
+                                    clicked => { App.catalog-open-repo(c.id); }
+                                }
+                                if c.state == 0: Button {
+                                    text: @tr("Install");
+                                    icon: Icons.download;
+                                    primary: true;
+                                    clicked => { App.catalog-install(c.id); }
+                                }
+                                if c.state == 1: Text {
+                                    text: @tr("Installed");
+                                    font-size: Theme.fs-sm;
+                                    color: Theme.text3;
+                                    vertical-alignment: center;
+                                }
+                                if c.state == 2: Text {
+                                    text: @tr("No build for this computer");
+                                    font-size: Theme.fs-sm;
+                                    color: Theme.text3;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
                     }
+                    if c.description != "": Text { text: c.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; }
+                    if c.caps != "": Text { text: c.caps; font-size: Theme.fs-xs; color: Theme.text3; wrap: word-wrap; }
                 }
             }
         }
