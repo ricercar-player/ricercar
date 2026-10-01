@@ -72,6 +72,12 @@
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.1" date="2026-10-01">
+      <description>
+        <p>Network streams from servers that send many headers play again; clearer playback errors; stream addresses are logged without their secrets; the playing track is marked on plugin album and playlist pages.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.7.1</url>
+    </release>
     <release version="0.7.0" date="2026-09-30">
       <description>
         <p>Source plugins bring their own settings, lyrics, favourites, editable playlists, artist details and radios; six interface languages; a choice of network interface; faster seeking in network streams.</p>
