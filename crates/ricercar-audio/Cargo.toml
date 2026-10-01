@@ -13,4 +13,7 @@ libc = "0.2"
 symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "flac", "vorbis", "ogg", "wav", "aiff", "isomp4", "aac", "alac", "pcm", "adpcm"] }
 thiserror.workspace = true
 tracing.workspace = true
-ureq = "2.12"
+httparse = "1.10"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+url = "2.5"
+webpki-roots = "1"

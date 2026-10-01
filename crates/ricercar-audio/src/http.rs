@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender};
 use symphonia::core::io::MediaSource;
 
-use crate::error::{AudioError, Result};
+use crate::client::{self, Body};
+use crate::error::Result;
 
 const CHUNK: usize = 64 * 1024;
 /// Live streams: at most this much read ahead of the decoder.
@@ -42,31 +43,17 @@ pub struct HttpSource {
 }
 
 pub fn open(uri: &str) -> Result<HttpSource> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(30))
-        .user_agent(concat!("ricercar/", env!("CARGO_PKG_VERSION")))
-        .build();
-    let resp = agent
-        .get(uri)
-        .set("Icy-MetaData", "1")
-        .call()
-        .map_err(|e| match e {
-            ureq::Error::Status(status, _) => AudioError::HttpStatus {
-                uri: uri.to_string(),
-                status,
-            },
-            e => AudioError::UnsupportedSource(format!("http fetch {uri}: {e}")),
-        })?;
+    let resp = client::get(uri, None)?;
 
     let metaint = resp
         .header("icy-metaint")
         .and_then(|v| v.trim().parse::<usize>().ok())
         .filter(|&n| n > 0);
     // A transfer-encoded body makes Content-Length meaningless for offsets.
-    let identity = resp
-        .header("content-encoding")
-        .is_none_or(|e| e.eq_ignore_ascii_case("identity"));
+    let identity = !resp.chunked
+        && resp
+            .header("content-encoding")
+            .is_none_or(|e| e.eq_ignore_ascii_case("identity"));
     let len = resp
         .header("content-length")
         .and_then(|v| v.trim().parse::<u64>().ok())
@@ -75,10 +62,9 @@ pub fn open(uri: &str) -> Result<HttpSource> {
         .header("accept-ranges")
         .is_some_and(|v| v.split(',').any(|u| u.trim().eq_ignore_ascii_case("bytes")))
         .then(|| Origin {
-            agent: agent.clone(),
             uri: uri.to_string(),
         });
-    let body: Body = Box::new(resp.into_reader());
+    let body = resp.body;
 
     match len.filter(|&n| n <= spool_limit(free_space(&spool_dir()))) {
         Some(len) => Ok(HttpSource {
@@ -214,11 +200,8 @@ struct Shared {
     cancel: AtomicBool,
 }
 
-type Body = Box<dyn Read + Send>;
-
 /// Where a spooled body comes from, for `Range` requests.
 struct Origin {
-    agent: ureq::Agent,
     uri: String,
 }
 
@@ -226,15 +209,9 @@ impl Origin {
     /// `GET` with `Range: bytes=<from>-`; returns the body and the end of
     /// the part it carries. Anything but a matching 206 is refused.
     fn range(&self, from: u64, len: u64) -> std::result::Result<(Body, u64), String> {
-        let resp = self
-            .agent
-            .get(&self.uri)
-            .set("Icy-MetaData", "1")
-            .set("Range", &format!("bytes={from}-"))
-            .call()
-            .map_err(|e| e.to_string())?;
-        if resp.status() != 206 {
-            return Err(format!("status {}", resp.status()));
+        let resp = client::get(&self.uri, Some(from)).map_err(|e| e.to_string())?;
+        if resp.status != 206 {
+            return Err(format!("status {}", resp.status));
         }
         if resp
             .header("content-encoding")
@@ -245,7 +222,7 @@ impl Origin {
         let cr = resp.header("content-range").unwrap_or_default().to_string();
         match parse_content_range(&cr) {
             Some((first, last, total)) if first == from && total == len => {
-                Ok((Box::new(resp.into_reader()), last + 1))
+                Ok((resp.body, last + 1))
             }
             _ => Err(format!("content-range {cr:?}")),
         }

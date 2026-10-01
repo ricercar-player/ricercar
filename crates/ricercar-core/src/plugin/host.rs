@@ -557,6 +557,8 @@ impl PluginHost {
                 .name(format!("ricercar-plugin-{id}-log"))
                 .spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                        // Plugins may log the URLs they resolve.
+                        let line = ricercar_audio::redact_urls(&line);
                         tracing::info!("plugin[{id}] {line}");
                     }
                 });

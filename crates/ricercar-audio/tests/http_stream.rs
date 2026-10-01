@@ -575,3 +575,251 @@ fn range_seek_plays_bit_exact() {
         "{s:?}"
     );
 }
+
+// ---------------------------------------------------------------- client
+
+/// Answer every connection with `respond(path, request head)`.
+fn serve_fn(respond: impl Fn(&str, &str) -> Vec<u8> + Send + Sync + 'static) -> String {
+    let respond = Arc::new(respond);
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for stream in l.incoming().flatten() {
+            let respond = respond.clone();
+            thread::spawn(move || {
+                let mut stream = stream;
+                let head = read_head(&mut stream);
+                let path = head.split(' ').nth(1).unwrap_or("/").to_string();
+                let out = respond(&path, &head);
+                for c in out.chunks(16 * 1024) {
+                    if stream.write_all(c).is_err() {
+                        return;
+                    }
+                }
+                let _ = stream.flush();
+            });
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+fn with_headers(status: &str, extra: &[String], body: &[u8]) -> Vec<u8> {
+    let mut out = format!("{status}\r\n").into_bytes();
+    for h in extra {
+        out.extend(h.as_bytes());
+        out.extend(b"\r\n");
+    }
+    out.extend(b"Connection: close\r\n\r\n");
+    out.extend(body);
+    out
+}
+
+fn debug_headers(n: usize) -> Vec<String> {
+    (0..n).map(|i| format!("X-Debug: {i}")).collect()
+}
+
+fn engine_error(uri: &str) -> (String, Option<String>, Option<u16>) {
+    let (h, _out) = file_player("err");
+    let sub = h.subscribe();
+    h.load(uri);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        if let Ok(EngineEvent::Error {
+            message,
+            uri,
+            http_status,
+        }) = sub.0.recv_timeout(Duration::from_millis(200))
+        {
+            return (message, uri, http_status);
+        }
+    }
+    panic!("no engine error for {uri}");
+}
+
+#[test]
+fn many_header_lines_are_accepted_and_seekable() {
+    let data = wav(&pattern(300_000));
+    let len = data.len();
+    let base = serve_fn(move |_, _| {
+        let mut h = debug_headers(150);
+        h.push(format!("Content-Length: {len}"));
+        h.push("Accept-Ranges: bytes".into());
+        h.push("Content-Type: audio/wav".into());
+        with_headers("HTTP/1.1 200 OK", &h, &data)
+    });
+    let data = wav(&pattern(300_000));
+    let src = ricercar_audio::http::open(&format!("{base}/many.wav")).unwrap();
+    assert!(src.seekable);
+    let mut src = src.source;
+    src.seek(SeekFrom::End(-5000)).unwrap();
+    let mut tail = Vec::new();
+    src.read_to_end(&mut tail).unwrap();
+    assert!(tail == data[data.len() - 5000..], "tail differs");
+    src.seek(SeekFrom::Start(0)).unwrap();
+    let mut all = Vec::new();
+    src.read_to_end(&mut all).unwrap();
+    assert!(all == data, "whole file differs");
+}
+
+#[test]
+fn too_many_header_lines_is_a_clear_error() {
+    let base = serve_fn(|_, _| {
+        let mut h = debug_headers(600);
+        h.push("Content-Length: 4".into());
+        with_headers("HTTP/1.1 200 OK", &h, b"RIFF")
+    });
+    let uri = format!("{base}/x.flac");
+    let e = ricercar_audio::http::open(&uri).err().unwrap().to_string();
+    // 600 + Content-Length + Connection.
+    assert_eq!(e, "response from 127.0.0.1 has too many headers (602)");
+    let (message, _, status) = engine_error(&uri);
+    assert!(message.contains("too many headers (602)"), "{message}");
+    assert!(!message.contains("unsupported source"), "{message}");
+    assert_eq!(status, None);
+}
+
+#[test]
+fn malformed_response_is_a_clear_error() {
+    let base = serve_fn(|_, _| b"SPEAK 200 PLEASE\r\n\r\n".to_vec());
+    let e = ricercar_audio::http::open(&format!("{base}/x.flac"))
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        e.starts_with("malformed HTTP response from 127.0.0.1"),
+        "{e}"
+    );
+}
+
+/// `Transfer-Encoding: chunked` with chunks of varied sizes.
+fn chunked(body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = body;
+    let mut size = 1;
+    while !rest.is_empty() {
+        let n = size.min(rest.len());
+        out.extend(format!("{n:x};x=y\r\n").as_bytes());
+        out.extend(&rest[..n]);
+        out.extend(b"\r\n");
+        rest = &rest[n..];
+        size = size * 7 % 40_000 + 1;
+    }
+    out.extend(b"0\r\nX-Trailer: 1\r\n\r\n");
+    out
+}
+
+#[test]
+fn chunked_stream_of_unknown_length_plays_bit_exact() {
+    let body = fixture("tone_16_441.flac");
+    let base = serve_fn(move |_, _| {
+        with_headers(
+            "HTTP/1.1 200 OK",
+            &[
+                "Content-Type: audio/flac".into(),
+                "Transfer-Encoding: chunked".into(),
+            ],
+            &chunked(&body),
+        )
+    });
+    let (h, out) = file_player("chunked");
+    let sub = h.subscribe();
+    h.load(format!("{base}/tone.flac"));
+    let mut seekable = None;
+    assert!(wait_stopped(&sub, |ev| {
+        if let EngineEvent::TrackStarted { .. } = ev {
+            seekable = Some(h.state.lock().unwrap().seekable);
+        }
+    }));
+    assert_eq!(seekable, Some(false));
+    assert_eq!(std::fs::read(&out).unwrap(), golden());
+}
+
+#[test]
+fn icy_status_line_is_accepted() {
+    let body = fixture("tone_16_441.flac");
+    let base = serve_fn(move |_, head| {
+        assert!(head.contains("icy-metadata: 1"));
+        with_headers(
+            "ICY 200 OK",
+            &["icy-name: Test FM".into(), "icy-metaint: 4096".into()],
+            &icy_interleave(&body, 4096, &["Artist - Only"]),
+        )
+    });
+    let (h, out) = file_player("icyline");
+    let sub = h.subscribe();
+    h.load(format!("{base}/stream"));
+    let mut titles = Vec::new();
+    assert!(wait_stopped(&sub, |ev| {
+        if let EngineEvent::StreamTitle { title } = ev {
+            titles.push(title.clone());
+        }
+    }));
+    assert_eq!(std::fs::read(&out).unwrap(), golden());
+    assert_eq!(titles, ["Artist - Only"]);
+}
+
+#[test]
+fn redirect_chain_is_followed() {
+    let body = fixture("tone_16_441.flac");
+    let port = Arc::new(Mutex::new(String::new()));
+    let p = port.clone();
+    let base = serve_fn(move |path, _| {
+        let to =
+            |status: &str, loc: String| with_headers(status, &[format!("Location: {loc}")], b"");
+        match path {
+            "/a" => to("HTTP/1.1 302 Found", "b".into()),
+            "/b" => to("HTTP/1.1 301 Moved", format!("{}/c?k=v", p.lock().unwrap())),
+            "/c?k=v" => to("HTTP/1.1 307 Temporary", "/sub/d".into()),
+            "/sub/d" => to("HTTP/1.1 308 Permanent", "../final.flac".into()),
+            "/final.flac" => with_headers(
+                "HTTP/1.1 200 OK",
+                &[format!("Content-Length: {}", body.len())],
+                &body,
+            ),
+            "/loop" => to("HTTP/1.1 302 Found", "/loop".into()),
+            _ => with_headers("HTTP/1.1 404 Not Found", &["Content-Length: 0".into()], b""),
+        }
+    });
+    *port.lock().unwrap() = base.clone();
+    let src = ricercar_audio::http::open(&format!("{base}/a")).unwrap();
+    assert!(src.seekable);
+    let mut got = Vec::new();
+    { src.source }.read_to_end(&mut got).unwrap();
+    assert!(got == fixture("tone_16_441.flac"));
+    let e = ricercar_audio::http::open(&format!("{base}/loop"))
+        .err()
+        .unwrap()
+        .to_string();
+    assert_eq!(e, "more than 5 redirects");
+}
+
+#[test]
+fn url_secrets_never_reach_error_messages() {
+    let base = serve_fn(|path, _| {
+        let status = if path.starts_with("/gone") {
+            "HTTP/1.1 410 Gone"
+        } else {
+            "HTTP/1.1 200 OK"
+        };
+        with_headers(status, &debug_headers(700), b"")
+    });
+    for path in ["/gone?token=secret", "/x?token=secret&a=secret#secret"] {
+        let uri = format!("{base}{path}");
+        let e = ricercar_audio::http::open(&uri).err().unwrap().to_string();
+        assert!(!e.contains("secret"), "{e}");
+        let (message, u, _) = engine_error(&uri);
+        assert!(!message.contains("secret"), "{message}");
+        assert!(message.contains("token=…"), "{message}");
+        // The event still carries the real URL for matching.
+        assert_eq!(u.as_deref(), Some(uri.as_str()));
+    }
+    // Nothing listening there.
+    let dead = TcpListener::bind("127.0.0.1:0").unwrap();
+    let uri = format!(
+        "http://user:secret@{}/x?token=secret",
+        dead.local_addr().unwrap()
+    );
+    drop(dead);
+    let (message, _, _) = engine_error(&uri);
+    assert!(!message.contains("secret"), "{message}");
+}

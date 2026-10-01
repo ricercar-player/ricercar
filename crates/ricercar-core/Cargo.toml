@@ -33,3 +33,4 @@ doc = false
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tracing-subscriber.workspace = true

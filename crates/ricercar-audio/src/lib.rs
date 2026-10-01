@@ -5,12 +5,14 @@
 //! never resamples, never mixes, never truncates. If a device cannot play a
 //! track at its native rate/depth, it is refused, not degraded.
 
+mod client;
 pub mod device;
 pub mod error;
 pub mod fmt;
 pub mod gain;
 pub mod http;
 pub mod player;
+pub mod redact;
 pub mod sink;
 pub mod stream;
 
@@ -22,5 +24,6 @@ pub use player::{
     ChainInfo, EndReason, EngineEvent, PlayerHandle, PlayerShared, Subscriber, TransportStatus,
     spawn_player, spawn_player_with_sink,
 };
+pub use redact::{redact_url, redact_urls};
 pub use sink::AudioSink;
 pub use stream::TrackSource;

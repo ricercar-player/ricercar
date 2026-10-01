@@ -1475,7 +1475,10 @@ impl Bridge {
                 .filter(|t| same_plugin(&t.uri) && !exclude.contains(&t.uri))
                 .collect(),
             Err(e) => {
-                tracing::info!("continuous playback after {}: {e}", seed.info.uri);
+                tracing::info!(
+                    "continuous playback after {}: {e}",
+                    ricercar_audio::redact_url(&seed.info.uri)
+                );
                 Vec::new()
             }
         };
@@ -1529,7 +1532,10 @@ impl Bridge {
                 }
                 Ok(_) => false,
                 Err(e) => {
-                    tracing::info!("preload {}: {e}", item.info.uri);
+                    tracing::info!(
+                        "preload {}: {e}",
+                        ricercar_audio::redact_url(&item.info.uri)
+                    );
                     false
                 }
             }
@@ -1681,7 +1687,10 @@ impl Bridge {
             .find(|q| q.id == target)
             .cloned();
         let Some(item) = item else { return false };
-        tracing::info!("{uri}: HTTP {status}, resolving again");
+        tracing::info!(
+            "{}: HTTP {status}, resolving again",
+            ricercar_audio::redact_url(uri)
+        );
         let is_loading = self.lock_pending().loading == Some(item.id);
         let b = self.clone();
         if is_loading {
@@ -1697,6 +1706,8 @@ impl Bridge {
         if self.retry_refused(uri.as_deref(), http_status) {
             return;
         }
+        // Signed URLs carry their credentials in the query.
+        let message = ricercar_audio::redact_urls(&message);
         tracing::warn!("engine: {message}");
         self.events.publish(CtlEvent::Error(message));
         // A track that fails to open is skipped (bounded, to avoid spinning
@@ -1892,5 +1903,52 @@ mod tests {
         // Sessions saved before these fields still load.
         let old: TrackInfo = serde_json::from_str(r#"{"uri":"plugin://d/t","title":"x"}"#).unwrap();
         assert_eq!((old.album_ref, old.artist_ref), (None, None));
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuf(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn engine_errors_are_logged_without_url_secrets() {
+        let c = ctl();
+        let events = c.subscribe();
+        let buf = LogBuf::default();
+        let w = buf.clone();
+        let sub = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || w.clone())
+            .finish();
+        let uri = "http://127.0.0.1:9/x?token=secret";
+        tracing::subscriber::with_default(sub, || {
+            c.bridge().on_error(
+                format!("{uri}: connection to 127.0.0.1 timed out"),
+                Some(uri.into()),
+                None,
+            );
+        });
+        let log = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            log.contains("engine: http://127.0.0.1:9/x?token=…: connection"),
+            "{log}"
+        );
+        assert!(!log.contains("secret"), "{log}");
+        let shown = events
+            .try_iter()
+            .find_map(|e| match e {
+                CtlEvent::Error(m) => Some(m),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!shown.contains("secret"), "{shown}");
     }
 }

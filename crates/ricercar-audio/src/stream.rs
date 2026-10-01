@@ -12,6 +12,7 @@ use symphonia::core::units::TimeBase;
 use crate::error::{AudioError, Result};
 use crate::fmt::PcmFormat;
 use crate::http;
+use crate::redact::redact_url;
 
 /// A decoded track ready (or nearly ready) to be pumped into a sink.
 pub struct TrackSource {
@@ -113,7 +114,7 @@ impl TrackSource {
                 let h = http::open(uri)?;
                 (h.source, h.seekable, h.titles)
             } else {
-                return Err(AudioError::UnsupportedSource(uri.into()));
+                return Err(AudioError::UnsupportedSource(redact_url(uri)));
             };
         let mss = MediaSourceStream::new(src, MediaSourceStreamOptions::default());
 
@@ -128,11 +129,11 @@ impl TrackSource {
                 FormatOptions::default(),
                 MetadataOptions::default(),
             )
-            .map_err(|e| AudioError::Decode(format!("probe {uri}: {e}")))?;
+            .map_err(|e| AudioError::Decode(format!("probe {}: {e}", redact_url(uri))))?;
 
         let track = reader
             .default_track(TrackType::Audio)
-            .ok_or_else(|| AudioError::Decode(format!("no audio track in {uri}")))?;
+            .ok_or_else(|| AudioError::Decode(format!("no audio track in {}", redact_url(uri))))?;
         let track_id = track.id;
         let time_base = track.time_base;
         let num_frames = track.num_frames;

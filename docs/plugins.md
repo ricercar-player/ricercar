@@ -372,6 +372,14 @@ page, and it has no sidebar section of its own. A plugin that only declares
   ignores `Range` still works, but falls back to one sequential download.
   Relays that produce the stream on demand should only advertise
   `Accept-Ranges` if they can really serve arbitrary offsets.
+- The player's HTTP client speaks HTTP/1.1 (or `ICY 200 OK`), one request
+  per connection, without compression. It follows up to 5 redirects but
+  never from `https` to `http`, and accepts up to 512 header lines
+  (256 KiB in all). System proxy settings are not used.
+- URLs are logged and shown in errors without their query values,
+  credentials or fragment (`https://host/path?uid=…&hmac=…`). Plugins
+  should do the same in what they print on stderr; the host masks URLs
+  found there too.
 - `format` describes what the URL delivers. Pick the best format within
   `output`, and return `unavailable` if none fits.
 - `delivery: "proxied"` when the plugin serves the stream itself (usually

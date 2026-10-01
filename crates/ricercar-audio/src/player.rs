@@ -10,6 +10,7 @@ use crate::device::{DeviceInfo, DeviceKind};
 use crate::error::AudioError;
 use crate::fmt::PcmFormat;
 pub use crate::gain::{GainStage, TrackOpts};
+use crate::redact::redact_url;
 use crate::sink::{AudioSink, device_info, make_sink};
 use crate::stream::TrackSource;
 
@@ -317,15 +318,16 @@ fn open_source(uri: &str) -> Opened {
             (src, ok)
         })
     }));
+    let shown = redact_url(uri);
     match opened {
         Ok(Ok((src, true))) => Ok(src),
         Ok(Ok((_, false))) => Err(OpenFailure {
-            message: format!("cannot decode {uri}"),
+            message: format!("cannot decode {shown}"),
             uri: None,
             http_status: None,
         }),
         Ok(Err(e)) => Err(OpenFailure {
-            message: format!("{uri}: {e}"),
+            message: format!("{shown}: {e}"),
             uri: Some(uri.to_string()),
             http_status: match &e {
                 AudioError::HttpStatus { status, .. } => Some(*status),
@@ -333,7 +335,7 @@ fn open_source(uri: &str) -> Opened {
             },
         }),
         Err(p) => Err(OpenFailure {
-            message: format!("{uri}: decoder fault: {}", panic_message(p.as_ref())),
+            message: format!("{shown}: decoder fault: {}", panic_message(p.as_ref())),
             uri: Some(uri.to_string()),
             http_status: None,
         }),
@@ -782,7 +784,7 @@ impl Engine {
             )))
         });
         if let Err(e) = pumped {
-            let msg = format!("{}: {e}", src.uri);
+            let msg = format!("{}: {e}", redact_url(&src.uri));
             self.error(msg);
             self.end_current(EndReason::Error);
             return self.go_stopped(false);

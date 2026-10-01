@@ -1804,6 +1804,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48ce8546b993eaf241d69ded33b1be6d205dd9857ec879d9d18bd05d3676e144"
 
 [[package]]
+name = "httparse"
+version = "1.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4052,12 +4058,15 @@ version = "0.7.0"
 dependencies = [
  "alsa",
  "crossbeam-channel",
+ "httparse",
  "libc",
+ "rustls",
  "serde_json",
  "symphonia",
  "thiserror 2.0.20",
  "tracing",
- "ureq",
+ "url",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -4088,6 +4097,7 @@ dependencies = [
  "thiserror 2.0.20",
  "toml",
  "tracing",
+ "tracing-subscriber",
  "ureq",
  "walkdir",
 ]

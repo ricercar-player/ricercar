@@ -15,8 +15,13 @@ pub enum AudioError {
     #[error("decode error: {0}")]
     Decode(String),
     /// The server answered with an error status.
+    /// `uri` is redacted (see [`crate::redact_url`]).
     #[error("http fetch {uri}: status {status}")]
     HttpStatus { uri: String, status: u16 },
+    /// The request failed before a status: connection, TLS, malformed or
+    /// oversized response.
+    #[error("{0}")]
+    Http(String),
     #[error(
         "device '{0}' does not support the track format (bit-perfect policy refuses resampling)"
     )]
