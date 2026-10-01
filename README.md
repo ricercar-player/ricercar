@@ -19,6 +19,7 @@ A native Linux music player that is also a UPnP / OpenHome network receiver.
 [Install](#-install) ·
 [Stream from your phone](#-stream-from-your-phone) ·
 [Bit-perfect](#-bit-perfect-for-real) ·
+[How it's built](#-how-its-built) ·
 [FAQ](#-faq) ·
 [Roadmap](#-roadmap)
 
@@ -487,6 +488,34 @@ itself. Plugins you declare are separate programs: what they contact is up
 to them. ricercar tells them the interface language, so they can translate
 their pages, and, only for plugins that ask for it, what you play (see
 their settings to turn that off).
+
+## 🤖 How it's built
+
+ricercar is written largely with AI coding assistants. You would guess it
+from a commit history that moves this fast, so it is better said here.
+
+The assistants write most of the code. The maintainer sets the design,
+decides what goes in, tries it on real DACs and phone apps, and answers for
+every release. "It compiles" is never the bar: what protects you are checks
+that don't care who or what wrote the code.
+
+- **Bit-perfect is tested, not claimed.** Golden tests capture exactly what
+  would reach ALSA and compare it, byte for byte, with an independent
+  ffmpeg decode, in every container (S16, S24_3LE, S24, S32).
+- **The network side is tested against the protocols.** UPnP AV,
+  OpenHome and MediaServer have their own integration tests (SSDP, SOAP,
+  GENA events).
+- **Every push runs CI:** formatting, `clippy -D warnings`, the full test
+  suite, a release build, and validation of the desktop entry and
+  AppStream metadata.
+- **Releases are built by CI, never on a personal machine,** smoke-tested,
+  and their checksums are signed with minisign.
+- **No hidden network traffic:** [Privacy](#-privacy) lists every host
+  ricercar can contact. There is no telemetry.
+
+Found a bug? Please [open an issue](https://github.com/ricercar-player/ricercar/issues)
+with the diagnostic report (Settings → About). It is the fastest way to
+get it fixed, whoever wrote the line.
 
 ## 🏗️ Architecture
 
