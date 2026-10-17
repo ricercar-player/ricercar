@@ -762,6 +762,11 @@ export component ContextMenu inherits Rectangle {
                 MenuLine { text: @tr("New playlist…"); icon: Icons.plus; clicked => { root.playlists-mode = false; root.new-playlist-for(root.is-album); } }
                 // Local playlists, then the editable ones of the plugin the
                 // items come from, under each source's name.
+                Flickable {
+                    // What the window leaves under the pinned lines.
+                    height: min(targets.preferred-height, max(34px, root.win-h - 16px - 10px - 77px));
+                    content-height: targets.preferred-height;
+                    targets := VerticalLayout {
                 for p in App.pl-targets: VerticalLayout {
                     if p.header: HorizontalLayout {
                         height: 28px;
@@ -782,6 +787,8 @@ export component ContextMenu inherits Rectangle {
                         text: p.name;
                         icon: Icons.list-music;
                         clicked => { act("pl:" + p.key); }
+                    }
+                }
                     }
                 }
             }
