@@ -810,6 +810,7 @@ pub fn load_browse(ui: &Rc<Ui>, arg: &str) {
         pv.browse_serial
     };
     crate::plugin_menu::browse_opened(ui, &id, &reference, serial);
+    crate::details::load_browse(ui, &id, &reference, serial);
     check_editable(ui, serial, &id, &reference);
     fetch_page(ui, serial, id, reference, 0, false);
 }

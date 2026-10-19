@@ -7,6 +7,7 @@ import { Icons } from "icons.slint";
 import { App } from "state.slint";
 import { Button, IconButton, TextField, Toggle, Segmented, SectionTitle } from "widgets.slint";
 import { BrowseContent } from "lists.slint";
+import { Biography, DetailShelves } from "details.slint";
 import { PageScroll, ActionBar } from "pages.slint";
 
 /// A list from a plugin (sidebar section, album, playlist, folder).
@@ -32,6 +33,12 @@ export component BrowsePage inherits PageScroll {
             color: Theme.text2;
             overflow: elide;
         }
+        if App.br-facts != "": Text {
+            text: App.br-facts;
+            font-size: Theme.fs-sm;
+            color: Theme.text3;
+            wrap: word-wrap;
+        }
         // Its tracks, its heart and its menu (the plugin's actions; rename
         // and delete for a playlist the user owns).
         if App.br-tracks.length > 0 || App.br-actions || App.br-editable: ActionBar {
@@ -49,6 +56,18 @@ export component BrowsePage inherits PageScroll {
             toggle-fav => { App.album-action(App.br-menu-id, "fav"); }
             queue => { App.album-action(App.br-menu-id, "queue"); }
         }
+        if App.br-bio != "": Biography {
+            max-width: 760px;
+            text: App.br-bio;
+            source: App.br-bio-source;
+        }
+    }
+    // Before the list, which may run long ("Load more").
+    if App.br-related.length > 0: DetailShelves { shelves: App.br-related; }
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: App.br-related.length > 0 ? 28px : 12px;
         BrowseContent {
             cards: App.br-cards;
             tracks: App.br-tracks;

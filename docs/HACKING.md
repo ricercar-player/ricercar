@@ -261,8 +261,8 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
   album page, a playing plugin track, a search mixing both sources, playlist
   editing on the service (an editable playlist and its entry menu, "Add to
   playlist" grouped by source, the new-playlist location, rename, the delete
-  confirmation, a followed playlist), the plugin's details on an artist and
-  an album page, the "Start radio" menu and the radio it starts, the
+  confirmation, a followed playlist), the plugin's details on an artist, an
+  album and a browse page, the "Start radio" menu and the radio it starts, the
   continuous playback setting and the plugin's settings dialog (with a
   refused value).
   Headless tours never open a browser nor check for updates. Pass

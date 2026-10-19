@@ -1,4 +1,4 @@
-//! What plugins add to the artist and album pages (`item.details`:
+//! What plugins add to the artist, album and browse pages (`item.details`:
 //! biography, related shelves, facts) and radios started from a plugin
 //! track, album or artist (`radio.next`). Both are asked off the UI thread,
 //! after the page shows; answers for a page left since are dropped.
@@ -21,6 +21,7 @@ use crate::{AlbumCard, ArtistCard, DetailShelf, TrackRow};
 /// Track lists of the related shelves: `<prefix>-<shelf index>`.
 const ALBUM_LISTS: &str = "album-related";
 const ARTIST_LISTS: &str = "artist-related";
+const BROWSE_LISTS: &str = "browse-related";
 
 /// One related shelf, split by kind.
 struct ShelfRows {
@@ -38,6 +39,7 @@ pub struct DetailsView {
     artist_serial: u64,
     album: Vec<ShelfRows>,
     artist: Vec<ShelfRows>,
+    browse: Vec<ShelfRows>,
     /// Artist page: details already asked of a plugin.
     artist_asked: bool,
     /// Artist page: the `plugin://` URI a radio starts from.
@@ -127,6 +129,53 @@ fn show_album(ui: &Ui, id: &str, d: ItemDetails) {
     let rows = shelves(ui, id, ALBUM_LISTS, &d.related);
     app.set_al_related(shelf_model(&rows));
     ui.plugins.borrow_mut().details.album = rows;
+}
+
+/// A new browse page (`serial`, plugin `id`'s `reference`): forget the
+/// previous details, ask those of this item.
+pub fn load_browse(ui: &Ui, id: &str, reference: &str, serial: u64) {
+    ui.plugins.borrow_mut().details.browse.clear();
+    ui.st
+        .borrow_mut()
+        .lists
+        .retain(|k, _| !k.starts_with(BROWSE_LISTS));
+    let app = ui.app();
+    app.set_br_bio("".into());
+    app.set_br_bio_source("".into());
+    app.set_br_facts("".into());
+    app.set_br_related(ModelRc::default());
+    if !status(ui, id).is_some_and(|s| s.caps.details) {
+        return;
+    }
+    let (h, id, reference) = (
+        ui.ctx.plugins.clone(),
+        id.to_string(),
+        reference.to_string(),
+    );
+    std::thread::spawn(move || {
+        let r = h.item_details(&id, &reference);
+        post(move |ui| {
+            if ui.plugins.borrow().browse_serial != serial {
+                return;
+            }
+            match r {
+                Ok(d) => show_browse(ui, &id, d),
+                Err(e) => tracing::info!("plugin[{id}] details of {reference}: {e}"),
+            }
+        });
+    });
+}
+
+fn show_browse(ui: &Ui, id: &str, d: ItemDetails) {
+    let app = ui.app();
+    if let Some(b) = &d.biography {
+        app.set_br_bio(b.text.clone().into());
+        app.set_br_bio_source(b.source.clone().unwrap_or_default().into());
+    }
+    app.set_br_facts(facts_line(&d).into());
+    let rows = shelves(ui, id, BROWSE_LISTS, &d.related);
+    app.set_br_related(shelf_model(&rows));
+    ui.plugins.borrow_mut().details.browse = rows;
 }
 
 /// The artist page found `name` in plugin `id` as `reference`: the first
@@ -287,7 +336,13 @@ fn shelf_model(rows: &[ShelfRows]) -> ModelRc<DetailShelf> {
 /// A decoded cover for the rows of the related shelves waiting for it.
 pub fn patch_cover(ui: &Ui, key: &str, size: u32, img: &slint::Image) {
     let pv = ui.plugins.borrow();
-    for s in pv.details.album.iter().chain(&pv.details.artist) {
+    for s in pv
+        .details
+        .album
+        .iter()
+        .chain(&pv.details.artist)
+        .chain(&pv.details.browse)
+    {
         match size {
             TILE => {
                 s.cards.patch_cover(key, img);

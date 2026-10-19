@@ -1215,6 +1215,15 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            "plugin-browse-artist",
+            (
+                1500,
+                Box::new(move |ui| {
+                    ui.navigate(Page::Browse, &album("artist/1", "Demo Ensemble"), true)
+                }),
+            ),
+        ),
+        (
             "library-tracks",
             (1200, Box::new(|ui| ui.navigate(Page::Tracks, "", true))),
         ),

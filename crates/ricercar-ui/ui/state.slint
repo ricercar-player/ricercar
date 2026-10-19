@@ -728,6 +728,11 @@ export global App {
     in property <bool> br-more;
     in property <string> br-error;
     in property <bool> br-auth;
+    // plugin details (item.details) of the listed item, filled after the page shows
+    in property <string> br-bio;
+    in property <string> br-bio-source;
+    in property <string> br-facts;
+    in property <[DetailShelf]> br-related;
     // card id of the item on the browse page (what its header's menu and
     // queue button act on), whether it has plugin actions, and its
     // favourite state when the plugin gives one

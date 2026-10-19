@@ -580,7 +580,9 @@ playlists on the service, and add or remove tracks, from ricercar.
 ## Details (optional)
 
 With the `details` capability, the host's artist and album pages show more
-than the item: a biography, shelves of related items, facts.
+than the item: a biography, shelves of related items, facts. So does the
+page of any list the plugin opens (an artist, a label, a playlist…): the
+host asks the details of its ref, and shows the shelves above the list.
 
 ```jsonc
 // host → plugin
